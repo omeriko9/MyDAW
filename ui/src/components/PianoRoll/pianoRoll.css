@@ -1,0 +1,246 @@
+/* ============================================================================
+ * PianoRoll (U4) — component styles.
+ * Component-scoped canvas tokens live on .pr-root (read by prDraw.resolvePalette);
+ * everything else uses the global theme tokens (lib/theme.css).
+ * ==========================================================================*/
+
+.pr-root {
+  /* canvas palette tokens (dark piano-roll surfaces, derived from the theme family) */
+  --pr-row-white: #1f222a;
+  --pr-row-black: #1a1c23;
+  --pr-grid-fine: #252830;
+  --pr-grid-beat: #2e323d;
+  --pr-grid-bar: #3c414f;
+  --pr-grid-octave: #30343f;
+  --pr-key-white: #b6bcc9;
+  --pr-key-black: #23262e;
+  --pr-key-text: #454b59;
+  --pr-key-border: #868c9b;
+  --pr-outside: rgba(10, 11, 14, 0.45);
+  --pr-vel-bg: #191b21;
+  --pr-note-text: rgba(13, 14, 18, 0.78);
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Light-theme canvas tokens (prDraw palettes re-resolve on THEME_EVENT). Black keys
+   stay dark, and note text stays dark-on-note-color — note colors are theme-invariant. */
+:root[data-theme="light"] .pr-root {
+  --pr-row-white: #f7f8fc;
+  --pr-row-black: #eceef5;
+  --pr-grid-fine: #e2e5ee;
+  --pr-grid-beat: #d3d7e3;
+  --pr-grid-bar: #b6bdcf;
+  --pr-grid-octave: #c8cdda;
+  --pr-key-white: #fbfcfe;
+  --pr-key-black: #2a2e38;
+  --pr-key-text: #8b91a2;
+  --pr-key-border: #b9c0d0;
+  --pr-outside: rgba(125, 133, 155, 0.18);
+  --pr-vel-bg: #eef0f6;
+}
+
+/* ---- toolbar ---- */
+
+.pr-toolbar {
+  display: flex;
+  /* wrap: the lane toggles on the right must stay reachable in a narrow dock */
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 2px 6px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 2px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.pr-clip-chip {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.pr-clip-name {
+  font-weight: 600;
+  max-width: 140px;
+}
+
+.pr-track-name {
+  max-width: 110px;
+  font-size: 11px;
+}
+
+.pr-lbl {
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.pr-len {
+  min-width: 36px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.pr-count {
+  font-size: 11px;
+}
+
+/* toolbar zoom cluster: H pair upright, V pair rotated (magnifier axis = vertical) */
+.pr-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin: 0 2px;
+}
+.pr-zoom .pr-zoom-v svg {
+  transform: rotate(90deg);
+}
+.pr-zoom .pr-zoom-v {
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+}
+.pr-zoom .pr-zoom-v + .pr-zoom-v {
+  border-left: none;
+}
+
+.pr-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+/* ---- body grid ---- */
+
+.pr-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 56px 1fr;
+}
+
+.pr-corner {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.pr-ruler-wrap,
+.pr-keys-wrap,
+.pr-notes-wrap,
+.pr-vel-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pr-keys-wrap {
+  border-right: 1px solid var(--border);
+}
+
+.pr-vel-corner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 6px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.pr-vel-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.pr-vel-wrap {
+  border-top: 1px solid var(--border);
+}
+
+/* ---- bottom-lane selector (velocity / pitch bend / CC) ---- */
+
+.pr-lane-corner {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 3px 0;
+}
+
+.pr-lane-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.pr-lane-btn:hover {
+  border-color: var(--border-light);
+  color: var(--text);
+}
+
+.pr-cc-lane canvas {
+  cursor: crosshair;
+}
+
+.pr-root canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.pr-overlay-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pr-vel-wrap canvas {
+  cursor: ns-resize;
+}
+
+.pr-ruler-wrap canvas {
+  cursor: text;
+  cursor: ew-resize;
+}
+
+/* ---- empty state ---- */
+
+.pr-empty {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-faint);
+}
+
+.pr-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.pr-empty-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+}

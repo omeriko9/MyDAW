@@ -1,0 +1,7 @@
+# Generated + canonical agent/catalog files are written with LF by the generator; pin them
+# to LF so a checkout on autocrlf=true doesn't flip them and trip the catalog drift gate.
+*.gen.ts   text eol=lf
+*.gen.cpp  text eol=lf
+*.gen.h    text eol=lf
+shared/agent/*.json text eol=lf
+scripts/*.mjs text eol=lf

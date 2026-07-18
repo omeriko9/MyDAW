@@ -1,0 +1,75 @@
+/* ============================================================================
+ * MenuBar — vertical icon strip flush against the app's left edge. One icon per
+ * menu (File / Edit / View / Project / Audio / MIDI / Help); hover opens its
+ * options as a flyout to the right. Theme tokens only (lib/theme.css).
+ * ==========================================================================*/
+
+.menu-strip {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  z-index: 6;
+  cursor: pointer; /* empty strip space toggles expanded ↔ collapsed */
+}
+.menu-strip.expanded {
+  width: 108px;
+  align-items: stretch;
+  padding: 6px 5px;
+}
+
+.ms-item {
+  appearance: none;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.menu-strip.expanded .ms-item {
+  width: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 8px;
+}
+.ms-label {
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ms-label.dim {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.ms-expander {
+  height: 24px;
+  color: var(--text-faint);
+}
+.ms-expander:hover {
+  color: var(--text);
+}
+.ms-item:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+.ms-item.open {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+/* Pin Help to the bottom of the strip. */
+.ms-bottom {
+  margin-top: auto;
+}

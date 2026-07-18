@@ -1,0 +1,614 @@
+/* ============================================================================
+ * Mixer (U3) — horizontal channel-strip rail (SPEC §9 "Mixer (bottom dock tab)").
+ * All colors come from theme tokens (ui/src/lib/theme.css).
+ * ==========================================================================*/
+
+.mixer-root {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.mixer-rail {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* auto-height inner row: when the dock is shorter than a strip, the rail scrolls
+   vertically instead of clipping (stretch resolves against the tallest child) */
+.mixer-rail-inner {
+  display: flex;
+  align-items: stretch;
+  min-height: 100%;
+}
+
+/* slim left edge bar: wide/narrow toggle + strip count */
+.mixer-toolbar {
+  flex: 0 0 auto;
+  width: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.mixer-count {
+  font-size: 9px;
+  color: var(--text-faint);
+  writing-mode: vertical-rl;
+  user-select: none;
+  letter-spacing: 0.08em;
+}
+
+.mixer-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.mixer-strips {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  min-height: 380px;
+  box-sizing: border-box;
+}
+.mixer-scroll,
+.mixer-toolbar,
+.mixer-master-wrap {
+  min-height: 380px;
+}
+
+/* master pinned at the right behind a separator */
+.mixer-master-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  padding: 2px;
+  min-height: 380px;
+  border-left: 2px solid var(--border-light);
+  background: var(--panel);
+}
+
+.mixer-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-faint);
+  user-select: none;
+}
+.mixer-empty-title {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.mixer-empty-sub {
+  font-size: 11px;
+}
+
+/* ============================================================================
+ * Channel strip
+ * ==========================================================================*/
+
+.mxstrip {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  user-select: none;
+}
+.mxstrip.selected {
+  border-color: var(--accent);
+}
+/* plugin drag from the Browser hovering anywhere on the strip */
+.mxstrip.drop-active {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.mxstrip-color {
+  height: 4px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  /* it's a <button> (keyboard-focusable) — strip the UA chrome */
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 0;
+}
+.mxstrip-color:hover {
+  filter: brightness(1.25);
+}
+
+.mxstrip-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 0 3px;
+  min-width: 0;
+}
+.mxstrip-kind {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+.mxstrip-frozen {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+/* track-name TextInput override (borderless until hover) */
+.input.mxstrip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  padding: 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  background: transparent;
+  border-color: transparent;
+}
+.input.mxstrip-name:hover {
+  border-color: var(--border);
+  background: var(--bg);
+}
+.input.mxstrip-name:focus {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+
+/* ---- io selects ---- */
+.mxstrip-io {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border-top: 1px solid var(--border);
+}
+.select.mxstrip-select {
+  width: 100%;
+  height: 18px;
+  font-size: 10px;
+  padding: 0 14px 0 4px;
+  background-position: right 2px center;
+}
+.mxstrip-static {
+  height: 18px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- sections (inserts / sends) ---- */
+.mxsec {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+.mxsec-inserts {
+  flex: 3 1 56px;
+}
+.mxsec-sends {
+  flex: 2 1 42px;
+}
+.mxsec-label {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1px 2px 1px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.mxsec-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 3px 3px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.mxsec.drop-active .mxsec-body {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+.mxsec.frozen .mxsec-body {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.mxsec-frozen-note {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px 2px;
+  font-size: 9px;
+  color: var(--accent);
+}
+
+/* ---- insert slot ---- */
+.mxslot {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  flex: 0 0 auto;
+  padding: 0 3px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+.mxslot:hover {
+  background: var(--panel3);
+  border-color: var(--border-light);
+}
+
+/* Insert drag & drop: a 2px accent rule marks the boundary the plugin would land on
+   (reorder within the channel, or copy in from another channel). */
+.mxslot {
+  position: relative;
+}
+.mxslot.drop-before::before,
+.mxslot.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.mxslot.drop-before::before {
+  top: -2px;
+}
+.mxslot.drop-after::after {
+  bottom: -2px;
+}
+.mxslot[draggable="true"]:active {
+  opacity: 0.6;
+}
+.mxslot-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.mxslot.bypassed .mxslot-name {
+  color: var(--text-faint);
+}
+.mxslot-dot {
+  appearance: none;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  cursor: pointer;
+}
+.mxslot-dot[data-on="true"] {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.mxslot-dot:hover {
+  border-color: var(--text-dim);
+}
+.mxslot-state {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.mxslot-state.bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+.mxslot-state.busy {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid var(--warn);
+}
+.mxslot-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+}
+.mxslot-add:hover {
+  color: var(--text-dim);
+  border-color: var(--border-light);
+  background: var(--panel2);
+}
+.mxslot-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ---- send row ---- */
+.mxsend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  flex: 0 0 auto;
+  padding: 0 2px 0 3px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  min-width: 0;
+}
+.mxsend:hover {
+  border-color: var(--border-light);
+}
+.mxsend-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.mxsend.enabled .mxsend-name {
+  color: var(--text);
+}
+.mxsend-dot {
+  appearance: none;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  cursor: pointer;
+}
+.mxsend-dot[data-on="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mxsend-dot:hover {
+  border-color: var(--text-dim);
+}
+.mxsend-pre {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--warn);
+}
+.mxsend .knob-caption {
+  display: none; /* the 20px row has no room; value lives in the title tooltip */
+}
+.mxsend .knob {
+  flex: 0 0 auto;
+}
+
+/* ---- pan / fader / readout / buttons ---- */
+.mxstrip-pan {
+  display: flex;
+  justify-content: center;
+  padding: 3px 0 1px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.mxstrip-fader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 2px 2px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.mxstrip-db {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 10px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  padding: 1px 0;
+}
+.mxstrip-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.mxbtn {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel2);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.mxbtn:hover {
+  background: var(--panel3);
+  color: var(--text);
+  border-color: var(--border-light);
+}
+.mxbtn[data-on="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mxbtn[data-on="true"][data-variant="danger"] {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.mxbtn[data-on="true"][data-variant="warn"] {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.mxbtn[data-on="true"][data-variant="ok"] {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.mxstrip.narrow .mxbtn {
+  flex: 1 1 40%;
+}
+.mxstrip-lat {
+  flex: 0 0 auto;
+  text-align: center;
+  font-size: 9px;
+  color: var(--text-faint);
+  padding: 1px 0 3px;
+  border-top: 1px solid var(--border);
+}
+
+/* spacer that soaks remaining height in narrow strips (no inserts/sends shown) */
+.mxstrip-flexspace {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* ============================================================================
+ * Popups (plugin picker / color palette) — portal'd, fixed position
+ * ==========================================================================*/
+
+.mxr-popup {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+.mxr-plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 0;
+  color: var(--text);
+}
+.mxr-plugin-row:hover {
+  background: var(--panel3);
+}
+.mxr-plugin-row[data-sel="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.mxr-plugin-row[data-sel="true"] .mxr-plugin-vendor {
+  color: rgba(255, 255, 255, 0.7);
+}
+.mxr-plugin-vendor {
+  flex: 0 1 auto;
+  font-size: 9px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mxr-noresults {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.mxr-hint {
+  font-size: 9px;
+  color: var(--text-faint);
+  padding: 2px 4px 0;
+  border-top: 1px solid var(--border);
+}
+.mxr-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 18px);
+  gap: 4px;
+  padding: 2px;
+}
+.mxr-swatch {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  padding: 0;
+}
+.mxr-swatch:hover {
+  border-color: var(--text);
+}

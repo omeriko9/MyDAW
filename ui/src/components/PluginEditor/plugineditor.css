@@ -1,0 +1,177 @@
+/* ============================================================================
+ * Generic plugin editor — floating non-modal window (U6).
+ * Theme tokens only (lib/theme.css); no color literals.
+ * z-index 700 + per-window stack index (inline): above timeline/panels, below
+ * Modal (900) / ContextMenu (1000).
+ * ==========================================================================*/
+
+.pe-window {
+  position: fixed;
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  min-width: 340px;
+  min-height: 240px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  user-select: none;
+}
+
+/* text fields inside the (user-select:none) window stay selectable */
+.pe-window .input,
+.pe-window input {
+  user-select: text;
+}
+
+.pe-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  touch-action: none;
+}
+.pe-title {
+  font-size: 12px;
+  font-weight: 600;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.pe-vendor {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.pe-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pe-popover {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.pe-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.pe-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.pe-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.pe-row:hover {
+  background: var(--panel2);
+}
+.pe-name {
+  flex: 1 1 40%;
+  min-width: 0;
+}
+.pe-slider {
+  flex: 1 1 50%;
+  min-width: 60px;
+}
+.pe-row .numdrag {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.pe-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* transient note (preset saved / errors), floats over the body bottom */
+.pe-hint {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  padding: 6px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* bottom-right resize grip */
+.pe-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  z-index: 20;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.pe-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--border-light);
+  border-bottom: 2px solid var(--border-light);
+}
+.pe-resize:hover::after {
+  border-color: var(--accent);
+}

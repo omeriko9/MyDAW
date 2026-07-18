@@ -1,0 +1,777 @@
+/* ============================================================================
+ * MyDAW design system (SPEC §9 theme) — owned by F4.
+ * Dark (default) + light via :root[data-theme="light"] (lib/theme.ts stamps the
+ * attribute; canvas renderers re-resolve via THEME_EVENT). Crisp 1px borders,
+ * 6px radii, subtle shadows, 13px base type.
+ * Imported once from App.tsx. theme-base.css (resets) is owned by F4.
+ * ==========================================================================*/
+
+:root {
+  /* ---- core palette ---- */
+  --bg: #16171c;
+  --panel: #1e2027;
+  --panel2: #23262e; /* raised surfaces: buttons, hover fills, input chrome */
+  --panel3: #2a2e38; /* hover on panel2 */
+  --border: #2a2d36;
+  --border-light: #353947;
+  --text: #d7dae3;
+  --text-dim: #8b90a0;
+  --text-faint: #5f6573;
+  --accent: #5b8cff;
+  --accent-hover: #739dff;
+  --accent-soft: #27345c; /* accent-tinted fill for toggled/selected chrome */
+  --danger: #e25d5d;
+  --danger-soft: #4a2628;
+  --warn: #d8a14a;
+  --warn-soft: #443824;
+  --ok: #6fbf73;
+  --ok-soft: #24402a;
+  --meter-green: #45c25f;
+  --meter-yellow: #d9c945;
+  --meter-red: #e0504c;
+  --selection: rgba(91, 140, 255, 0.25);
+  --playhead: #e8eaf2;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --radius: 6px;
+  --radius-sm: 4px;
+
+  /* ---- derived chrome (kept as vars so the light theme can restate them) ---- */
+  --on-accent: #fff; /* text on accent-filled surfaces */
+  --accent-active: #4d7df2; /* primary button :active fill */
+  --panel-pressed: #20242c; /* button :active fill */
+  --bg-sunken: #16181f; /* inset wells: EQ curve bg, inspector meters */
+  --groove: #101116; /* fader/slider grooves, meter wells */
+  --tooltip-bg: #0d0e12;
+  --tooltip-text: var(--text);
+  --scroll-thumb: #343845;
+  --scroll-thumb-hover: #424757;
+  /* lit toggle/badge accents: border + readable text on the -soft fills */
+  --accent-border: #3b4f8a;
+  --danger-border: #6e3438;
+  --danger-text: #ff8d8d;
+  --warn-border: #6e5a2c;
+  --warn-text: #f0c46a;
+  --ok-border: #38663f;
+  --ok-text: #8ed694;
+  /* knob/fader hardware faces (SVG + CSS share these) */
+  --knob-face: #2b2f3a;
+  --knob-face-hi: #3a3f4d;
+  --knob-edge: #454b5c;
+  --pointer: #cfd4e0; /* knob/fader indicator line */
+  --thumb: #c6cbd8; /* range-slider thumb */
+  --thumb-hover: #e8eaf2;
+
+  /* camelCase aliases (SPEC names) so both spellings resolve */
+  --textDim: var(--text-dim);
+  --meterGreen: var(--meter-green);
+  --meterYellow: var(--meter-yellow);
+  --meterRed: var(--meter-red);
+
+  /* ---- track color palette (12) — also exported as TRACK_COLORS in lib/canvas.ts ---- */
+  --track-color-1: #e25d5d; /* red */
+  --track-color-2: #e2814d; /* orange */
+  --track-color-3: #d8a14a; /* amber */
+  --track-color-4: #bdb84f; /* yellow */
+  --track-color-5: #8fc457; /* green */
+  --track-color-6: #56c596; /* mint */
+  --track-color-7: #4dc3cd; /* cyan */
+  --track-color-8: #54a3e8; /* blue */
+  --track-color-9: #7a82f0; /* indigo */
+  --track-color-10: #a06ee8; /* purple */
+  --track-color-11: #d165d6; /* magenta */
+  --track-color-12: #e0639c; /* pink */
+
+  color-scheme: dark;
+}
+
+/* ============================================================================
+ * Light theme — same variable contract, restated values. Track colors and meter
+ * greens/yellows/reds stay identical (saturated mid-tones read fine on both).
+ * ==========================================================================*/
+
+:root[data-theme="light"] {
+  --bg: #f2f3f7;
+  --panel: #fbfbfd;
+  --panel2: #eef0f5;
+  --panel3: #e3e6ee;
+  --border: #d8dbe4;
+  --border-light: #c4c9d6;
+  --text: #23262f;
+  --text-dim: #5d6474;
+  --text-faint: #8f96a8;
+  --accent: #3a6fe8;
+  --accent-hover: #2f61d6;
+  --accent-soft: #dce6fb;
+  --danger: #cf4444;
+  --danger-soft: #f8dfdf;
+  --warn: #a97b1e;
+  --warn-soft: #f4ead0;
+  --ok: #35924a;
+  --ok-soft: #def0e0;
+  --selection: rgba(58, 111, 232, 0.2);
+  --playhead: #14161c;
+  --shadow: 0 4px 16px rgba(25, 30, 50, 0.18);
+  --shadow-sm: 0 2px 6px rgba(25, 30, 50, 0.12);
+
+  --on-accent: #fff;
+  --accent-active: #2b58c4;
+  --panel-pressed: #dde1ea;
+  --bg-sunken: #e9ebf2;
+  --groove: #dcdfe9;
+  /* tooltips stay dark-on-light for contrast (inverted chip, like OS tooltips) */
+  --tooltip-bg: #23262f;
+  --tooltip-text: #eef0f6;
+  --scroll-thumb: #c3c8d6;
+  --scroll-thumb-hover: #a9b0c2;
+  --accent-border: #b7c9f2;
+  --danger-border: #ecc2c2;
+  --danger-text: #a92f2f;
+  --warn-border: #e2cfa0;
+  --warn-text: #7d5c12;
+  --ok-border: #b9dcc0;
+  --ok-text: #256f38;
+  --knob-face: #f7f8fb;
+  --knob-face-hi: #ffffff;
+  --knob-edge: #b9c0d0;
+  --pointer: #3a4050;
+  --thumb: #7c8496;
+  --thumb-hover: #5d6577;
+
+  color-scheme: light;
+}
+
+/* ============================================================================
+ * Base typography & document
+ * ==========================================================================*/
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+/* ============================================================================
+ * Scrollbars — thin, dark, unobtrusive
+ * ==========================================================================*/
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* ============================================================================
+ * Focus — no default outlines, accent ring for keyboard nav only
+ * ==========================================================================*/
+
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ============================================================================
+ * Layout utilities
+ * ==========================================================================*/
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-width: 0;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.gap0 { gap: 2px; }
+.gap1 { gap: 4px; }
+.gap2 { gap: 8px; }
+.gap3 { gap: 12px; }
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.mono {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ============================================================================
+ * Buttons
+ * ==========================================================================*/
+
+.btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--panel3); border-color: var(--border-light); }
+.btn:active { background: var(--panel-pressed); }
+.btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+.btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary:active { background: var(--accent-active); }
+
+.btn.danger { color: var(--danger); }
+.btn.danger:hover { background: var(--danger-soft); border-color: var(--danger-border); }
+
+/* Icon-only button: transparent until hover, 24px square (size scales via inline style) */
+.btn-icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.btn-icon:hover { background: var(--panel2); color: var(--text); }
+.btn-icon:active { background: var(--panel-pressed); }
+.btn-icon:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+.btn-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* Toggle button (.btn look, lights up via data-on). Variants recolor the lit state:
+   data-variant="danger" → record/mute style, "warn" → solo style, "ok" → monitor style. */
+.btn-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.btn-toggle:hover { background: var(--panel3); color: var(--text); border-color: var(--border-light); }
+.btn-toggle:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+.btn-toggle[data-on="true"],
+.btn-icon[data-on="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.btn-toggle[data-on="true"][data-variant="danger"] {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+.btn-toggle[data-on="true"][data-variant="warn"] {
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+  color: var(--warn-text);
+}
+.btn-toggle[data-on="true"][data-variant="ok"] {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok-text);
+}
+
+/* ============================================================================
+ * Inputs
+ * ==========================================================================*/
+
+.input {
+  appearance: none;
+  height: 24px;
+  padding: 0 8px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px;
+}
+.input::placeholder { color: var(--text-faint); }
+.input:hover { border-color: var(--border-light); }
+.input:focus { border-color: var(--accent); outline: none; }
+.input:disabled { opacity: 0.4; }
+
+.select {
+  appearance: none;
+  height: 24px;
+  padding: 0 22px 0 8px;
+  min-width: 0;
+  background-color: var(--panel2);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%238b90a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 6.5 8 10l3.5-3.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.select:hover { border-color: var(--border-light); background-color: var(--panel3); }
+.select:focus { border-color: var(--accent); outline: none; }
+.select:disabled { opacity: 0.4; cursor: default; }
+.select option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* ============================================================================
+ * Badges
+ * ==========================================================================*/
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.badge.accent { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.badge.danger { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger-text); }
+.badge.warn { background: var(--warn-soft); border-color: var(--warn-border); color: var(--warn-text); }
+.badge.ok { background: var(--ok-soft); border-color: var(--ok-border); color: var(--ok-text); }
+
+/* ============================================================================
+ * Tabs (Tabs.tsx)
+ * ==========================================================================*/
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); background: var(--panel2); }
+.tab[data-on="true"] {
+  color: var(--text);
+  background: var(--panel2);
+  border-color: var(--border);
+}
+
+/* ============================================================================
+ * Context menu (ContextMenu.tsx)
+ * ==========================================================================*/
+
+.ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.ctx-menu {
+  position: fixed;
+  min-width: 160px;
+  max-width: 320px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text);
+  cursor: default;
+  white-space: nowrap;
+  user-select: none;
+}
+.ctx-item.hi { background: var(--accent); color: var(--on-accent); }
+.ctx-item.disabled { color: var(--text-faint); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger.hi { background: var(--danger); color: var(--on-accent); }
+.ctx-item .ctx-shortcut {
+  margin-left: auto;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.ctx-item.hi .ctx-shortcut { color: rgba(255, 255, 255, 0.7); }
+.ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
+/* ============================================================================
+ * Modal (Modal.tsx)
+ * ==========================================================================*/
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  max-width: min(90vw, 960px);
+  max-height: 85vh;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* draggable modals (Modal draggable prop): the title bar is the drag handle */
+.modal-title-drag {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+.modal-body {
+  padding: 12px;
+  overflow: auto;
+  min-height: 0;
+}
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================================================
+ * Tooltip (Tooltip.tsx)
+ * ==========================================================================*/
+
+.tooltip {
+  position: fixed;
+  z-index: 1200;
+  max-width: 280px;
+  padding: 3px 7px;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  color: var(--tooltip-text);
+  font-size: 11px;
+  line-height: 1.45;
+  pointer-events: none;
+  white-space: pre-line;
+}
+
+/* ============================================================================
+ * Resizer (Resizer.tsx) — invisible until hover/drag
+ * ==========================================================================*/
+
+.resizer {
+  flex: 0 0 auto;
+  z-index: 5;
+  background: transparent;
+  transition: background 0.12s 0.08s;
+}
+.resizer-v {
+  width: 5px;
+  margin: 0 -2px;
+  cursor: col-resize;
+}
+.resizer-h {
+  height: 5px;
+  margin: -2px 0;
+  cursor: row-resize;
+}
+.resizer:hover,
+.resizer[data-active="true"] {
+  background: var(--accent);
+}
+
+/* ============================================================================
+ * Knob (Knob.tsx)
+ * ==========================================================================*/
+
+.knob {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  user-select: none;
+  touch-action: none;
+}
+.knob svg { cursor: ns-resize; }
+.knob.disabled { opacity: 0.4; }
+.knob.disabled svg { cursor: default; }
+.knob-caption {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.knob-caption.value { color: var(--text); }
+
+/* ============================================================================
+ * Fader (Fader.tsx)
+ * ==========================================================================*/
+
+.fader {
+  position: relative;
+  flex: 0 0 auto;
+  user-select: none;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.fader.disabled { opacity: 0.4; cursor: default; }
+.fader-groove {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  background: var(--groove);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.fader-tick {
+  position: absolute;
+  height: 1px;
+  background: var(--border-light);
+  pointer-events: none;
+}
+.fader-tick.zero { background: var(--text-dim); }
+.fader-handle {
+  position: absolute;
+  left: 50%;
+  width: 22px;
+  height: 13px;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(var(--knob-face-hi), var(--knob-face));
+  border: 1px solid var(--knob-edge);
+  border-radius: 3px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.fader-handle::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+  background: var(--pointer);
+}
+.fader[data-dragging="true"] .fader-handle { border-color: var(--accent); }
+
+/* ============================================================================
+ * NumberDrag (NumberDrag.tsx)
+ * ==========================================================================*/
+
+.numdrag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  cursor: ns-resize;
+  user-select: none;
+  touch-action: none;
+  white-space: nowrap;
+}
+.numdrag:hover { background: var(--panel2); border-color: var(--border); }
+.numdrag[data-dragging="true"] { background: var(--panel2); border-color: var(--accent); }
+.numdrag.disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+.numdrag .numdrag-units {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+.numdrag-input {
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+/* ============================================================================
+ * Meter (Meter.tsx)
+ * ==========================================================================*/
+
+.meter {
+  display: block;
+  flex: 0 0 auto;
+  cursor: pointer; /* click resets clip latch */
+}
+
+/* ============================================================================
+ * Range input restyle (generic sliders, e.g. plugin generic editor)
+ * ==========================================================================*/
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  min-width: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]:disabled { opacity: 0.4; cursor: default; }
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--groove);
+  border: 1px solid var(--border);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--thumb);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+input[type="range"]:hover::-webkit-slider-thumb { background: var(--thumb-hover); }
+input[type="range"]:active::-webkit-slider-thumb { background: var(--accent); }
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--groove);
+  border: 1px solid var(--border);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--thumb);
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+input[type="range"]:hover::-moz-range-thumb { background: var(--thumb-hover); }
+input[type="range"]:active::-moz-range-thumb { background: var(--accent); }

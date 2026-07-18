@@ -1,0 +1,428 @@
+/* Agent panel (Increment 5). Themed via the shared CSS variables (light + dark). */
+
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--panel);
+  color: var(--text);
+  position: relative;
+}
+
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.agent-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.agent-model {
+  font-size: 11px;
+  color: var(--text-dim);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-yolo {
+  appearance: none;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  cursor: pointer;
+  background: transparent;
+}
+/* ON: live warning look. OFF: dim/outlined, click to enable. */
+.agent-yolo.on {
+  color: var(--danger);
+  border: 1px solid var(--danger-border, var(--danger));
+  background: var(--danger-soft, transparent);
+}
+.agent-yolo.off {
+  color: var(--text-faint);
+  border: 1px dashed var(--border);
+}
+.agent-yolo.off:hover {
+  color: var(--text-dim);
+  border-color: var(--border-light, var(--border));
+}
+.agent-header-spacer {
+  flex: 1 1 auto;
+}
+
+.agent-transcript {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* the app root sets user-select:none; chat content must be selectable for copy/paste */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: auto;
+}
+.agent-transcript ::selection {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+}
+.agent-empty,
+.agent-working {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.agent-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agent-row.user {
+  align-items: flex-end;
+}
+.agent-row.assistant {
+  align-items: flex-start;
+}
+.agent-bubble {
+  max-width: 92%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+.agent-tool pre,
+.agent-tool summary {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.agent-row.user .agent-bubble {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border-bottom-right-radius: 3px;
+}
+.agent-row.assistant .agent-bubble {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 3px;
+}
+.agent-tool-note {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.agent-tool {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel2);
+  padding: 3px 8px;
+}
+.agent-tool.error {
+  border-color: var(--danger-border, var(--danger));
+  color: var(--danger);
+}
+.agent-tool summary {
+  cursor: pointer;
+  user-select: none;
+}
+.agent-tool pre {
+  margin: 6px 0 2px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+}
+
+.agent-error {
+  color: var(--danger);
+  font-size: 12px;
+  border: 1px solid var(--danger-border, var(--danger));
+  border-radius: 6px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+}
+
+/* Approval card */
+.agent-approval {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+.agent-approval-head {
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 10px;
+  background: var(--panel3, var(--panel2));
+  border-bottom: 1px solid var(--border);
+}
+.agent-approval-body {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.agent-approval-tool {
+  font-weight: 600;
+}
+.agent-approval-ops {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.agent-approval-risk {
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.agent-approval-args pre {
+  max-height: 160px;
+  overflow: auto;
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+.agent-approval-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Jump-to-latest floating button */
+.agent-jump {
+  position: absolute;
+  right: 14px;
+  bottom: 84px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel3, var(--panel2));
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Composer */
+.agent-composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+/* Scripts split-button in the header: icon (opens the manager) + a thinner caret (opens the
+   quick-pick dropdown). Visually joined into one control. */
+.agent-scripts-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.agent-scripts-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.agent-scripts-caret-btn {
+  width: 14px;
+  min-width: 14px;
+  padding: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+  color: var(--text-dim);
+}
+.agent-scripts-caret-btn:hover {
+  color: var(--text);
+}
+.agent-input {
+  flex: 1 1 auto;
+  resize: none;
+  min-height: 38px;
+  max-height: 180px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg, var(--panel2));
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Prepared-scripts dropdown */
+.agent-scripts {
+  position: absolute;
+  bottom: 44px;
+  left: 0;
+  width: 300px;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border-light, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+  overflow: hidden;
+}
+.agent-scripts-search {
+  margin: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.agent-scripts-list {
+  overflow-y: auto;
+  padding: 0 6px 8px;
+}
+.agent-scripts-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.agent-scripts-item:hover {
+  background: var(--panel2);
+}
+.agent-scripts-title {
+  font-size: 12px;
+}
+.agent-scripts-cat {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.agent-scripts-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Scripts manager modal */
+.scripts-mgr {
+  display: flex;
+  gap: 12px;
+  height: 420px;
+  user-select: text;
+}
+.scripts-mgr-list {
+  flex: 0 0 240px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scripts-mgr-new {
+  margin-bottom: 6px;
+}
+.scripts-mgr-group {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  margin: 8px 0 2px;
+}
+.scripts-mgr-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.scripts-mgr-item:hover {
+  background: var(--panel2);
+}
+.scripts-mgr-item.sel {
+  background: var(--accent-soft, var(--panel3, var(--panel2)));
+  outline: 1px solid var(--accent);
+}
+.scripts-mgr-cat {
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.scripts-mgr-detail {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-width: 0;
+}
+.scripts-mgr-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.scripts-mgr-view {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 300px;
+  overflow: auto;
+}
+.scripts-mgr-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.scripts-mgr-field > span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.scripts-mgr-prompt {
+  width: 100%;
+  resize: vertical;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg, var(--panel2));
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.scripts-mgr-spacer {
+  flex: 1 1 auto;
+}
+.scripts-mgr-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 10px 0;
+}

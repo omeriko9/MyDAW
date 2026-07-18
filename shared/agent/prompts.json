@@ -1,0 +1,97 @@
+{
+  "$schema": "./prompts.schema.json",
+  "formatVersion": 1,
+  "prompts": [
+    {
+      "id": "instrument-idea",
+      "title": "Create an instrument track and musical idea",
+      "category": "compose",
+      "prompt": "Create a new instrument track, add a short MIDI clip near the start, and write a simple 2-bar musical idea into it. Tell me the track id, clip id, and what notes you added.",
+      "tags": ["track", "midi", "instrument"]
+    },
+    {
+      "id": "chord-progression",
+      "title": "Build a chord progression from a key/style",
+      "category": "compose",
+      "prompt": "Build a 4-chord progression in the key and style I describe below. Create (or reuse) a MIDI clip and write the chords as sustained notes, one chord per bar. Ask me for the key and style if I did not give them.\n\nKey/style: ",
+      "tags": ["midi", "harmony"]
+    },
+    {
+      "id": "humanize-selection",
+      "title": "Humanize selected MIDI",
+      "category": "edit",
+      "prompt": "Apply subtle timing and velocity humanization to the currently selected MIDI notes. Keep it musical, not random. Report exactly what changed.",
+      "tags": ["midi", "humanize"]
+    },
+    {
+      "id": "quantize-groove",
+      "title": "Quantize selected notes with a groove",
+      "category": "edit",
+      "prompt": "Quantize the selected MIDI notes to a 1/16 grid with a light swing/groove and partial strength so it does not sound robotic. Report the strength and grid you used.",
+      "tags": ["midi", "quantize"]
+    },
+    {
+      "id": "legato-cleanup",
+      "title": "Legato / fix overlaps / clean duplicate notes",
+      "category": "edit",
+      "prompt": "Clean up the selected MIDI: make it legato, fix overlapping notes, and remove exact duplicate notes. Report how many notes were affected.",
+      "tags": ["midi", "cleanup"]
+    },
+    {
+      "id": "gain-stage",
+      "title": "Gain-stage the project",
+      "category": "mix",
+      "prompt": "Review the track and master levels and propose gain-staging changes so nothing clips and there is healthy headroom. Show me the plan before applying any level changes.",
+      "tags": ["mix", "levels"]
+    },
+    {
+      "id": "bus-routing",
+      "title": "Build bus/send routing",
+      "category": "mix",
+      "prompt": "Create a bus and route the tracks I describe to it, then add a send where it makes sense. Explain the routing you created. Ask me which tracks to group if I did not say.\n\nTracks to group: ",
+      "tags": ["routing", "bus", "send"]
+    },
+    {
+      "id": "sidechain-compression",
+      "title": "Add and configure sidechain compression",
+      "category": "mix",
+      "prompt": "Add a compressor to the target track and configure it for sidechain ducking from the source track I name. Report the instance id and the settings you chose.\n\nTarget track / source track: ",
+      "tags": ["effect", "sidechain", "compressor"]
+    },
+    {
+      "id": "find-assign-vst",
+      "title": "Find and assign a suitable VST",
+      "category": "plugins",
+      "prompt": "Search the plugin registry for a plugin matching what I describe below, then add it to the track I name. Confirm what you assigned. Ask me if the intent is ambiguous.\n\nWhat I want / target track: ",
+      "tags": ["plugins", "registry"]
+    },
+    {
+      "id": "diagnose-silent-track",
+      "title": "Diagnose why a track is silent",
+      "category": "diagnose",
+      "prompt": "Investigate why the track I name is producing no sound. Check mute/solo, volume, routing, plugin bypass, and whether it has any clips. Report the likely cause and a fix, but do not change anything until I approve.\n\nTrack: ",
+      "tags": ["diagnose", "routing"]
+    },
+    {
+      "id": "recreate-unresolved-plugins",
+      "title": "Recreate unresolved plugins",
+      "category": "plugins",
+      "prompt": "List the project's unresolved plugins and propose how to recreate or replace each one from the current registry. Show the plan before making changes.",
+      "tags": ["plugins", "recovery"]
+    },
+    {
+      "id": "project-health",
+      "title": "Project health report (read-only)",
+      "category": "diagnose",
+      "prompt": "Give me a read-only health report of this project: track/clip counts, unresolved plugins, tracks with no output, obvious level or routing issues, and anything that looks broken. Do not modify anything.",
+      "tags": ["diagnose", "read-only"]
+    },
+    {
+      "id": "mix-export-checklist",
+      "title": "Prepare a mix/export checklist",
+      "category": "mix",
+      "prompt": "Walk the project and prepare a pre-export checklist: levels/headroom, obvious mix problems, unresolved plugins, and loop/marker setup. Present it as a checklist; do not change anything yet.",
+      "tags": ["mix", "export", "read-only"]
+    }
+  ]
+}

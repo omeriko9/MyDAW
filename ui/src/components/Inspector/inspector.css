@@ -1,0 +1,290 @@
+/* ============================================================================
+ * Inspector panel (U5) — right-side properties panel.
+ * Uses theme.css tokens only.
+ * ==========================================================================*/
+
+.inspector {
+  height: 100%;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--panel);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.insp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 12px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* ---- collapsible section ---- */
+
+.insp-section {
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.insp-section-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.insp-section-header:hover {
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.insp-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 8px 10px;
+  min-width: 0;
+}
+
+/* ---- labelled rows ---- */
+
+.insp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.insp-label {
+  flex: 0 0 56px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.insp-error {
+  color: var(--danger);
+  font-size: 11px;
+  white-space: pre-line;
+}
+
+/* ---- color swatches ---- */
+
+.insp-swatches {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.insp-swatch {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.insp-swatch:hover {
+  border-color: var(--text);
+}
+.insp-swatch[data-on="true"] {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* ---- compact item lists (sends / inserts / markers) ---- */
+
+.insp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.insp-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 26px;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  min-width: 0;
+}
+.insp-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-item.bypassed .insp-item-name {
+  color: var(--text-faint);
+}
+
+.insp-hint {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ---- channel EQ ---- */
+
+.eq-curve-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  overflow: hidden;
+  min-width: 0;
+}
+.eq-curve-wrap.bypassed {
+  opacity: 0.55;
+}
+.eq-curve {
+  display: block;
+  width: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.eq-bands {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  min-width: 0;
+}
+.eq-band.off {
+  opacity: 0.6;
+}
+
+.eq-band-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.eq-band-num {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.eq-band-params {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.eq-pk {
+  color: var(--text-faint);
+  font-size: 10px;
+  margin-left: 2px;
+}
+.eq-pk:first-child {
+  margin-left: 0;
+}
+
+/* ---- key/value overview grid ---- */
+
+.insp-kv {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 3px 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.insp-kv .insp-k {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.insp-kv .insp-v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- takes / comping ---- */
+
+.takes-folder {
+  padding: 4px 0 6px;
+  border-top: 1px solid var(--border, #2a2a2a);
+}
+.takes-folder:first-child {
+  border-top: none;
+}
+.takes-comp {
+  position: relative;
+  height: 10px;
+  margin: 2px 0 4px;
+  border-radius: 3px;
+  background: var(--bg-sunken, #1b1b1b);
+  overflow: hidden;
+}
+.takes-comp-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.takes-lane {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0;
+}
+.takes-lane-name {
+  flex: 0 0 58px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.takes-strip {
+  position: relative;
+  flex: 1 1 auto;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--bg-sunken, #1b1b1b);
+  border: 1px solid var(--border, #2a2a2a);
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+.takes-strip:hover {
+  border-color: var(--accent, #4f8cff);
+}
+.takes-strip-active {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.85;
+}

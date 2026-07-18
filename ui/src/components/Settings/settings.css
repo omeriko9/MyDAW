@@ -1,0 +1,137 @@
+/* ============================================================================
+ * Settings dialog (U5). Uses theme.css tokens only.
+ * ==========================================================================*/
+
+.sett-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 320px;
+  padding-top: 10px;
+}
+
+.sett-grid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+.sett-grid > .sett-label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.sett-note {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.sett-error {
+  color: var(--danger);
+  font-size: 12px;
+  white-space: pre-line;
+}
+.sett-token {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  user-select: all;
+}
+.sett-ok {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+/* ---- engine status strip ---- */
+
+.sett-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 12px;
+}
+.sett-status .k {
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+/* ---- progress bar ---- */
+
+.sett-progress {
+  height: 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.sett-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+/* ---- MIDI activity dot ---- */
+
+.sett-activity {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--panel3);
+  border: 1px solid var(--border-light);
+}
+.sett-activity.on {
+  background: var(--ok);
+  border-color: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+}
+
+/* ---- list rows (midi inputs, folders, blacklist) ---- */
+
+.sett-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sett-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  min-width: 0;
+}
+.sett-item .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sett-item .path {
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sett-subhead {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}

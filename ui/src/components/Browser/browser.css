@@ -1,0 +1,267 @@
+/* ============================================================================
+ * Browser sidebar (U6) — Plugins / Files tabs.
+ * Theme tokens only (lib/theme.css); no color literals.
+ * ==========================================================================*/
+
+.browser {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--panel);
+  user-select: none;
+}
+
+/* text fields inside the (user-select:none) browser stay selectable */
+.browser .input,
+.browser input {
+  user-select: text;
+}
+
+.browser-tabbar {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.browser-content {
+  position: relative;
+  min-height: 0;
+}
+
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.browser-listwrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.browser-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+/* slim progress bar used for scan / import progress */
+.browser-progressblock {
+  flex: 0 0 auto;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.browser-progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--panel3);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.browser-progress > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+/* transient toast-like hint, bottom of the panel */
+.browser-hint {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 20;
+  padding: 6px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.browser-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------------------
+ * Plugins tab
+ * ------------------------------------------------------------------------ */
+
+.plugin-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 8px;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.plugin-group:hover {
+  color: var(--text);
+}
+.plugin-group .plugin-group-count {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 8px 0 12px;
+  font-size: 12px;
+  cursor: grab;
+}
+.plugin-row:hover {
+  background: var(--panel2);
+}
+.plugin-row .plugin-row-icon {
+  color: var(--text-faint);
+}
+.plugin-row.instrument .plugin-row-icon {
+  color: var(--accent);
+}
+.plugin-row.blacklisted {
+  color: var(--danger);
+  cursor: default;
+}
+.plugin-row.blacklisted:hover {
+  background: var(--danger-soft);
+}
+.plugin-row.blacklisted .plugin-row-icon {
+  color: var(--danger);
+}
+
+.plugin-unbl {
+  appearance: none;
+  flex: 0 0 auto;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.plugin-unbl:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* favorite star — hidden until row hover, always visible (accent) when active */
+.plugin-fav {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  /* always visible (empty ☆ on every row) so a plugin can be favorited without hovering */
+  visibility: visible;
+}
+.plugin-row:hover .plugin-fav {
+  visibility: visible;
+}
+.plugin-fav:hover {
+  color: var(--text);
+}
+.plugin-fav.active {
+  visibility: visible;
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * Files tab
+ * ------------------------------------------------------------------------ */
+
+.files-tab {
+  position: relative;
+  min-height: 0;
+}
+
+.asset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
+  cursor: grab;
+}
+.asset-row:hover {
+  background: var(--panel2);
+}
+.asset-row .asset-icon {
+  color: var(--text-faint);
+}
+.asset-row.missing .asset-icon {
+  color: var(--danger);
+}
+.asset-name {
+  font-size: 12px;
+}
+.asset-meta {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.asset-relink {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+/* OS-file drop highlight (pointer-events none so drop lands on the tab) */
+.browser-drop {
+  position: absolute;
+  inset: 6px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}

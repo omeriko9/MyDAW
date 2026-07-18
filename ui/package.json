@@ -1,0 +1,32 @@
+{
+  "name": "mydaw-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "catalog:generate": "node ../scripts/generate-agent-catalog.mjs",
+    "catalog:check": "node ../scripts/generate-agent-catalog.mjs --check",
+    "dev": "vite",
+    "prebuild": "npm run catalog:check",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "pretypecheck": "npm run catalog:check",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run catalog:check",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^4.1.9"
+  }
+}

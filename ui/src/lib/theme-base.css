@@ -1,0 +1,50 @@
+/* theme-base.css — minimal resets only (owned by F4).
+   The full theme (CSS vars, component styles) lives in src/lib/theme.css, owned by the
+   shell/theme agent, and is imported from App. Keep ONLY resets here. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  /* fallbacks only — theme.css restates these from the active palette */
+  background: var(--bg, #16171c);
+  color: var(--text, #e6e8ee);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+a {
+  color: inherit;
+}

@@ -1,0 +1,64 @@
+/* ============================================================================
+ * ToastHost (U2) — transient notifications, bottom-right. Theme tokens only.
+ * Above modals (.modal-overlay z 900, ctx 1000, offline 1500) so errors stay visible.
+ * ==========================================================================*/
+
+.toast-host {
+  position: fixed;
+  right: 14px;
+  bottom: 34px; /* clear of the status bar */
+  z-index: 1600;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 420px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  animation: toast-in 0.16s ease-out;
+}
+.toast svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.toast.error {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.toast.success {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.toast-msg {
+  min-width: 0;
+  word-break: break-word;
+  white-space: pre-line;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,23 @@
+# Deferred features & stubs
+
+Policy (SPEC §10): nothing fake. Anything unfinished is either absent from the UI or
+visibly disabled with the reason. This is the complete list.
+
+| Feature | State | Where to pick it up |
+|---|---|---|
+| **ASIO backend** | Deferred. Driver enumeration lists ASIO as unavailable with the reason; `engine/src/audio/AsioDriver.h` defines the interface and `MYDAW_ASIO_SDK_DIR`/`MYDAW_HAVE_ASIO` wiring exists in CMake. | Implement `AsioDriver.cpp` against the Steinberg ASIO SDK (CLSID enum from `HKLM\SOFTWARE\ASIO`, `bufferSwitch` trampoline, sample-type conversion). `DriverManager` already routes by `DriverType::Asio`. WASAPI (shared, AUTOCONVERTPCM + exclusive) is the supported driver. |
+| **Native plugin UI streaming to browser** | Design only (ARCHITECTURE.md). The real native editor opens as a local window via the host process — implemented. | `Windows.Graphics.Capture` + WebRTC in `plugin-host`, modal + input forwarding in UI. |
+| **Time-stretch** | DONE (2026-07-03) for offline: `cmd/clip.stretch {clipId, ratio, transpose?}` runs a WSOLA pass (`engine/src/media/TimeStretch.{h,cpp}`) into a new derivative asset; UI audio-clip ▸ Time-Stretch. Interactive clip *resize*-drag still trims only. | Alt-drag the clip edge to stretch inline (stretch marker on `cmd/clip.resize`). |
+| **Multichannel (>stereo) tracks** | Schema + IPC allow up to 8 channels; the v1 graph mixes stereo buffers; UI exposes mono/stereo. | Generalize the buffer pool channel count in `AudioGraph`/`TrackNode`. |
+| **MIDI hardware output** | Inputs only (winmm). | `midiOutOpen` sibling of `MidiInput` + an output routing field on tracks. |
+| **Comping** | DONE (2026-07-03): `Track.takeFolders` + comp resolution in `AudioGraph::buildPlan` (windowed per-segment lane selection); loop-record slices laps into takes (audio only); commands `cmd/take.create|setComp|flatten`; Inspector "Takes / Comp" editor (comp bar + per-take strips, click/drag swipe). The comp is edited in the Inspector, NOT yet drawn inline in the arrangement; MIDI loop-record isn't lap-split. | Take-lane rows in `ClipCanvas` for on-timeline swipe; split MIDI loop-record into per-lap lanes. |
+| **Sidechain routing** | DONE (2026-07-03) for the built-in compressor: `PluginInstance.sidechainSource` keys the detector from another track (pre-fader capture so a muted "silent key" still works); generic editor shows a source picker for `builtin:compressor`. Out-of-process plugins are not yet sidechainable. | VST3 aux-input bus activation in `Vst3Host` + route an extra input tap through shm (extend `ShmHeader.numIn`). |
+| **VST2 shell plugins** | DONE (2026-07-02). Scan enumerates a shell DLL via `effShellGetNextPlugin` (one PluginInfo per child uid); load selects the child via `audioMasterCurrentId`. Verified with Waves Diamond 5 (`WaveShell-VST 5.0`). Ships with capture file-path/COM virtualization (SPEC §8.5). | — |
+| **plugin/savePreset** | Returns honest `unsupported` error (no host-side op). Full plugin state is captured in project saves and autosaves. | Add a `savePreset` pipe op (VST2 program write / VST3 unit program or state snapshot library). |
+| **SMF media-import tempo** | `media/import` (dropping a `.mid` into the EXISTING project) imports notes + track names but ignores tempo/timesig metas (would silently change the project tempo). File > Import Project *does* adopt the file's tempo/timesig — it builds a new project (`SmfImportProvider`). | Surface an "apply file tempo?" choice in the media-import flow; `SmfReader` already parses it. |
+| **media/import undo** | Imports are not undoable (recording *is*, via one undo entry). | Route import results through `internal/recording.commit`-style command. |
+| **.cpr mixer levels/EQ/sends** | Cubase import extracts insert chains + instruments with state, but NOT fader/pan (only one calibration point confirmed: 25856.0f = 0 dB), channel EQ (band field mapping unverified), or sends (all empty in the reference corpus). Skips are counted in the import log. | `docs/CPR_MIXER_FORMAT.md` "TOP REMAINING UNKNOWNS" — highest-value unblock: two controlled Cubase saves moving one fader / one pan. |
+| **.cpr FX/group/device-channel inserts** | Inserts on Cubase FX/group/device tracks and VST-Mixer output/master channels are skipped with log counts (no MyDAW track is imported for those channels in v1). | Map them onto bus tracks once group-channel import lands (user-deferred). |
+
+Known cosmetic quirks: some plugins report opaque parameter names ("0", "#000") for
+their automation-slot params — that is what the plugin exposes, not a bridge defect.

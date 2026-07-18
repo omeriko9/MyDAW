@@ -1,0 +1,443 @@
+/* ============================================================================
+ * Timeline (U1) — arrangement view styles. Theme tokens only, no color literals.
+ * ==========================================================================*/
+
+.tl-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg);
+  user-select: none;
+}
+
+.tl-main {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ---- minimap strip (above the ruler) ---- */
+
+.tl-minimap {
+  flex: 0 0 auto;
+  width: 100%;
+  display: block;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+/* Matches .tl-minimap exactly on the track-header side, so the ruler bottoms
+   and every row's content-space origin remain shared between both panes. */
+.tl-minimap-spacer {
+  flex: 0 0 auto;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+/* ---- left column: track headers ---- */
+
+.tl-left {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 140px;
+  max-width: 420px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.tl-corner {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.tl-corner-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.tl-headers {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tl-headers-inner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  will-change: transform;
+}
+
+.tl-headers-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* ---- track header row ---- */
+
+.tlh-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.tlh-row[data-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.tlh-row[data-drop-into="true"] {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* browser plugin/asset or OS-file drag hovering this row (dashed = external drop,
+   solid data-drop-into above = internal reorder-into-folder) */
+.tlh-row[data-droppable="true"] {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+
+.tlh-row-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 4px 0 0;
+  min-width: 0;
+}
+
+.tlh-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px 0 0;
+  min-width: 0;
+  /* wrap: deeply nested folders indent this row — M/S/R must stay reachable */
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+
+.tlh-color {
+  flex: 0 0 auto;
+  width: 5px;
+  align-self: stretch;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.tlh-color-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.tlh-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: default;
+}
+
+.tlh-name.dim {
+  color: var(--text-dim);
+}
+
+.tlh-kind-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--text-dim);
+}
+
+.tlh-chevron {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.tlh-chevron:hover {
+  background: var(--panel3);
+  color: var(--text);
+}
+
+/* compact toggles (reuse .btn-toggle chrome, shrink) */
+.tlh-btn {
+  height: 17px;
+  min-width: 19px;
+  padding: 0 4px;
+  font-size: 10px;
+  border-radius: var(--radius-sm);
+}
+
+.tlh-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 3;
+}
+.tlh-resize:hover {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* ---- automation lane header row ---- */
+
+.tlh-lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 2px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 var(--border);
+  overflow: hidden;
+}
+
+.tlh-lane-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tlh-lane-value {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* reorder indicator */
+.tlh-drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.tlh-drag-ghost {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--panel3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.9;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- right pane ---- */
+
+.tl-right {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.tl-ruler {
+  flex: 0 0 auto;
+  width: 100%;
+  display: block;
+}
+
+.tl-canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tl-clipcanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tl-playhead-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.tl-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---- scrollbars ---- */
+
+.tl-hscroll {
+  position: absolute;
+  left: 0;
+  right: 12px;
+  bottom: 0;
+  height: 11px;
+  z-index: 7;
+}
+
+.tl-vscroll {
+  position: absolute;
+  top: 0;
+  bottom: 12px;
+  right: 0;
+  width: 11px;
+  z-index: 7;
+}
+
+.tl-scroll-thumb {
+  position: absolute;
+  background: var(--border-light);
+  border-radius: 5px;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.tl-scroll-thumb:hover,
+.tl-scroll-thumb[data-active="true"] {
+  opacity: 0.9;
+  background: var(--text-faint);
+}
+.tl-hscroll .tl-scroll-thumb {
+  top: 2px;
+  bottom: 2px;
+}
+.tl-vscroll .tl-scroll-thumb {
+  left: 2px;
+  right: 2px;
+}
+
+/* ---- popovers / floating input ---- */
+
+.tl-pop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+}
+
+.tl-color-pop {
+  position: fixed;
+  display: grid;
+  grid-template-columns: repeat(6, 24px);
+  gap: 4px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.tl-color-swatch {
+  width: 24px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0;
+}
+.tl-color-swatch:hover {
+  border-color: var(--text);
+}
+.tl-color-swatch[data-on="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.tl-floating-input {
+  position: fixed;
+  z-index: 1150;
+  height: 22px;
+  font-size: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* badge for frozen tracks */
+.tlh-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}

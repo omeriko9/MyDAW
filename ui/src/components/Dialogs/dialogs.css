@@ -1,0 +1,267 @@
+/* plugin-loading progress modal (PluginLoadOverlay) — above other dialogs */
+.plugin-load-overlay {
+  z-index: 950;
+}
+.plugin-load-overlay .plo-name {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.plugin-load-overlay .plo-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+ * Dialogs (U5): export / relink / recovery / confirm. Uses theme.css tokens only.
+ * ==========================================================================*/
+
+.dlg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dlg-subhead {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dlg-radio {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.dlg-radio input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.dlg-radio.disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.dlg-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.dlg-check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.dlg-indent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 21px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dlg-summary {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.dlg-summary .mono {
+  color: var(--text);
+}
+
+.dlg-progress {
+  height: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.dlg-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+.dlg-progress-fill.indeterminate {
+  width: 30%;
+  animation: dlg-indet 1.2s ease-in-out infinite alternate;
+}
+@keyframes dlg-indet {
+  from { margin-left: 0; }
+  to { margin-left: 70%; }
+}
+
+.dlg-done {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.dlg-path {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+  word-break: break-all;
+  white-space: normal;
+}
+
+.dlg-error {
+  color: var(--danger);
+  font-size: 12px;
+  white-space: pre-line;
+}
+.dlg-ok {
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 600;
+}
+.dlg-warn {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.dlg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dlg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  min-width: 0;
+}
+.dlg-item .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dlg-item .path {
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Recreate Plugins dialog — format chip + status badge */
+.dlg-chip {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.dlg-badge {
+  flex: none;
+  max-width: 200px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dlg-badge.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.dlg-badge.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.dlg-badge.err {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.dlg-confirm-msg {
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+  max-width: 420px;
+}
+
+/* ---- keyboard-shortcut cheat sheet (ShortcutsDialog) ---- */
+
+.shk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 4px 24px;
+  align-items: start;
+}
+.shk-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 10px;
+  min-width: 0;
+}
+.shk-title {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding-bottom: 4px;
+}
+.shk-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.shk-keys {
+  flex: 0 0 148px;
+  white-space: nowrap;
+}
+.shk-kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--border-light);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.shk-what {
+  font-size: 12px;
+  color: var(--text);
+  min-width: 0;
+}
+.shk-note {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+  font-size: 11px;
+}

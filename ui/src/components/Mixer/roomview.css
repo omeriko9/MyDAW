@@ -1,0 +1,204 @@
+/* ============================================================================
+ * Room View — perspective spatial panner (RoomView.tsx).
+ * All colors from theme tokens (ui/src/lib/theme.css); works in both themes.
+ * ==========================================================================*/
+
+.rv-room {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  user-select: none;
+  touch-action: none;
+}
+
+.rv-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* floor + walls */
+.rv-floor {
+  fill: var(--panel);
+  fill-opacity: 0.55;
+  stroke: none;
+}
+.rv-wall {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.rv-outline {
+  fill: none;
+  stroke: var(--border-light);
+  stroke-width: 1.25;
+}
+
+/* grid */
+.rv-grid {
+  stroke: var(--border-light);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.rv-grid.center {
+  stroke: var(--text-faint);
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+.rv-grid.zero {
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  opacity: 0.8;
+}
+
+/* labels */
+.rv-lab {
+  fill: var(--text-faint);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+.rv-lab.zero {
+  fill: var(--accent);
+}
+.rv-lab.side {
+  font-size: 11px;
+  fill: var(--text-dim);
+}
+
+/* listener marker at the room entrance (front-center) */
+.rv-listener {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.rv-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* ============================================================================
+ * Channel token — a 0×0 anchor at its floor position; children hang off it.
+ * Perspective size comes from transform: scale() set inline (roomMath.tokenScale).
+ * ==========================================================================*/
+
+.rv-token {
+  position: absolute;
+  width: 0;
+  height: 0;
+  cursor: grab;
+}
+.rv-token.dragging {
+  cursor: grabbing;
+}
+.rv-token.muted {
+  opacity: 0.35;
+}
+
+/* live-level halo behind the disc (opacity driven by --lv from the rAF meter loop) */
+.rv-glow {
+  position: absolute;
+  left: -34px;
+  top: -56px;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--tk-color), transparent 72%);
+  opacity: calc(var(--lv, 0) * 0.75);
+  pointer-events: none;
+}
+
+/* contact shadow that grounds the token on the floor */
+.rv-shadow {
+  position: absolute;
+  left: -16px;
+  top: -5px;
+  width: 32px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.45), transparent 78%);
+  pointer-events: none;
+}
+
+.rv-disc {
+  position: absolute;
+  left: -20px;
+  top: -42px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 58%),
+    var(--tk-color);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.rv-disc svg {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+.rv-token.selected .rv-disc {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.rv-token.dragging .rv-disc {
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.5);
+}
+
+.rv-name {
+  position: absolute;
+  top: 6px;
+  left: -60px;
+  width: 120px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px var(--bg);
+  pointer-events: none;
+}
+.rv-token.selected .rv-name,
+.rv-token.dragging .rv-name {
+  color: var(--text);
+}
+
+/* footer — single fixed-height line: the readout appearing/changing must never
+   reflow the room above it (legend ellipsizes, readout never wraps) */
+.rv-legend {
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.rv-live {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 250px;
+  white-space: nowrap;
+  text-align: right;
+}

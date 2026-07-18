@@ -1,0 +1,7927 @@
+{
+  "$schema": "./capabilities.schema.json",
+  "formatVersion": 1,
+  "schemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "schemas": {
+    "AddableTrackKind": {
+      "description": "kinds creatable via cmd/track.add",
+      "enum": [
+        "audio",
+        "midi",
+        "instrument",
+        "folder",
+        "bus"
+      ],
+      "type": "string"
+    },
+    "AppSettings": {
+      "additionalProperties": {},
+      "description": "App settings persisted to %APPDATA%/MyDAW/settings.json. Open-ended by design.",
+      "properties": {
+        "autosaveMinutes": {
+          "type": "number"
+        },
+        "theme": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Asset": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "type": "number"
+        },
+        "file": {
+          "description": "project-folder-relative path, e.g. \"audio/rec-1.wav\"",
+          "type": "string"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lengthSamples": {
+          "type": "number"
+        },
+        "missing": {
+          "type": "boolean"
+        },
+        "originalPath": {
+          "type": "string"
+        },
+        "sampleRate": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "sampleRate",
+        "channels",
+        "lengthSamples"
+      ],
+      "type": "object"
+    },
+    "AudioClip": {
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string"
+        },
+        "fadeInSec": {
+          "type": "number"
+        },
+        "fadeOutSec": {
+          "type": "number"
+        },
+        "gain": {
+          "description": "linear gain",
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lengthSamples": {
+          "type": "number"
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "srcOffsetSamples": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "type": {
+          "const": "audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "name",
+        "startBeat",
+        "assetId",
+        "srcOffsetSamples",
+        "lengthSamples",
+        "gain",
+        "fadeInSec",
+        "fadeOutSec"
+      ],
+      "type": "object"
+    },
+    "AutomationAddPoint": {
+      "additionalProperties": false,
+      "description": "add-point shape per SPEC §5.3: {t, v, curve?} (t = beat, v = value).",
+      "properties": {
+        "curve": {
+          "type": "number"
+        },
+        "t": {
+          "type": "number"
+        },
+        "v": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "t",
+        "v"
+      ],
+      "type": "object"
+    },
+    "AutomationLane": {
+      "additionalProperties": false,
+      "description": "paramRef: \"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\" (SPEC §5.3)",
+      "properties": {
+        "paramRef": {
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/schemas/AutomationPoint"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paramRef",
+        "points"
+      ],
+      "type": "object"
+    },
+    "AutomationPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "curve": {
+          "description": "curve bend -1..1 (SPEC §6)",
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "beat",
+        "value"
+      ],
+      "type": "object"
+    },
+    "AutomationPointPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "curve": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "AutomationPointUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/schemas/AutomationPointPatch"
+        },
+        "pointId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "pointId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "AutomationSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "add": {
+          "items": {
+            "$ref": "#/schemas/AutomationAddPoint"
+          },
+          "type": "array"
+        },
+        "paramRef": {
+          "description": "\"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\"",
+          "type": "string"
+        },
+        "remove": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "update": {
+          "items": {
+            "$ref": "#/schemas/AutomationPointUpdate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trackId",
+        "paramRef"
+      ],
+      "type": "object"
+    },
+    "Bitness": {
+      "enum": [
+        32,
+        64
+      ],
+      "type": "number"
+    },
+    "CcEditRequest": {
+      "additionalProperties": false,
+      "description": "One undo entry for the whole batch (mirrors cmd/notes.edit); granular clip scope.",
+      "properties": {
+        "add": {
+          "items": {
+            "$ref": "#/schemas/CcInput"
+          },
+          "type": "array"
+        },
+        "clipId": {
+          "type": "number"
+        },
+        "remove": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "update": {
+          "items": {
+            "$ref": "#/schemas/CcUpdate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "type": "object"
+    },
+    "CcInput": {
+      "additionalProperties": false,
+      "description": "CC point to add — the engine assigns the id.",
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "controller": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "controller",
+        "beat",
+        "value"
+      ],
+      "type": "object"
+    },
+    "CcPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "CcUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "ccId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/CcPatch"
+        }
+      },
+      "required": [
+        "ccId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "Clip": {
+      "anyOf": [
+        {
+          "$ref": "#/schemas/AudioClip"
+        },
+        {
+          "$ref": "#/schemas/MidiClip"
+        }
+      ],
+      "description": "Discriminated union on `type`."
+    },
+    "ClipAddAudioReply": {
+      "additionalProperties": false,
+      "properties": {
+        "clip": {
+          "$ref": "#/schemas/AudioClip"
+        }
+      },
+      "required": [
+        "clip"
+      ],
+      "type": "object"
+    },
+    "ClipAddAudioRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string"
+        },
+        "fadeInSec": {
+          "type": "number"
+        },
+        "fadeOutSec": {
+          "type": "number"
+        },
+        "gain": {
+          "type": "number"
+        },
+        "lengthSamples": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "srcOffsetSamples": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "startBeat",
+        "assetId"
+      ],
+      "type": "object"
+    },
+    "ClipAddMidiReply": {
+      "additionalProperties": false,
+      "properties": {
+        "clip": {
+          "$ref": "#/schemas/MidiClip"
+        }
+      },
+      "required": [
+        "clip"
+      ],
+      "type": "object"
+    },
+    "ClipAddMidiRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "lengthBeats": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/schemas/NoteInput"
+          },
+          "type": "array"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "startBeat",
+        "lengthBeats"
+      ],
+      "type": "object"
+    },
+    "ClipDeleteRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipDuplicateReply": {
+      "additionalProperties": false,
+      "properties": {
+        "clips": {
+          "items": {
+            "$ref": "#/schemas/Clip"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clips"
+      ],
+      "type": "object"
+    },
+    "ClipDuplicateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipEdge": {
+      "enum": [
+        "l",
+        "r"
+      ],
+      "type": "string"
+    },
+    "ClipJoinReply": {
+      "additionalProperties": false,
+      "properties": {
+        "clip": {
+          "$ref": "#/schemas/Clip"
+        }
+      },
+      "required": [
+        "clip"
+      ],
+      "type": "object"
+    },
+    "ClipJoinRequest": {
+      "additionalProperties": false,
+      "description": "midi only in v1; audio join only if contiguous same-asset",
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipMoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "deltaBeats": {
+          "type": "number"
+        },
+        "targetTrackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "clipIds",
+        "deltaBeats"
+      ],
+      "type": "object"
+    },
+    "ClipPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "fadeInSec": {
+          "type": "number"
+        },
+        "fadeOutSec": {
+          "type": "number"
+        },
+        "gain": {
+          "type": "number"
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ClipResizeRequest": {
+      "additionalProperties": false,
+      "description": "audio: trims srcOffset/len; no stretch in v1 (SPEC §5.3)",
+      "properties": {
+        "clipId": {
+          "type": "number"
+        },
+        "edge": {
+          "$ref": "#/schemas/ClipEdge"
+        },
+        "newLengthBeats": {
+          "type": "number"
+        },
+        "newStartBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "clipId",
+        "edge"
+      ],
+      "type": "object"
+    },
+    "ClipSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clipId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/ClipPatch"
+        }
+      },
+      "required": [
+        "clipId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "ClipSplitReply": {
+      "additionalProperties": false,
+      "properties": {
+        "newClipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "newClipIds"
+      ],
+      "type": "object"
+    },
+    "ClipSplitRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "atBeat": {
+          "type": "number"
+        },
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipIds",
+        "atBeat"
+      ],
+      "type": "object"
+    },
+    "CompSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "lane": {
+          "description": "index into TakeFolder.lanes; -1 = silent gap",
+          "type": "number"
+        },
+        "startBeat": {
+          "description": "plays from here until the next segment's startBeat (or the folder end)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "startBeat",
+        "lane"
+      ],
+      "type": "object"
+    },
+    "DeviceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "isDefault": {
+          "type": "boolean"
+        },
+        "maxInputs": {
+          "type": "number"
+        },
+        "maxOutputs": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sampleRates": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "isDefault",
+        "maxInputs",
+        "maxOutputs",
+        "sampleRates"
+      ],
+      "type": "object"
+    },
+    "DialogPathReply": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "DialogPathsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "DriverInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "devices": {
+          "items": {
+            "$ref": "#/schemas/DeviceInfo"
+          },
+          "type": "array"
+        },
+        "reason": {
+          "description": "present when unavailable, e.g. \"build without ASIO SDK\"",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/schemas/DriverType"
+        }
+      },
+      "required": [
+        "type",
+        "available",
+        "devices"
+      ],
+      "type": "object"
+    },
+    "DriverType": {
+      "enum": [
+        "wasapi",
+        "asio"
+      ],
+      "type": "string"
+    },
+    "EmptyObject": {
+      "additionalProperties": {
+        "not": {}
+      },
+      "description": "Replies/requests with no defined payload.",
+      "type": "object"
+    },
+    "EngineStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "bufferSize": {
+          "type": "number"
+        },
+        "cpuPercent": {
+          "type": "number"
+        },
+        "device": {
+          "type": "string"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "latencyMs": {
+          "type": "number"
+        },
+        "pdcSamples": {
+          "type": "number"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "sampleRate": {
+          "type": "number"
+        },
+        "xruns": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "running",
+        "driver",
+        "device",
+        "sampleRate",
+        "bufferSize",
+        "latencyMs",
+        "xruns",
+        "cpuPercent",
+        "pdcSamples"
+      ],
+      "type": "object"
+    },
+    "EqBand": {
+      "additionalProperties": false,
+      "description": "Per-track parametric channel EQ band (SPEC §6 track.eq). type enum (FIXED): 0=peak(bell), 1=lowShelf, 2=highShelf, 3=highCut(lowpass), 4=lowCut(highpass), 5=notch. gainDb is ignored for cut/notch types. Ranges: freqHz 20..20000, gainDb -24..+24, q 0.1..18.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "freqHz": {
+          "type": "number"
+        },
+        "gainDb": {
+          "type": "number"
+        },
+        "q": {
+          "type": "number"
+        },
+        "type": {
+          "description": "0=peak | 1=lowShelf | 2=highShelf | 3=highCut | 4=lowCut | 5=notch",
+          "type": "number"
+        }
+      },
+      "required": [
+        "enabled",
+        "type",
+        "freqHz",
+        "gainDb",
+        "q"
+      ],
+      "type": "object"
+    },
+    "ExportFormat": {
+      "additionalProperties": false,
+      "properties": {
+        "bitDepth": {
+          "description": "WAV only: 16 | 24 (PCM, TPDF dither) | 32 (float).",
+          "enum": [
+            16,
+            24,
+            32
+          ],
+          "type": "number"
+        },
+        "kbps": {
+          "description": "Lossy (mp3/m4a) target bitrate in kbps (64..320, default 320).",
+          "type": "number"
+        },
+        "type": {
+          "description": "\"wav\" (PCM) or an encoded codec (Media Foundation).",
+          "enum": [
+            "wav",
+            "mp3",
+            "flac",
+            "m4a",
+            "aac"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "bitDepth"
+      ],
+      "type": "object"
+    },
+    "ExportMidiReply": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ExportMidiRequest": {
+      "additionalProperties": false,
+      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid).",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ExportRenderReply": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "codec actually written (wav|mp3|flac|m4a).",
+          "type": "string"
+        },
+        "lufs": {
+          "description": "measured integrated loudness (BS.1770) of the written signal, LUFS.",
+          "type": "number"
+        },
+        "path": {
+          "type": "string"
+        },
+        "peakDb": {
+          "description": "measured peak of the written signal, dBFS.",
+          "type": "number"
+        },
+        "seconds": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "path",
+        "seconds"
+      ],
+      "type": "object"
+    },
+    "ExportRenderRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "endBeat": {
+          "type": "number"
+        },
+        "format": {
+          "$ref": "#/schemas/ExportFormat"
+        },
+        "loudnessTarget": {
+          "description": "integrated-loudness target in LUFS (e.g. -14); scales the export to hit it.",
+          "type": "number"
+        },
+        "normalize": {
+          "description": "peak-normalize to 0 dBFS (ignored when loudnessTarget is set).",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "if no path, engine shows native save dialog",
+          "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "startBeat",
+        "endBeat",
+        "format"
+      ],
+      "type": "object"
+    },
+    "GetDevicesReply": {
+      "additionalProperties": false,
+      "properties": {
+        "drivers": {
+          "items": {
+            "$ref": "#/schemas/DriverInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "drivers"
+      ],
+      "type": "object"
+    },
+    "GetImportFormatsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "formats": {
+          "items": {
+            "$ref": "#/schemas/ImportFormatInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "formats"
+      ],
+      "type": "object"
+    },
+    "GetLogReply": {
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "type": "object"
+    },
+    "GetLogRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "tail": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "GetUnresolvedPluginsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "plugins": {
+          "items": {
+            "$ref": "#/schemas/UnresolvedPlugin"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plugins"
+      ],
+      "type": "object"
+    },
+    "Grid": {
+      "additionalProperties": false,
+      "description": "Grid settings. `division` is in beats. Snapping uses `division` and `triplet`; `swing` (0..1) is for quantize only (cmd/notes.quantize).",
+      "properties": {
+        "division": {
+          "type": "number"
+        },
+        "snap": {
+          "type": "boolean"
+        },
+        "swing": {
+          "type": "number"
+        },
+        "triplet": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "division",
+        "snap",
+        "triplet",
+        "swing"
+      ],
+      "type": "object"
+    },
+    "GridSetRequest": {
+      "additionalProperties": false,
+      "description": "Patch semantics — omitted fields keep their current value (SPEC §5.3).",
+      "properties": {
+        "division": {
+          "type": "number"
+        },
+        "snap": {
+          "type": "boolean"
+        },
+        "swing": {
+          "type": "number"
+        },
+        "triplet": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "HelloEngineInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "asioAvailable": {
+          "type": "boolean"
+        },
+        "blockSize": {
+          "type": "number"
+        },
+        "driver": {
+          "type": "string"
+        },
+        "latencyMs": {
+          "type": "number"
+        },
+        "sampleRate": {
+          "type": "number"
+        },
+        "version": {
+          "type": "string"
+        },
+        "vst3Available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "sampleRate",
+        "blockSize",
+        "driver",
+        "latencyMs",
+        "asioAvailable",
+        "vst3Available"
+      ],
+      "type": "object"
+    },
+    "HelloReply": {
+      "additionalProperties": false,
+      "properties": {
+        "audioDevices": {
+          "$ref": "#/schemas/GetDevicesReply",
+          "description": "same shape as engine/getDevices reply"
+        },
+        "automationWrite": {
+          "description": "automation-write arm — absent on older engines",
+          "type": "boolean"
+        },
+        "engine": {
+          "$ref": "#/schemas/HelloEngineInfo"
+        },
+        "metronome": {
+          "$ref": "#/schemas/MetronomeState",
+          "description": "authoritative metronome state — absent on older engines"
+        },
+        "midiInputs": {
+          "items": {
+            "$ref": "#/schemas/MidiInputInfo"
+          },
+          "type": "array"
+        },
+        "midiMaps": {
+          "$ref": "#/schemas/MidiMapsState",
+          "description": "MIDI control-surface maps + learn-arm — absent on older engines"
+        },
+        "pluginRegistry": {
+          "items": {
+            "$ref": "#/schemas/PluginInfo"
+          },
+          "type": "array"
+        },
+        "project": {
+          "$ref": "#/schemas/Project"
+        },
+        "recentProjects": {
+          "items": {
+            "$ref": "#/schemas/RecentProject"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "engine",
+        "project",
+        "pluginRegistry",
+        "recentProjects",
+        "audioDevices",
+        "midiInputs"
+      ],
+      "type": "object"
+    },
+    "HelloRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clientName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clientName"
+      ],
+      "type": "object"
+    },
+    "ImportFormatInfo": {
+      "additionalProperties": false,
+      "description": "One foreign-project import provider (engine ImportProviderRegistry).",
+      "properties": {
+        "extensions": {
+          "description": "lowercase, no dot, e.g. [\"mid\",\"midi\"]",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "description": "stable lowercase id, e.g. \"smf\"",
+          "type": "string"
+        },
+        "name": {
+          "description": "e.g. \"Standard MIDI File\"",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "extensions"
+      ],
+      "type": "object"
+    },
+    "LoopRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endBeat": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "startBeat",
+        "endBeat",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "LoopSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endBeat": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "startBeat",
+        "endBeat",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Marker": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string"
+        },
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "beat",
+        "name"
+      ],
+      "type": "object"
+    },
+    "MarkerAddReply": {
+      "additionalProperties": false,
+      "properties": {
+        "marker": {
+          "$ref": "#/schemas/Marker"
+        }
+      },
+      "type": "object"
+    },
+    "MarkerAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beat",
+        "name"
+      ],
+      "type": "object"
+    },
+    "MarkerPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "MarkerRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "markerId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "markerId"
+      ],
+      "type": "object"
+    },
+    "MarkerSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "markerId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/MarkerPatch"
+        }
+      },
+      "required": [
+        "markerId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "MediaImportReply": {
+      "additionalProperties": false,
+      "description": "midi files may create tracks (SPEC §5.5).",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/schemas/Asset"
+          },
+          "type": "array"
+        },
+        "clips": {
+          "items": {
+            "$ref": "#/schemas/Clip"
+          },
+          "type": "array"
+        },
+        "tracks": {
+          "items": {
+            "$ref": "#/schemas/Track"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "assets",
+        "clips",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "MediaImportRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "atBeat": {
+          "type": "number"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "MediaRelinkRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "type": "number"
+        },
+        "newPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "assetId",
+        "newPath"
+      ],
+      "type": "object"
+    },
+    "MetronomeState": {
+      "additionalProperties": false,
+      "description": "Engine metronome state (pinned wire contract): carried by the session/hello reply, by event/transport payloads, and by every transport/* reply. OPTIONAL everywhere — older engines omit it and the UI's local mirror then stands.",
+      "properties": {
+        "countInBars": {
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled",
+        "countInBars"
+      ],
+      "type": "object"
+    },
+    "MidiCc": {
+      "additionalProperties": false,
+      "description": "MIDI continuous-controller point on a MidiClip (kept sorted by (controller, beat)). controller: 0..127 = MIDI CC number; 128 = pitch bend (value 0..1, 0.5 = center, sent as 14-bit); 129 = channel aftertouch. beat is CLIP-RELATIVE; value is normalized 0..1 (CC sent as round(value*127)).",
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "controller": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "controller",
+        "beat",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MidiClip": {
+      "additionalProperties": false,
+      "properties": {
+        "cc": {
+          "description": "CC / pitch-bend / aftertouch points (optional, [] default).",
+          "items": {
+            "$ref": "#/schemas/MidiCc"
+          },
+          "type": "array"
+        },
+        "color": {
+          "type": "string"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lengthBeats": {
+          "type": "number"
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/schemas/Note"
+          },
+          "type": "array"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "type": {
+          "const": "midi",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "name",
+        "startBeat",
+        "lengthBeats",
+        "notes"
+      ],
+      "type": "object"
+    },
+    "MidiGetInputsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "description": "present in midi/getInputs reply",
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "enabled",
+              "id",
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "inputs"
+      ],
+      "type": "object"
+    },
+    "MidiInputInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "present in midi/getInputs reply",
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "MidiMap": {
+      "additionalProperties": false,
+      "description": "Hardware CC → param mapping (SPEC §5.2). paramRef: \"track:<id>:volume|pan\" | \"plugin:<id>:<pid>\".",
+      "properties": {
+        "cc": {
+          "type": "number"
+        },
+        "channel": {
+          "type": "number"
+        },
+        "paramRef": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cc",
+        "channel",
+        "paramRef"
+      ],
+      "type": "object"
+    },
+    "MidiMapsState": {
+      "additionalProperties": false,
+      "properties": {
+        "armed": {
+          "description": "paramRef currently armed for learn (the next CC binds to it), or null.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maps": {
+          "items": {
+            "$ref": "#/schemas/MidiMap"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "maps",
+        "armed"
+      ],
+      "type": "object"
+    },
+    "MidiPreviewRequest": {
+      "additionalProperties": false,
+      "description": "Live note audition — NOT undoable, no projectChanged; injected into the track's live MIDI path (audible while stopped, regardless of arm).",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "pitch": {
+          "description": "0..127",
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "velocity": {
+          "description": "1..127",
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "pitch",
+        "velocity",
+        "on"
+      ],
+      "type": "object"
+    },
+    "MidiSetInputEnabledRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "description": "default 0",
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lengthBeats": {
+          "type": "number"
+        },
+        "pitch": {
+          "description": "0..127",
+          "type": "number"
+        },
+        "startBeat": {
+          "description": "relative to clip start, beats",
+          "type": "number"
+        },
+        "velocity": {
+          "description": "1..127",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "pitch",
+        "velocity",
+        "startBeat",
+        "lengthBeats"
+      ],
+      "type": "object"
+    },
+    "NoteInput": {
+      "additionalProperties": false,
+      "description": "Note to add — id optional (engine assigns; negative temp ids allowed for optimistic UI).",
+      "properties": {
+        "channel": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lengthBeats": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "velocity": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "pitch",
+        "velocity",
+        "startBeat",
+        "lengthBeats"
+      ],
+      "type": "object"
+    },
+    "NotePatch": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "type": "number"
+        },
+        "lengthBeats": {
+          "type": "number"
+        },
+        "pitch": {
+          "type": "number"
+        },
+        "startBeat": {
+          "type": "number"
+        },
+        "velocity": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "NoteUpdate": {
+      "additionalProperties": false,
+      "properties": {
+        "noteId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/NotePatch"
+        }
+      },
+      "required": [
+        "noteId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "NotesEditRequest": {
+      "additionalProperties": false,
+      "description": "One undo entry (SPEC §5.3). Missing arrays are treated as empty.",
+      "properties": {
+        "add": {
+          "items": {
+            "$ref": "#/schemas/NoteInput"
+          },
+          "type": "array"
+        },
+        "clipId": {
+          "type": "number"
+        },
+        "remove": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "update": {
+          "items": {
+            "$ref": "#/schemas/NoteUpdate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "type": "object"
+    },
+    "NotesQuantizeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clipId": {
+          "type": "number"
+        },
+        "grid": {
+          "description": "grid in beats",
+          "type": "number"
+        },
+        "noteIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "strength": {
+          "description": "0..1",
+          "type": "number"
+        },
+        "swing": {
+          "description": "0..1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "clipId",
+        "grid",
+        "strength",
+        "swing"
+      ],
+      "type": "object"
+    },
+    "OutputTarget": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "const": "master",
+          "type": "string"
+        },
+        {
+          "const": "none",
+          "type": "string"
+        }
+      ],
+      "description": "trackId of a bus, or \"master\", or \"none\""
+    },
+    "PluginAddReply": {
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "$ref": "#/schemas/PluginInstance"
+        }
+      },
+      "required": [
+        "instance"
+      ],
+      "type": "object"
+    },
+    "PluginAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "copyFrom": {
+          "type": "number",
+          "description": "Existing instanceId to clone settings/state from (mixer Alt+drag copy); uid may be omitted when given."
+        }
+      },
+      "required": [
+        "trackId",
+        "uid"
+      ],
+      "type": "object"
+    },
+    "PluginCloseEditorRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "PluginFormat": {
+      "enum": [
+        "vst2",
+        "vst3",
+        "builtin"
+      ],
+      "type": "string"
+    },
+    "PluginGetParamsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "hasEditor": {
+          "description": "Pinned wire contract: true when the plugin has a native editor window (plugin/openEditor works). Absent on older engines — treat as unknown.",
+          "type": "boolean"
+        },
+        "params": {
+          "items": {
+            "$ref": "#/schemas/PluginParam"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "params"
+      ],
+      "type": "object"
+    },
+    "PluginGetParamsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "PluginGetPresetsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "presets": {
+          "items": {
+            "$ref": "#/schemas/PluginPreset"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "presets"
+      ],
+      "type": "object"
+    },
+    "PluginGetPresetsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "PluginInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "bitness": {
+          "$ref": "#/schemas/Bitness"
+        },
+        "blacklistReason": {
+          "type": "string"
+        },
+        "blacklisted": {
+          "type": "boolean"
+        },
+        "category": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/schemas/PluginFormat"
+        },
+        "isInstrument": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "numInputs": {
+          "type": "number"
+        },
+        "numOutputs": {
+          "type": "number"
+        },
+        "path": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid",
+        "format",
+        "path",
+        "bitness",
+        "name",
+        "vendor",
+        "category",
+        "isInstrument",
+        "numInputs",
+        "numOutputs"
+      ],
+      "type": "object"
+    },
+    "PluginInstance": {
+      "additionalProperties": false,
+      "properties": {
+        "bitness": {
+          "$ref": "#/schemas/Bitness"
+        },
+        "bypass": {
+          "type": "boolean"
+        },
+        "format": {
+          "$ref": "#/schemas/PluginFormat"
+        },
+        "instanceId": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "paramValues": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sampleAssetId": {
+          "description": "sampler: bound audio asset id (0/absent = none)",
+          "type": "number"
+        },
+        "sidechainSource": {
+          "description": "built-in compressor sidechain: source track id whose signal keys the detector (0/absent = self)",
+          "type": "number"
+        },
+        "stateFile": {
+          "description": "plugin-states/<instanceId>.bin",
+          "type": "string"
+        },
+        "uid": {
+          "description": "vst2: decimal uniqueID string; vst3: class GUID string (SPEC §5.6).",
+          "type": "string"
+        },
+        "wetDry": {
+          "description": "engine-side mix 0..1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId",
+        "uid",
+        "format",
+        "path",
+        "bitness",
+        "name",
+        "bypass",
+        "wetDry"
+      ],
+      "type": "object"
+    },
+    "PluginLoadPresetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "instanceId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId",
+        "id"
+      ],
+      "type": "object"
+    },
+    "PluginMoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "newIndex": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "destTrackId": {
+          "type": "number",
+          "description": "Move the insert to this channel instead, keeping its live state; newIndex is then the insertion index in the destination."
+        }
+      },
+      "required": [
+        "trackId",
+        "instanceId",
+        "newIndex"
+      ],
+      "type": "object"
+    },
+    "PluginOpenEditorRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "PluginParam": {
+      "additionalProperties": false,
+      "properties": {
+        "defaultValue": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "label": {
+          "description": "units",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "steps": {
+          "description": "discrete step count, if stepped",
+          "type": "number"
+        },
+        "value": {
+          "description": "normalized 0..1",
+          "type": "number"
+        },
+        "valueText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "label",
+        "value",
+        "defaultValue",
+        "valueText"
+      ],
+      "type": "object"
+    },
+    "PluginPreset": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "vst2 program index (number) or preset id string for state-snapshot presets",
+          "type": [
+            "number",
+            "string"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PluginRecreateResult": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "number"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "instanceId",
+        "ok"
+      ],
+      "type": "object"
+    },
+    "PluginRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "PluginSavePresetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instanceId",
+        "name"
+      ],
+      "type": "object"
+    },
+    "PluginSetParamRequest": {
+      "additionalProperties": false,
+      "description": "normalized 0..1; use transient while dragging (SPEC §5.6)",
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "paramId": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "instanceId",
+        "paramId",
+        "value"
+      ],
+      "type": "object"
+    },
+    "PluginSetPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "bypass": {
+          "type": "boolean"
+        },
+        "sidechainSource": {
+          "description": "built-in compressor: source track id to key the sidechain detector (0 = none/self)",
+          "type": "number"
+        },
+        "wetDry": {
+          "description": "engine-side mix 0..1",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "PluginSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/PluginSetPatch"
+        }
+      },
+      "required": [
+        "instanceId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "PluginsFolders": {
+      "additionalProperties": false,
+      "properties": {
+        "vst2": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "vst3": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "vst2",
+        "vst3"
+      ],
+      "type": "object"
+    },
+    "PluginsRecreateReply": {
+      "additionalProperties": false,
+      "description": "Reply to plugins/recreate. Mutates the model on success (path/bitness/name refreshed from the registry), goes through the command pipeline (undoable, broadcasts event/projectChanged).",
+      "properties": {
+        "results": {
+          "items": {
+            "$ref": "#/schemas/PluginRecreateResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "results"
+      ],
+      "type": "object"
+    },
+    "PluginsRecreateRequest": {
+      "additionalProperties": false,
+      "description": "Omitted instanceIds = recreate ALL unresolved inserts. substitutions recreates those inserts as a DIFFERENT registry plugin (uid from getUnresolvedPlugins suggestions or any registry uid); saved state carries over only within the same format.",
+      "properties": {
+        "instanceIds": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "substitutions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "instanceId": {
+                "type": "number"
+              },
+              "uid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "uid"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PluginsRegistryReply": {
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "items": {
+            "$ref": "#/schemas/PluginInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "registry"
+      ],
+      "type": "object"
+    },
+    "PluginsScanReply": {
+      "additionalProperties": false,
+      "description": "`started` is false when a scan was already running (this request started nothing).",
+      "properties": {
+        "started": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "started"
+      ],
+      "type": "object"
+    },
+    "PluginsScanRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "full": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PluginsUnblacklistRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "uid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uid"
+      ],
+      "type": "object"
+    },
+    "Project": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/schemas/Asset"
+          },
+          "type": "array"
+        },
+        "formatVersion": {
+          "const": 1,
+          "type": "number"
+        },
+        "grid": {
+          "$ref": "#/schemas/Grid"
+        },
+        "loop": {
+          "$ref": "#/schemas/LoopRegion"
+        },
+        "markers": {
+          "items": {
+            "$ref": "#/schemas/Marker"
+          },
+          "type": "array"
+        },
+        "masterTrack": {
+          "$ref": "#/schemas/Track",
+          "description": "kind: \"master\""
+        },
+        "name": {
+          "type": "string"
+        },
+        "nextId": {
+          "type": "number"
+        },
+        "sampleRate": {
+          "type": "number"
+        },
+        "tempoMap": {
+          "items": {
+            "$ref": "#/schemas/TempoPoint"
+          },
+          "type": "array"
+        },
+        "timeSigMap": {
+          "items": {
+            "$ref": "#/schemas/TimeSigEntry"
+          },
+          "type": "array"
+        },
+        "tracks": {
+          "description": "ordered, tree via parentId (folders)",
+          "items": {
+            "$ref": "#/schemas/Track"
+          },
+          "type": "array"
+        },
+        "ui": {
+          "$ref": "#/schemas/ProjectUiState"
+        },
+        "vcas": {
+          "description": "VCA control-group faders (absent on older engines).",
+          "items": {
+            "$ref": "#/schemas/Vca"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "name",
+        "sampleRate",
+        "tempoMap",
+        "timeSigMap",
+        "loop",
+        "grid",
+        "markers",
+        "tracks",
+        "masterTrack",
+        "assets",
+        "nextId"
+      ],
+      "type": "object"
+    },
+    "ProjectImportForeignRequest": {
+      "additionalProperties": false,
+      "description": "Errors: \"no_provider\" | \"import_failed\". Reply carries {project}; adoption ≙ project/load.",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ProjectLoadRecentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ProjectLoadRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ProjectReply": {
+      "additionalProperties": false,
+      "description": "Replies carry {project} on load/new (SPEC §5.1); recover behaves like load.",
+      "properties": {
+        "project": {
+          "$ref": "#/schemas/Project"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "ProjectSaveAsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ProjectUiState": {
+      "additionalProperties": {},
+      "description": "opaque to engine (SPEC §6)",
+      "properties": {
+        "scrollX": {
+          "type": "number"
+        },
+        "scrollY": {
+          "type": "number"
+        },
+        "zoomX": {
+          "type": "number"
+        },
+        "zoomY": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RecentProject": {
+      "additionalProperties": false,
+      "properties": {
+        "mtime": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "mtime"
+      ],
+      "type": "object"
+    },
+    "RecoveryInfoReply": {
+      "additionalProperties": false,
+      "properties": {
+        "autosavePath": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "mtime": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "type": "object"
+    },
+    "Send": {
+      "additionalProperties": false,
+      "properties": {
+        "destTrackId": {
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "level": {
+          "type": "number"
+        },
+        "pre": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "destTrackId",
+        "level",
+        "pre",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "SendPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "level": {
+          "type": "number"
+        },
+        "pre": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SetAudioConfigReply": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "additionalProperties": false,
+          "properties": {
+            "bufferSize": {
+              "type": "number"
+            },
+            "latencyMs": {
+              "type": "number"
+            },
+            "sampleRate": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "sampleRate",
+            "bufferSize",
+            "latencyMs"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "actual"
+      ],
+      "type": "object"
+    },
+    "SetAudioConfigRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bufferSize": {
+          "type": "number"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "driver": {
+          "$ref": "#/schemas/DriverType"
+        },
+        "exclusive": {
+          "type": "boolean"
+        },
+        "sampleRate": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "driver",
+        "deviceId",
+        "sampleRate",
+        "bufferSize"
+      ],
+      "type": "object"
+    },
+    "SetMetronomeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "countInBars": {
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "type": "number"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "SettingsSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "additionalProperties": {},
+          "properties": {
+            "autosaveMinutes": {
+              "type": "number"
+            },
+            "theme": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "patch"
+      ],
+      "type": "object"
+    },
+    "TakeFolder": {
+      "additionalProperties": false,
+      "properties": {
+        "comp": {
+          "description": "sorted by startBeat; empty ⇒ lane 0 for the whole span",
+          "items": {
+            "$ref": "#/schemas/CompSegment"
+          },
+          "type": "array"
+        },
+        "endBeat": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "lanes": {
+          "items": {
+            "$ref": "#/schemas/TakeLane"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "startBeat",
+        "endBeat",
+        "lanes",
+        "comp"
+      ],
+      "type": "object"
+    },
+    "TakeLane": {
+      "additionalProperties": false,
+      "properties": {
+        "clips": {
+          "items": {
+            "$ref": "#/schemas/Clip"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "clips"
+      ],
+      "type": "object"
+    },
+    "TempoMapSetRequest": {
+      "additionalProperties": false,
+      "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/schemas/TempoPoint"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "TempoPoint": {
+      "additionalProperties": false,
+      "description": "tempoMap entry — v1: single entry at beat 0 (SPEC §6).",
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "bpm": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "beat",
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "TempoSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bpm": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "bpm"
+      ],
+      "type": "object"
+    },
+    "TimeSigEntry": {
+      "additionalProperties": false,
+      "description": "timeSigMap entry — bar is 1-based; v1: single entry (SPEC §6).",
+      "properties": {
+        "bar": {
+          "type": "number"
+        },
+        "den": {
+          "type": "number"
+        },
+        "num": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "bar",
+        "num",
+        "den"
+      ],
+      "type": "object"
+    },
+    "TimeSigMapSetRequest": {
+      "additionalProperties": false,
+      "description": "Full time-signature-map replace — first bar == 0, num 1..32, den in {1,2,4,8,16,32}.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/schemas/TimeSigEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "TimeSigSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "den": {
+          "type": "number"
+        },
+        "num": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "num",
+        "den"
+      ],
+      "type": "object"
+    },
+    "Track": {
+      "additionalProperties": false,
+      "properties": {
+        "automation": {
+          "items": {
+            "$ref": "#/schemas/AutomationLane"
+          },
+          "type": "array"
+        },
+        "channels": {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "number"
+        },
+        "clips": {
+          "items": {
+            "$ref": "#/schemas/Clip"
+          },
+          "type": "array"
+        },
+        "color": {
+          "type": "string"
+        },
+        "eq": {
+          "$ref": "#/schemas/TrackEq",
+          "description": "Channel EQ — absent/empty bands and not bypassed => no EQ (SPEC §6)."
+        },
+        "frozen": {
+          "type": "boolean"
+        },
+        "frozenAssetId": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "inputChannel": {
+          "type": "number"
+        },
+        "inputDevice": {
+          "type": "string"
+        },
+        "inserts": {
+          "items": {
+            "$ref": "#/schemas/PluginInstance"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/schemas/TrackKind"
+        },
+        "midiTarget": {
+          "description": "MIDI routing (kind \"midi\" only): id of an Instrument-kind track that receives this track's MIDI — one shared plugin instance for N midi tracks. Absent/0 = none, the track plays through its own inserts (SPEC §6).",
+          "type": "number"
+        },
+        "monitor": {
+          "type": "boolean"
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputTarget": {
+          "$ref": "#/schemas/OutputTarget"
+        },
+        "pan": {
+          "description": "-1..1",
+          "type": "number"
+        },
+        "parentId": {
+          "description": "folder parent",
+          "type": "number"
+        },
+        "recordArm": {
+          "type": "boolean"
+        },
+        "sends": {
+          "items": {
+            "$ref": "#/schemas/Send"
+          },
+          "type": "array"
+        },
+        "solo": {
+          "type": "boolean"
+        },
+        "takeFolders": {
+          "description": "comping: stacked takes + per-segment comp selection (optional, absent = none).",
+          "items": {
+            "$ref": "#/schemas/TakeFolder"
+          },
+          "type": "array"
+        },
+        "vcaId": {
+          "description": "VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader.",
+          "type": "number"
+        },
+        "volume": {
+          "description": "linear, 1 = 0 dB",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "color",
+        "channels",
+        "volume",
+        "pan",
+        "mute",
+        "solo",
+        "recordArm",
+        "outputTarget",
+        "inserts",
+        "sends",
+        "automation",
+        "clips"
+      ],
+      "type": "object"
+    },
+    "TrackAddReply": {
+      "additionalProperties": false,
+      "properties": {
+        "track": {
+          "$ref": "#/schemas/Track"
+        }
+      },
+      "required": [
+        "track"
+      ],
+      "type": "object"
+    },
+    "TrackAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "number"
+        },
+        "index": {
+          "type": "number"
+        },
+        "kind": {
+          "$ref": "#/schemas/AddableTrackKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TrackAddSendRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "destTrackId": {
+          "type": "number"
+        },
+        "level": {
+          "type": "number"
+        },
+        "pre": {
+          "type": "boolean"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "destTrackId"
+      ],
+      "type": "object"
+    },
+    "TrackBounceReply": {
+      "additionalProperties": false,
+      "properties": {
+        "assetId": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TrackBounceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "freeze": {
+          "type": "boolean"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
+      ],
+      "type": "object"
+    },
+    "TrackDuplicateReply": {
+      "additionalProperties": false,
+      "description": "The freshly created copy (inserted right after the source track).",
+      "properties": {
+        "track": {
+          "$ref": "#/schemas/Track"
+        }
+      },
+      "required": [
+        "track"
+      ],
+      "type": "object"
+    },
+    "TrackDuplicateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
+      ],
+      "type": "object"
+    },
+    "TrackEq": {
+      "additionalProperties": false,
+      "description": "Track channel EQ. Empty bands OR bypass=true => no processing.",
+      "properties": {
+        "bands": {
+          "items": {
+            "$ref": "#/schemas/EqBand"
+          },
+          "type": "array"
+        },
+        "bypass": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bypass",
+        "bands"
+      ],
+      "type": "object"
+    },
+    "TrackEqPatch": {
+      "additionalProperties": false,
+      "description": "Channel-EQ patch. `bands` (when present) REPLACES the whole band list; omit it to change only `bypass`. Transient-aware (knob/slider drags) like cmd/track.set.",
+      "properties": {
+        "bands": {
+          "items": {
+            "$ref": "#/schemas/EqBand"
+          },
+          "type": "array"
+        },
+        "bypass": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TrackKind": {
+      "enum": [
+        "audio",
+        "midi",
+        "instrument",
+        "folder",
+        "bus",
+        "master"
+      ],
+      "type": "string"
+    },
+    "TrackPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "height": {
+          "type": "number"
+        },
+        "inputChannel": {
+          "type": "number"
+        },
+        "inputDevice": {
+          "type": "string"
+        },
+        "midiTarget": {
+          "description": "kind \"midi\" only — Instrument-track id to route this track's MIDI into; 0 clears.",
+          "type": "number"
+        },
+        "monitor": {
+          "type": "boolean"
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputTarget": {
+          "$ref": "#/schemas/OutputTarget"
+        },
+        "pan": {
+          "type": "number"
+        },
+        "recordArm": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        },
+        "vcaId": {
+          "description": "VCA-group id this track belongs to; 0 clears.",
+          "type": "number"
+        },
+        "volume": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TrackRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
+      ],
+      "type": "object"
+    },
+    "TrackRemoveSendRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "sendIndex": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "sendIndex"
+      ],
+      "type": "object"
+    },
+    "TrackReorderRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "newIndex": {
+          "type": "number"
+        },
+        "parentId": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "newIndex"
+      ],
+      "type": "object"
+    },
+    "TrackSetEqRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/schemas/TrackEqPatch"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "TrackSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/schemas/TrackPatch"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "TrackSetSendRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/schemas/SendPatch"
+        },
+        "sendIndex": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "sendIndex",
+        "patch"
+      ],
+      "type": "object"
+    },
+    "TrackUnfreezeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
+      ],
+      "type": "object"
+    },
+    "TransportLocateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "beat"
+      ],
+      "type": "object"
+    },
+    "TransportReply": {
+      "additionalProperties": false,
+      "description": "Every transport/* reply echoes the authoritative metronome + automation-write state.",
+      "properties": {
+        "automationWrite": {
+          "type": "boolean"
+        },
+        "metronome": {
+          "$ref": "#/schemas/MetronomeState"
+        }
+      },
+      "type": "object"
+    },
+    "UndoRedoReply": {
+      "additionalProperties": false,
+      "description": "Reply also triggers a full event/projectChanged (SPEC §5.3).",
+      "properties": {
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "UnresolvedPlugin": {
+      "additionalProperties": false,
+      "description": "Recreate-plugins flow (pinned wire contract). An insert is \"unresolved\" when it exists in the project model with NO live host instance (typical after Import Project).",
+      "properties": {
+        "bitness": {
+          "type": "number"
+        },
+        "format": {
+          "$ref": "#/schemas/PluginFormat"
+        },
+        "hasState": {
+          "type": "boolean"
+        },
+        "inRegistry": {
+          "type": "boolean"
+        },
+        "instanceId": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slotIndex": {
+          "type": "number"
+        },
+        "source": {
+          "description": "Pinned wire contract (optional): provenance of the imported insert, e.g. \"Cubase 5.1.1 project, 2009; 32-bit era\".",
+          "type": "string"
+        },
+        "suggestions": {
+          "description": "Present only when !inRegistry: usable stand-ins from the registry — fuzzy name matches across format/bitness/channel-config suffix, else an in-spirit built-in. Sorted best-first; feed a uid into plugins/recreate substitutions.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "bitness": {
+                "type": "number"
+              },
+              "format": {
+                "$ref": "#/schemas/PluginFormat"
+              },
+              "name": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "uid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "uid",
+              "name",
+              "format",
+              "bitness",
+              "score"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "trackName": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instanceId",
+        "name",
+        "uid",
+        "format",
+        "bitness",
+        "trackId",
+        "trackName",
+        "slotIndex",
+        "hasState",
+        "inRegistry"
+      ],
+      "type": "object"
+    },
+    "Vca": {
+      "additionalProperties": false,
+      "description": "VCA control-group fader (SPEC §6): gain multiplies the fader of every member track.",
+      "properties": {
+        "gain": {
+          "description": "linear, 1 = 0 dB",
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "gain"
+      ],
+      "type": "object"
+    },
+    "UiSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "noteIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "trackIds",
+        "clipIds",
+        "noteIds"
+      ]
+    },
+    "UiLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "browser": {
+          "type": "boolean"
+        },
+        "inspector": {
+          "type": "boolean"
+        },
+        "minimap": {
+          "type": "boolean"
+        },
+        "agent": {
+          "type": "boolean"
+        },
+        "bottomTab": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "mixer",
+                "pianoRoll",
+                "clipEditor",
+                "visualizer"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "browser",
+        "inspector",
+        "minimap",
+        "agent",
+        "bottomTab"
+      ]
+    },
+    "UiViewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zoomX": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "zoomY": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scrollX": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scrollY": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "zoomX",
+        "zoomY",
+        "scrollX",
+        "scrollY"
+      ]
+    }
+  },
+  "operations": [
+    {
+      "name": "cmd/automation.set",
+      "category": "automation",
+      "description": "Add, update, and remove points in a channel automation lane.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "track:7:volume",
+            "add": [
+              {
+                "t": 0,
+                "v": 0.8
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/cc.edit",
+      "category": "controllers",
+      "description": "Add, update, and remove MIDI controller events in a clip.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/CcEditRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "add": [
+              {
+                "controller": 1,
+                "beat": 0,
+                "value": 64
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.addAudio",
+      "category": "clips",
+      "description": "Add an audio clip referencing an imported project asset.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "asset"
+      ],
+      "produces": [
+        "clip.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ClipAddAudioRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipAddAudioReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "startBeat": 0,
+            "assetId": 3,
+            "srcOffsetSamples": 0,
+            "lengthSamples": 96000
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.addMidi",
+      "category": "clips",
+      "description": "Add a new MIDI clip to a track (by trackId, not clipId; lengthBeats > 0), optionally populated with notes.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "clip.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ClipAddMidiRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipAddMidiReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "startBeat": 0,
+            "lengthBeats": 4,
+            "name": "Verse",
+            "notes": [
+              {
+                "pitch": 60,
+                "startBeat": 0,
+                "lengthBeats": 1,
+                "velocity": 100
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.delete",
+      "category": "clips",
+      "description": "Delete one or more clips from the project.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipDeleteRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.duplicate",
+      "category": "clips",
+      "description": "Duplicate one or more clips in place.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "clips[].id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ClipDuplicateRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipDuplicateReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.join",
+      "category": "clips",
+      "description": "Join compatible selected clips into one clip.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "clip.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ClipJoinRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipJoinReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.move",
+      "category": "clips",
+      "description": "Move clips in time and optionally onto another channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipMoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
+            ],
+            "deltaBeats": 4,
+            "targetTrackId": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.processAudio",
+      "category": "clips",
+      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove); writes a new edit asset and repoints the clip.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "op": {
+            "enum": [
+              "gain",
+              "normalize",
+              "fadeIn",
+              "fadeOut",
+              "reverse",
+              "invert",
+              "silence",
+              "dcRemove"
+            ],
+            "type": "string"
+          },
+          "gainDb": {
+            "description": "op \"gain\": dB to apply (-48..48).",
+            "type": "number"
+          },
+          "targetDb": {
+            "description": "op \"normalize\": peak target in dBFS (default -1).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "op"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "op": "normalize",
+            "targetDb": -1
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.resize",
+      "category": "clips",
+      "description": "Resize a clip at its left or right edge.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipResizeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "edge": "r",
+            "newLengthBeats": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.set",
+      "category": "clips",
+      "description": "Patch a clip's name, color, gain, mute, or fade properties.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "patch": {
+              "name": "Chorus",
+              "muted": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.split",
+      "category": "clips",
+      "description": "Split one or more clips at an arrangement beat.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "newClipIds[]"
+      ],
+      "input": {
+        "$ref": "#/schemas/ClipSplitRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipSplitReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21
+            ],
+            "atBeat": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.stretch",
+      "category": "clips",
+      "description": "Render a time-stretched audio clip and optionally preserve pitch.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "transpose": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "clipId",
+          "ratio"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "assetId",
+          "lengthSamples"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "ratio": 1.25,
+            "transpose": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/grid.set",
+      "category": "arrangement",
+      "description": "Patch snap, division, triplet, and swing grid settings.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/GridSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "division": 0.25,
+            "snap": true,
+            "swing": 0,
+            "triplet": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/loop.set",
+      "category": "arrangement",
+      "description": "Set and enable or disable the transport loop region.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/LoopSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 8,
+            "endBeat": 16,
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/marker.add",
+      "category": "arrangement",
+      "description": "Add a named arrangement marker at a beat.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "marker.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/MarkerAddRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/MarkerAddReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "beat": 16,
+            "name": "Chorus"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/marker.remove",
+      "category": "arrangement",
+      "description": "Remove an arrangement marker.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MarkerRemoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "markerId": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/marker.set",
+      "category": "arrangement",
+      "description": "Patch an arrangement marker's beat or name.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MarkerSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "markerId": 4,
+            "patch": {
+              "name": "Bridge",
+              "beat": 32
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/notes.edit",
+      "category": "notes",
+      "description": "Add, update, and remove MIDI notes in one undoable edit.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/NotesEditRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "add": [
+              {
+                "pitch": 64,
+                "startBeat": 1,
+                "lengthBeats": 0.5,
+                "velocity": 96
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/notes.quantize",
+      "category": "notes",
+      "description": "Quantize MIDI note starts with grid, swing, and strength controls.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/NotesQuantizeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "noteIds": [
+              101,
+              102
+            ],
+            "grid": 0.25,
+            "strength": 1,
+            "swing": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.add",
+      "category": "plugins",
+      "description": "Add a plugin insert by its exact uid (from mydaw_query view:plugin_registry; never guess it). copyFrom clones an existing instance's settings/state.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "plugin-registry-entry"
+      ],
+      "produces": [
+        "instance.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/PluginAddRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginAddReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "uid": "builtin:compressor",
+            "index": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.move",
+      "category": "plugins",
+      "description": "Move a plugin instance to another insert index on its channel, or (with destTrackId) to another channel keeping its state.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginMoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "instanceId": 31,
+            "newIndex": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.remove",
+      "category": "plugins",
+      "description": "Remove a plugin instance from a channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginRemoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.set",
+      "category": "plugins",
+      "description": "Patch plugin bypass, wet mix, or sidechain routing.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "patch": {
+              "bypass": false,
+              "wetDry": 0.75
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.setParam",
+      "category": "plugins",
+      "description": "Set a plugin parameter by stable parameter ID.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginSetParamRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "paramId": 2,
+            "value": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/plugin.setSample",
+      "category": "plugins",
+      "description": "Assign a project audio asset to a sampler plugin instance.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "instanceId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "instanceId",
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "assetId": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.create",
+      "category": "takes",
+      "description": "Group clips on a channel into a take folder.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "clip"
+      ],
+      "produces": [
+        "folder.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "clipIds"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "folder": {
+            "$ref": "#/schemas/TakeFolder"
+          }
+        },
+        "required": [
+          "folder"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "clipIds": [
+              21,
+              22
+            ],
+            "name": "Lead takes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.flatten",
+      "category": "takes",
+      "description": "Flatten a take folder's comp into ordinary clips.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [
+        "clipIds[]"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "folderId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "folderId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clipIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "clipIds"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "folderId": 9
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.setComp",
+      "category": "takes",
+      "description": "Choose a take lane or replace the comp segments of a take folder.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "activeLane": {
+            "type": "number"
+          },
+          "comp": {
+            "items": {
+              "$ref": "#/schemas/CompSegment"
+            },
+            "type": "array"
+          },
+          "folderId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "folderId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "folderId": 9,
+            "activeLane": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/tempo.set",
+      "category": "arrangement",
+      "description": "Set the project's base tempo.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TempoSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "bpm": 124
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/tempoMap.set",
+      "category": "arrangement",
+      "description": "Replace the complete tempo map.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TempoMapSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "entries": [
+              {
+                "beat": 0,
+                "bpm": 120
+              },
+              {
+                "beat": 32,
+                "bpm": 126
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/timeSigMap.set",
+      "category": "arrangement",
+      "description": "Replace the complete time-signature map.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TimeSigMapSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "entries": [
+              {
+                "bar": 0,
+                "num": 4,
+                "den": 4
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/timesig.set",
+      "category": "arrangement",
+      "description": "Set the project's base time signature.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TimeSigSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "num": 4,
+            "den": 4
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.add",
+      "category": "tracks",
+      "description": "Add an audio, MIDI, instrument, folder, or bus channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "track.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/TrackAddRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TrackAddReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "kind": "instrument",
+            "name": "Agent Synth",
+            "channels": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.addSend",
+      "category": "tracks",
+      "description": "Create a send from one channel to another channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackAddSendRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "destTrackId": 12,
+            "level": 0.25,
+            "pre": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.bounce",
+      "category": "tracks",
+      "description": "Render a channel to audio, optionally replacing it with a frozen result.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "assetId"
+      ],
+      "input": {
+        "$ref": "#/schemas/TrackBounceRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TrackBounceReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "freeze": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.duplicate",
+      "category": "tracks",
+      "description": "Duplicate a channel with its clips, routing, and inserts.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "track.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/TrackDuplicateRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TrackDuplicateReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.remove",
+      "category": "tracks",
+      "description": "Remove a channel and its contained clips, routing, and inserts.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackRemoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.removeSend",
+      "category": "tracks",
+      "description": "Remove a send by its index on the source channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackRemoveSendRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "sendIndex": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.reorder",
+      "category": "tracks",
+      "description": "Move a channel to a new project-tree position.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackReorderRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "newIndex": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.set",
+      "category": "tracks",
+      "description": "Patch channel identity, mixer, routing, monitoring, or record properties.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "patch": {
+              "name": "Lead",
+              "volume": 0.8,
+              "pan": -0.1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.setEq",
+      "category": "tracks",
+      "description": "Patch one or more bands of a channel's built-in EQ.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackSetEqRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "patch": {
+              "bypass": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.setSend",
+      "category": "tracks",
+      "description": "Patch the destination, gain, or pre-fader state of a send.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackSetSendRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "sendIndex": 0,
+            "patch": {
+              "level": 0.4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.unfreeze",
+      "category": "tracks",
+      "description": "Restore the editable pre-freeze state of a frozen channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TrackUnfreezeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/vca.add",
+      "category": "vca",
+      "description": "Add a VCA control channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "vca.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "vca": {
+            "$ref": "#/schemas/Vca"
+          }
+        },
+        "required": [
+          "vca"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "name": "Drums VCA"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/vca.remove",
+      "category": "vca",
+      "description": "Remove a VCA control channel.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "vca"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "id": 5
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/vca.set",
+      "category": "vca",
+      "description": "Patch a VCA's name or gain.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun",
+        "transient"
+      ],
+      "requires": [
+        "project",
+        "vca"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "patch": {
+            "additionalProperties": false,
+            "properties": {
+              "gain": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "patch"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "id": 5,
+            "patch": {
+              "gain": 0.9,
+              "name": "Band VCA"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "dialog/importFiles",
+      "category": "dialogs",
+      "description": "Ask the user for one or more media files using the native picker.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/DialogPathsReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "dialog/importProject",
+      "category": "dialogs",
+      "description": "Ask the user for a foreign project path using the native picker.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/DialogPathReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "dialog/openProject",
+      "category": "dialogs",
+      "description": "Ask the user for a MyDAW project path using the native picker.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/DialogPathReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "dialog/saveProject",
+      "category": "dialogs",
+      "description": "Ask the user for a project save path using the native picker.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/DialogPathReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "edit/redo",
+      "category": "editing",
+      "description": "Redo the most recently undone project edit.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/UndoRedoReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "edit/undo",
+      "category": "editing",
+      "description": "Undo the most recent undoable project edit.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/UndoRedoReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "engine/getDevices",
+      "category": "engine",
+      "description": "List audio drivers, devices, sample rates, and buffer sizes.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/GetDevicesReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "engine/getLog",
+      "category": "engine",
+      "description": "Read a bounded tail of engine log entries.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/GetLogRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/GetLogReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "tail": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "engine/getStatus",
+      "category": "engine",
+      "description": "Read current audio-engine configuration and runtime health.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/EngineStatus"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "engine/panic",
+      "category": "engine",
+      "description": "Immediately silence active voices and clear stuck MIDI notes.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "engine/setAudioConfig",
+      "category": "engine",
+      "description": "Apply an audio driver, device, sample-rate, and buffer configuration.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "audio-device"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/SetAudioConfigRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/SetAudioConfigReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "driver": "wasapi",
+            "deviceId": "default",
+            "sampleRate": 48000,
+            "bufferSize": 256,
+            "exclusive": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "export/midi",
+      "category": "export",
+      "description": "Export project MIDI content to a Standard MIDI File.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "path"
+      ],
+      "input": {
+        "$ref": "#/schemas/ExportMidiRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ExportMidiReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/Music/arrangement.mid"
+          }
+        }
+      ]
+    },
+    {
+      "name": "export/render",
+      "category": "export",
+      "description": "Render an arrangement range to an audio file.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "path"
+      ],
+      "input": {
+        "$ref": "#/schemas/ExportRenderRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ExportRenderReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 0,
+            "endBeat": 64,
+            "format": {
+              "type": "wav",
+              "bitDepth": 24
+            },
+            "path": "C:/Music/mix.wav"
+          }
+        }
+      ]
+    },
+    {
+      "name": "media/import",
+      "category": "media",
+      "description": "Import audio or MIDI files into the project and optionally place clips.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "assets[].id",
+        "clips[].id",
+        "tracks[].id"
+      ],
+      "input": {
+        "$ref": "#/schemas/MediaImportRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/MediaImportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "paths": [
+              "C:/Music/kick.wav"
+            ],
+            "trackId": 7,
+            "atBeat": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "media/relink",
+      "category": "media",
+      "description": "Relink a missing project asset to a replacement filesystem path.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MediaRelinkRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "assetId": 3,
+            "newPath": "C:/Music/kick.wav"
+          }
+        }
+      ]
+    },
+    {
+      "name": "midi/getInputs",
+      "category": "midi",
+      "description": "List MIDI input devices and their enabled state.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/MidiGetInputsReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "midi/preview",
+      "category": "midi",
+      "description": "Send a live note-on or note-off to a channel without editing the project.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MidiPreviewRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "pitch": 60,
+            "velocity": 100,
+            "on": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "midi/setInputEnabled",
+      "category": "midi",
+      "description": "Enable or disable a MIDI input device.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MidiSetInputEnabledRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "id": "midi-in-1",
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "midimap/feedCc",
+      "category": "midi-mapping",
+      "description": "Feed a MIDI CC value through the control-surface mapping layer.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "cc": {
+            "type": "number"
+          },
+          "channel": {
+            "type": "number"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "cc",
+          "value"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "cc": 7,
+            "channel": 0,
+            "value": 100
+          }
+        }
+      ]
+    },
+    {
+      "name": "midimap/learn",
+      "category": "midi-mapping",
+      "description": "Arm a channel or plugin parameter to learn the next MIDI CC.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "paramRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paramRef"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/MidiMapsState"
+      },
+      "examples": [
+        {
+          "input": {
+            "paramRef": "track:7:volume"
+          }
+        }
+      ]
+    },
+    {
+      "name": "midimap/remove",
+      "category": "midi-mapping",
+      "description": "Remove the MIDI CC mapping for a parameter reference.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "paramRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paramRef"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/MidiMapsState"
+      },
+      "examples": [
+        {
+          "input": {
+            "paramRef": "track:7:volume"
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/closeEditor",
+      "category": "plugins",
+      "description": "Close a plugin instance's native editor window.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginCloseEditorRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/getParams",
+      "category": "plugins",
+      "description": "Read a plugin instance's parameters and native-editor availability.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginGetParamsRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginGetParamsReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/getPresets",
+      "category": "plugins",
+      "description": "List presets exposed by a plugin instance.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginGetPresetsRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginGetPresetsReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/loadPreset",
+      "category": "plugins",
+      "description": "Load a plugin preset by instance-local preset ID.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginLoadPresetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "id": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/openEditor",
+      "category": "plugins",
+      "description": "Open a plugin instance's native editor window.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginOpenEditorRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/savePreset",
+      "category": "plugins",
+      "description": "Request saving the current plugin state as a named preset.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginSavePresetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "name": "Bright Lead"
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/getDefaultFolders",
+      "category": "plugins",
+      "description": "Read platform-default VST2 and VST3 search folders.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsFolders"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "plugins/getFolders",
+      "category": "plugins",
+      "description": "Read configured VST2 and VST3 search folders.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsFolders"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "plugins/getRegistry",
+      "category": "plugins",
+      "description": "List discovered built-in, VST2, and VST3 plugins.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsRegistryReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "plugins/recreate",
+      "category": "plugins",
+      "description": "Retry unresolved project plugin instances with currently available plugins.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsRecreateRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsRecreateReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceIds": [
+              31
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/scan",
+      "category": "plugins",
+      "description": "Scan configured plugin folders and refresh the registry.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsScanRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsScanReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "full": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/setFolders",
+      "category": "plugins",
+      "description": "Replace configured VST2 and VST3 search folders.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsFolders"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsFolders"
+      },
+      "examples": [
+        {
+          "input": {
+            "vst2": [
+              "C:/VST2"
+            ],
+            "vst3": [
+              "C:/Program Files/Common Files/VST3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/unblacklist",
+      "category": "plugins",
+      "description": "Remove a plugin from the scanner blacklist.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsUnblacklistRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "uid": "vst3:com.vendor.plugin"
+          }
+        }
+      ]
+    },
+    {
+      "name": "project/getImportFormats",
+      "category": "project",
+      "description": "List foreign project formats accepted by the importer.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/GetImportFormatsReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/getUnresolvedPlugins",
+      "category": "project",
+      "description": "List project plugin instances whose original plugins are unavailable.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/GetUnresolvedPluginsReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/importForeign",
+      "category": "project",
+      "description": "Import a supported foreign project file as the current project.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ProjectImportForeignRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ProjectReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/Music/Arrangement.cpr"
+          }
+        }
+      ]
+    },
+    {
+      "name": "project/load",
+      "category": "project",
+      "description": "Load a MyDAW project from an explicit filesystem path.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ProjectLoadRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ProjectReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/Music/Session.mydaw"
+          }
+        }
+      ]
+    },
+    {
+      "name": "project/loadRecent",
+      "category": "project",
+      "description": "Load a project selected from the recent-project list.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ProjectLoadRecentRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ProjectReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/Music/Session.mydaw"
+          }
+        }
+      ]
+    },
+    {
+      "name": "project/new",
+      "category": "project",
+      "description": "Replace the current session with a new empty project.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/ProjectReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/recover",
+      "category": "project",
+      "description": "Replace the current project with its available autosave recovery.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [
+        "recovery"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/ProjectReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/recoveryInfo",
+      "category": "project",
+      "description": "Inspect whether an autosave recovery is available.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/RecoveryInfoReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/save",
+      "category": "project",
+      "description": "Save the current project to its existing path.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "project-path"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/saveAs",
+      "category": "project",
+      "description": "Save the current project to a new explicit path.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ProjectSaveAsRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/Music/Session.mydaw"
+          }
+        }
+      ]
+    },
+    {
+      "name": "settings/get",
+      "category": "settings",
+      "description": "Read MyDAW's per-user application settings.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/AppSettings"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "settings/set",
+      "category": "settings",
+      "description": "Patch MyDAW's per-user application settings.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/SettingsSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "patch": {
+              "autosaveSeconds": 120
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/locate",
+      "category": "transport",
+      "description": "Move the transport playhead to an arrangement beat.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TransportLocateRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "beat": 16
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/pause",
+      "category": "transport",
+      "description": "Pause transport at its current position.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "transport/play",
+      "category": "transport",
+      "description": "Start transport playback.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "transport/record",
+      "category": "transport",
+      "description": "Start recording on armed channels.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "transport/setAutomationWrite",
+      "category": "transport",
+      "description": "Enable or disable live automation writing.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/setMetronome",
+      "category": "transport",
+      "description": "Enable or disable the metronome and set count-in bars.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/SetMetronomeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "enabled": true,
+            "countInBars": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/stop",
+      "category": "transport",
+      "description": "Stop transport playback or recording.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "ui/dialog.set",
+      "category": "ui",
+      "description": "Open or close a typed MyDAW dialog, optionally on a settings tab.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dialog": {
+            "type": "string",
+            "enum": [
+              "settings",
+              "export",
+              "shortcuts",
+              "recreatePlugins"
+            ]
+          },
+          "open": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "midi",
+              "plugins",
+              "general",
+              "llm"
+            ]
+          }
+        },
+        "required": [
+          "dialog",
+          "open"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "open": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "open"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "dialog": "settings",
+            "open": true,
+            "tab": "llm"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/edit.invoke",
+      "category": "ui",
+      "description": "Invoke a typed selection, clipboard, deletion, duplication, or navigation edit.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "destructive"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project"
+      ],
+      "produces": [
+        "createdClipIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "cut",
+              "paste",
+              "delete",
+              "duplicate",
+              "selectAll",
+              "clearSelection",
+              "zoomToFit",
+              "locatorsToSelection"
+            ]
+          },
+          "atBeat": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "createdClipIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "changed"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "action": "paste",
+            "atBeat": 16
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/entity.reveal",
+      "category": "ui",
+      "description": "Scroll an identified project entity into view and optionally select it.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "track",
+              "clip",
+              "note",
+              "marker",
+              "plugin"
+            ]
+          },
+          "id": {
+            "type": "number"
+          },
+          "select": {
+            "type": "boolean"
+          },
+          "focus": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revealed": {
+            "type": "boolean"
+          },
+          "pane": {
+            "type": "string",
+            "enum": [
+              "timeline",
+              "pianoRoll",
+              "clipEditor",
+              "mixer"
+            ]
+          }
+        },
+        "required": [
+          "revealed"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "kind": "clip",
+            "id": 21,
+            "select": true,
+            "focus": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/focus.set",
+      "category": "ui",
+      "description": "Route keyboard editing to a specific DAW pane.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pane": {
+            "type": "string",
+            "enum": [
+              "timeline",
+              "pianoRoll",
+              "clipEditor",
+              "mixer"
+            ]
+          }
+        },
+        "required": [
+          "pane"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pane": {
+            "type": "string",
+            "enum": [
+              "timeline",
+              "pianoRoll",
+              "clipEditor",
+              "mixer"
+            ]
+          }
+        },
+        "required": [
+          "pane"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "pane": "pianoRoll"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/follow.set",
+      "category": "ui",
+      "description": "Enable or disable automatic playhead following.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/layout.set",
+      "category": "ui",
+      "description": "Open, close, or choose browser, inspector, minimap, agent, and bottom-dock layout.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "browser": {
+            "type": "boolean"
+          },
+          "inspector": {
+            "type": "boolean"
+          },
+          "minimap": {
+            "type": "boolean"
+          },
+          "agent": {
+            "type": "boolean"
+          },
+          "bottomTab": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mixer",
+                  "pianoRoll",
+                  "clipEditor",
+                  "visualizer"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "output": {
+        "$ref": "#/schemas/UiLayout"
+      },
+      "examples": [
+        {
+          "input": {
+            "agent": true,
+            "bottomTab": "pianoRoll"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/midi.transform",
+      "category": "ui",
+      "description": "Run a pure high-level MIDI transformation on explicit or selected notes.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "changedNoteIds[]",
+        "removedNoteIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "noteIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          },
+          "transform": {
+            "type": "string",
+            "enum": [
+              "transpose",
+              "fixedLength",
+              "legato",
+              "humanizeTiming",
+              "humanizeVelocity",
+              "scaleVelocity",
+              "reverse",
+              "deleteDoubles"
+            ]
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "semitones": {
+                "type": "number"
+              },
+              "lengthBeats": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "maxBeats": {
+                "type": "number",
+                "minimum": 0
+              },
+              "amount": {
+                "type": "number",
+                "minimum": 0
+              },
+              "multiplier": {
+                "type": "number"
+              },
+              "add": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "required": [
+          "transform"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "changedNoteIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          },
+          "removedNoteIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "changedNoteIds",
+          "removedNoteIds"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "noteIds": [
+              101,
+              102
+            ],
+            "transform": "transpose",
+            "options": {
+              "semitones": 12
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/pluginEditor.set",
+      "category": "ui",
+      "description": "Open or close the in-app editor window for a plugin instance.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instanceId": {
+            "type": "number"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instanceId",
+          "open"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instanceId": {
+            "type": "number"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instanceId",
+          "open"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "open": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/selection.get",
+      "category": "ui",
+      "description": "Read the active track, clip, and MIDI-note selection.",
+      "target": "ui",
+      "mode": "read",
+      "traits": [
+        "idempotent",
+        "ui-only"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project"
+      ],
+      "produces": [
+        "trackIds[]",
+        "clipIds[]",
+        "noteIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "output": {
+        "$ref": "#/schemas/UiSelection"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "ui/selection.set",
+      "category": "ui",
+      "description": "Replace or extend the active track, clip, and MIDI-note selection.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project"
+      ],
+      "produces": [
+        "trackIds[]",
+        "clipIds[]",
+        "noteIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "selection": {
+            "$ref": "#/schemas/UiSelection"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "replace",
+              "add",
+              "toggle"
+            ]
+          }
+        },
+        "required": [
+          "selection"
+        ]
+      },
+      "output": {
+        "$ref": "#/schemas/UiSelection"
+      },
+      "examples": [
+        {
+          "input": {
+            "selection": {
+              "trackIds": [
+                7
+              ],
+              "clipIds": [
+                21
+              ],
+              "noteIds": []
+            },
+            "mode": "replace"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/theme.set",
+      "category": "ui",
+      "description": "Apply the per-user light or dark theme.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "theme": {
+            "type": "string",
+            "enum": [
+              "dark",
+              "light"
+            ]
+          }
+        },
+        "required": [
+          "theme"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "theme": {
+            "type": "string",
+            "enum": [
+              "dark",
+              "light"
+            ]
+          }
+        },
+        "required": [
+          "theme"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "theme": "dark"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/tool.set",
+      "category": "ui",
+      "description": "Choose the active timeline editing tool.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "select",
+              "draw",
+              "erase",
+              "split"
+            ]
+          }
+        },
+        "required": [
+          "tool"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "select",
+              "draw",
+              "erase",
+              "split"
+            ]
+          }
+        },
+        "required": [
+          "tool"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "tool": "draw"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/viewport.set",
+      "category": "ui",
+      "description": "Patch or fit the viewport of the timeline or an editor pane.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller"
+      ],
+      "produces": [],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pane": {
+            "type": "string",
+            "enum": [
+              "timeline",
+              "pianoRoll",
+              "clipEditor"
+            ]
+          },
+          "zoomX": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "zoomY": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "scrollX": {
+            "type": "number",
+            "minimum": 0
+          },
+          "scrollY": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fit": {
+            "type": "string",
+            "enum": [
+              "selection",
+              "content"
+            ]
+          }
+        },
+        "required": [
+          "pane"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "zoomX"
+            ]
+          },
+          {
+            "required": [
+              "zoomY"
+            ]
+          },
+          {
+            "required": [
+              "scrollX"
+            ]
+          },
+          {
+            "required": [
+              "scrollY"
+            ]
+          },
+          {
+            "required": [
+              "fit"
+            ]
+          }
+        ]
+      },
+      "output": {
+        "$ref": "#/schemas/UiViewport"
+      },
+      "examples": [
+        {
+          "input": {
+            "pane": "timeline",
+            "fit": "selection"
+          }
+        }
+      ]
+    }
+  ],
+  "requestExclusions": [
+    {
+      "request": "session/hello",
+      "reason": "Connection bootstrap returns a large unbounded session snapshot and is not an agent action.",
+      "use": "Use mydaw_context and bounded mydaw_query views for session, project, engine, transport, registry, and recent-project state."
+    },
+    {
+      "request": "session/newWindow",
+      "reason": "Spawns a detached second engine process + opens a browser tab; an app/window-management action, not a project edit.",
+      "use": "This is a UI window action (File > New Window), not an agent capability."
+    },
+    {
+      "request": "export/trackArchive",
+      "reason": "Interactive Cubase Track Archive XML file export (may open a native save dialog); a file-interchange utility with partially inferred output, not a project edit.",
+      "use": "Ask the user to run File > Export > Export Cubase Track Archive in the UI."
+    },
+    {
+      "request": "export/cpr",
+      "reason": "Interactive Cubase .cpr project file export (may open a native save dialog); a file-interchange utility, not a project edit.",
+      "use": "Ask the user to run File > Export > Export Cubase Project (.cpr) in the UI."
+    }
+  ]
+}

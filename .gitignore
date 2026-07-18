@@ -1,0 +1,49 @@
+build/
+build32/
+out/
+node_modules/
+ui/dist/
+*.user
+.vs/
+_deps/
+*.obj
+*.pdb
+*.ilk
+npm-debug.log*
+*.timestamp-*.mjs
+.cache/
+*.tmp.*
+Release/
+
+# Scratch binaries occasionally produced in the repository root while inspecting
+# legacy plugin payloads. Real build artifacts live under build*/ and Release/.
+/*.dll
+/*.tgz
+
+# Local launcher shortcut (machine-specific absolute paths; see MyDAW.lnk)
+/MyDAW.lnk
+
+# ---------------------------------------------------------------------------
+# Local/dev-only files — never published (machine-specific paths, personal
+# notes, plugin-scan debris, AI-session workspaces)
+# ---------------------------------------------------------------------------
+/*.log
+/llm_feature*.md
+/Editor Not found samples
+/.claude/
+docs/PICKUP_CONTEXT.md
+docs/BUGS_AND_FEATURES_*.md
+docs/CPR_GAMES_DEDUCED.md
+
+# Regression harnesses bound to the private Cubase corpus (paths outside the
+# repo; they SKIP without it, but the paths themselves are personal)
+scripts/cpr-import-test.mjs
+scripts/cpr-mixer-test.mjs
+scripts/cpr-metronome-check.mjs
+scripts/cpr-bisect-build.mjs
+scripts/cpr-bisect-build2.mjs
+scripts/cpr-roundtrip-test.mjs
+scripts/cpr-sx-fader-test.mjs
+scripts/cpr-taper-harvest.mjs
+scripts/midi-route-render-test.mjs
+scripts/recreate-test.mjs
