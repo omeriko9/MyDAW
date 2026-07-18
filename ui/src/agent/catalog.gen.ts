@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "d72b8f10a5d614adf4c6a5556fd7dc598d8c9397e6b03ed14378131358725f64";
+export const AGENT_CATALOG_SHA256 = "d11fe04aeef7372a8bf86ba22ced38f2c480c6d74cf02f3455babcecc32a7350";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -3557,6 +3557,7 @@ export const AGENT_CATALOG: AgentCatalog = {
                 "mixer",
                 "pianoRoll",
                 "clipEditor",
+                "sheetMusic",
                 "visualizer"
               ]
             },
@@ -7426,6 +7427,7 @@ export const AGENT_CATALOG: AgentCatalog = {
                   "mixer",
                   "pianoRoll",
                   "clipEditor",
+                  "sheetMusic",
                   "visualizer"
                 ]
               },
@@ -8564,7 +8566,7 @@ export interface UiOperationMap {
   "ui/entity.reveal": { req: { "kind": "track" | "clip" | "note" | "marker" | "plugin"; "id": number; "select"?: boolean; "focus"?: boolean; }; reply: { "revealed": boolean; "pane"?: "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/focus.set": { req: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; }; reply: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/follow.set": { req: { "enabled": boolean; }; reply: { "enabled": boolean; } };
-  "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "pianoRoll" | "clipEditor" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "pianoRoll" | "clipEditor" | "visualizer") | (null); } };
+  "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); } };
   "ui/midi.transform": { req: { "clipId"?: number; "noteIds"?: Array<number>; "transform": "transpose" | "fixedLength" | "legato" | "humanizeTiming" | "humanizeVelocity" | "scaleVelocity" | "reverse" | "deleteDoubles"; "options"?: { "semitones"?: number; "lengthBeats"?: number; "maxBeats"?: number; "amount"?: number; "multiplier"?: number; "add"?: number; }; }; reply: { "changedNoteIds": Array<number>; "removedNoteIds": Array<number>; } };
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };
   "ui/selection.get": { req: {  }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };

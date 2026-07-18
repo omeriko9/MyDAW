@@ -409,7 +409,7 @@ function buildViewMenu(): MenuEntry[] {
     {
       label: "Bottom Dock",
       checked: s.panels.bottomTab !== null,
-      title: "Mixer / Piano Roll / Clip Editor / Visualizer dock",
+      title: "Mixer / Piano Roll / Clip Editor / Sheet Music / Visualizer dock",
       onClick: () => s.setPanels({ bottomTab: s.panels.bottomTab === null ? "mixer" : null }),
     },
     "separator",

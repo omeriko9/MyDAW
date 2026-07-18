@@ -3529,6 +3529,7 @@
                 "mixer",
                 "pianoRoll",
                 "clipEditor",
+                "sheetMusic",
                 "visualizer"
               ]
             },
@@ -7398,6 +7399,7 @@
                   "mixer",
                   "pianoRoll",
                   "clipEditor",
+                  "sheetMusic",
                   "visualizer"
                 ]
               },

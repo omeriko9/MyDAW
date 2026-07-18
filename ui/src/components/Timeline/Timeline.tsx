@@ -20,7 +20,8 @@ import ClipCanvas from "./ClipCanvas";
 import Minimap, { MINIMAP_H } from "./Minimap";
 import { useAutomationUi } from "./automationUi";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
-import { manualScrollSuspended, noteManualScroll } from "../../lib/followSuspend";
+import { noteManualScroll } from "../../lib/followSuspend";
+import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { beatToPx, bpmAtBeat } from "../../lib/time";
 import {
   MAX_ZOOM_X,
@@ -242,16 +243,16 @@ export default function Timeline() {
     () =>
       transportBus.subscribe((ev) => {
         const s = useStore.getState();
-        if (!s.followPlayhead) return;
-        if (manualScrollSuspended()) return; // user is navigating — stand down (~1 s grace)
+        if (!shouldFollow(s.followPlayhead)) return;
         const ex = extentRef.current;
-        if (ex.viewW <= 0) return;
         const v = s.viewport;
-        const px = ev.beat * v.zoomX;
-        if (px >= v.scrollX + ex.viewW * 0.05 && px <= v.scrollX + ex.viewW * 0.8) return;
-        const maxX = Math.max(0, ex.cBeats * v.zoomX - ex.viewW);
-        const scrollX = clamp(px - ex.viewW * 0.1, 0, maxX);
-        if (scrollX !== v.scrollX) s.setViewport({ scrollX });
+        const scrollX = followScrollX({
+          x: ev.beat * v.zoomX,
+          scrollX: v.scrollX,
+          viewW: ex.viewW,
+          contentW: ex.cBeats * v.zoomX,
+        });
+        if (scrollX !== null) s.setViewport({ scrollX });
       }),
     [],
   );

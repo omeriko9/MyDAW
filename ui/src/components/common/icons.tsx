@@ -157,6 +157,14 @@ const BASE = {
       {path("M5.83 3.5v5M10.17 3.5v5", 2, { strokeWidth: 2.4 })}
     </>
   ),
+  /* five staff lines with a note on them — the Sheet Music pane */
+  staff: (
+    <>
+      {path("M1.5 3.5h13M1.5 6h13M1.5 8.5h13M1.5 11h13M1.5 13.5h13", 0, { strokeWidth: 1 })}
+      <ellipse key="h" cx="6" cy="11" rx="2.1" ry="1.5" transform="rotate(-20 6 11)" fill="currentColor" stroke="none" />
+      {path("M8 10.6V4.2", 2, { strokeWidth: 1.4 })}
+    </>
+  ),
   mixer: (
     <>
       {path("M4 2.5v11M8 2.5v11M12 2.5v11", 0)}

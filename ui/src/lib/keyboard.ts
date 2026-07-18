@@ -122,7 +122,7 @@ export interface KeyContextHandlers {
   zoomToFit?: () => boolean | void;
 }
 
-export type KeyContextName = "timeline" | "pianoRoll" | "clipEditor";
+export type KeyContextName = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic";
 
 const contexts = new Map<KeyContextName, KeyContextHandlers>();
 
@@ -164,7 +164,7 @@ function activeContext(): KeyContextHandlers | null {
   const s = useStore.getState();
   const tab = s.panels.bottomTab;
   const focused = s.focusedPane;
-  if (focused === "pianoRoll" || focused === "clipEditor") {
+  if (focused === "pianoRoll" || focused === "clipEditor" || focused === "sheetMusic") {
     if (paneVisible(s.panels, focused)) {
       const c = contexts.get(focused);
       if (c) return c;

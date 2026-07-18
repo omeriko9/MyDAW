@@ -1,0 +1,293 @@
+/* Sheet Music pane — screen chrome uses theme tokens; the engraved score is ink on
+   paper and deliberately switches to true black/white in page view and when printing. */
+
+.sm-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+/* ---- toolbar ---- */
+
+.sm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.sm-title-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.sm-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 6px 2px;
+  background: var(--border);
+  flex: 0 0 auto;
+}
+
+.sm-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+/* ---- scroll area ---- */
+
+.sm-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px 32px;
+}
+
+.sm-scroll.paged {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  background: var(--groove, var(--bg-sunken));
+}
+
+.sm-print-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.sm-scroll:not(.paged) .sm-print-root {
+  align-items: stretch;
+  gap: 0;
+}
+
+.sm-page-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.sm-scroll.paged .sm-page-wrap {
+  box-shadow: 0 2px 14px rgb(0 0 0 / 45%);
+  background: #fff;
+}
+
+.sm-page {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  /* Ink colour: theme-aware on screen, forced black on paper (see .paged / print). */
+  color: var(--text);
+}
+
+.sm-paper {
+  fill: #fff;
+}
+
+.sm-scroll.paged .sm-page {
+  color: #111;
+}
+
+/* ---- score ink ---- */
+
+.sm-ink {
+  fill: currentColor;
+  stroke: none;
+}
+
+.sm-ink-stroke {
+  stroke: currentColor;
+  fill: none;
+}
+
+.sm-staffline {
+  stroke: currentColor;
+  opacity: 0.72;
+  fill: none;
+  shape-rendering: crispEdges;
+}
+
+.sm-head {
+  fill: currentColor;
+  stroke: none;
+  cursor: pointer;
+}
+
+.sm-head.selected {
+  fill: var(--accent);
+}
+
+/* A note that is sounding right now — toggled imperatively during playback. */
+.sm-head.playing {
+  fill: var(--accent);
+}
+
+.sm-scroll.paged .sm-head.playing {
+  fill: #1668d8;
+}
+
+.sm-headname {
+  fill: var(--bg);
+  font-family: system-ui, sans-serif;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.sm-scroll.paged .sm-headname {
+  fill: #fff;
+}
+
+.sm-barnum {
+  fill: currentColor;
+  opacity: 0.55;
+  font-family: system-ui, sans-serif;
+  font-style: italic;
+}
+
+.sm-dynamic {
+  fill: currentColor;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 700;
+}
+
+.sm-title {
+  fill: currentColor;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+}
+
+.sm-subtitle,
+.sm-part,
+.sm-tempo,
+.sm-pageno {
+  fill: currentColor;
+  opacity: 0.75;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.sm-tempo {
+  font-style: italic;
+}
+
+/* ---- playhead ---- */
+
+.sm-playhead-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 0;
+  background: var(--playhead);
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 1px;
+  will-change: transform;
+}
+
+/* ---- empty state ---- */
+
+.sm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 100%;
+  min-height: 180px;
+  text-align: center;
+  padding: 24px;
+}
+
+.sm-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.sm-empty-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  max-width: 380px;
+  line-height: 1.5;
+}
+
+/* ============================================================================
+ * Print — the whole point of page view. Everything except the score is hidden
+ * (visibility, not display, so the app's layout does not thrash), and the score is
+ * lifted to the top-left of the printed page.
+ * ========================================================================= */
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .sm-print-root,
+  .sm-print-root * {
+    visibility: visible !important;
+  }
+
+  .sm-print-root {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    display: block !important;
+  }
+
+  .sm-page-wrap {
+    break-after: page;
+    page-break-after: always;
+    box-shadow: none !important;
+    background: #fff !important;
+    margin: 0 !important;
+  }
+
+  .sm-page-wrap:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .sm-page {
+    color: #000 !important;
+  }
+
+  .sm-headname {
+    fill: #fff !important;
+  }
+
+  .sm-head.playing {
+    fill: #000 !important;
+  }
+
+  .sm-playhead-bar {
+    display: none !important;
+  }
+}

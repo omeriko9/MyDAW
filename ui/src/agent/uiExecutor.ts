@@ -40,9 +40,9 @@ const asIntArray = (v: unknown): number[] =>
 
 const THEMES = new Set<ThemeName>(["dark", "light"]);
 const TOOLS = new Set<Tool>(["select", "draw", "erase", "split"]);
-const PANES = new Set<FocusedPane>(["timeline", "pianoRoll", "clipEditor", "mixer"]);
+const PANES = new Set<FocusedPane>(["timeline", "pianoRoll", "clipEditor", "sheetMusic", "mixer"]);
 const DIALOGS = new Set(["settings", "export", "shortcuts", "recreatePlugins"]);
-const BOTTOM_TABS = new Set(["mixer", "pianoRoll", "clipEditor", "visualizer"]);
+const BOTTOM_TABS = new Set(["mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"]);
 
 function require<T>(value: T | undefined | null, code: string, message: string): T {
   if (value === undefined || value === null) throw new UiOpError(code, message);

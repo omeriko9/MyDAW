@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d72b8f10a5d614adf4c6a5556fd7dc598d8c9397e6b03ed14378131358725f64";
+const char kAgentCatalogSha256[] = "d11fe04aeef7372a8bf86ba22ced38f2c480c6d74cf02f3455babcecc32a7350";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -3537,6 +3537,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                 "mixer",
                 "pianoRoll",
                 "clipEditor",
+                "sheetMusic",
                 "visualizer"
               ]
             },
@@ -7406,6 +7407,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                   "mixer",
                   "pianoRoll",
                   "clipEditor",
+                  "sheetMusic",
                   "visualizer"
                 ]
               },

@@ -109,10 +109,10 @@ export const recordingBus: Bus<RecordingNotesEvent> = makeBus<RecordingNotesEven
 /** Timeline tools: select(1) / draw(2) / erase(3) / split(4) (SPEC §9). */
 export type Tool = "select" | "draw" | "erase" | "split";
 
-export type BottomTab = "mixer" | "pianoRoll" | "clipEditor" | "visualizer" | null;
+export type BottomTab = "mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer" | null;
 
 /** Pane focus for keyboard routing — set by pointerdown (capture) on each pane root. */
-export type FocusedPane = "timeline" | "pianoRoll" | "clipEditor" | "mixer";
+export type FocusedPane = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic" | "mixer";
 
 /** Dock tabs that can be popped out into their own browser window (U3). */
 export type PoppedOutTab = Exclude<BottomTab, null>;
@@ -360,7 +360,7 @@ const prefPanels: PanelsState = {
       browser: isBool,
       browserTab: oneOf<BrowserTab>("plugins", "files", "inspector"),
       inspector: isBool,
-      bottomTab: oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "visualizer", null),
+      bottomTab: oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
     }),
   ),
   poppedOut: {},

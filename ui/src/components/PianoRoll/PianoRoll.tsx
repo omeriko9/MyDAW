@@ -34,6 +34,7 @@ import {
   usePrefState,
 } from "../../lib/prefs";
 import { useCanvas, useRafLoop } from "../../lib/canvas";
+import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { tempId } from "../../lib/ids";
 import { barToBeat, beatToBar, bpmAtBeat, timeSigAtBeat } from "../../lib/time";
 import { Icon } from "../common/icons";
@@ -563,6 +564,36 @@ function Editor({ track, clip }: EditorProps) {
         if (ev.state === "stopped") drawOverlayRef.current();
       }),
     [],
+  );
+
+  /* ---- follow playhead ("J") — same page-jump rule as the timeline, but this pane's
+     viewport is a REF (not store state), so scroll it directly and redraw. Registered
+     after the subscription above, so transportRef is already current here. ---- */
+  useEffect(
+    () =>
+      transportBus.subscribe((ev) => {
+        if (!shouldFollow(useStore.getState().followPlayhead)) return;
+        const el = notesCv.canvasRef.current;
+        if (!el) return;
+        const v = viewRef.current;
+        const c = clipRef.current;
+        const localBeat = ev.beat - c.startBeat;
+        const contentBeats = M.contentBeats(c) + M.SCROLL_MARGIN_BEATS;
+        // Playhead outside this clip entirely — leave the editor where the user put it.
+        if (localBeat < 0 || localBeat > contentBeats) return;
+        const next = followScrollX({
+          x: localBeat * v.zoomX,
+          scrollX: v.scrollX,
+          viewW: el.clientWidth,
+          contentW: contentBeats * v.zoomX,
+        });
+        if (next === null) return;
+        v.scrollX = next;
+        clampViewRef.current();
+        requestDraw();
+        drawOverlayRef.current();
+      }),
+    [notesCv.canvasRef, requestDraw],
   );
   // The overlay canvas may live in a popped-out window (portal) — animate on ITS rAF
   // clock so the playhead keeps moving while the MAIN tab is hidden. On the very first

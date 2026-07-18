@@ -34,6 +34,7 @@ import Timeline from "./components/Timeline/Timeline";
 import Mixer from "./components/Mixer/Mixer";
 import PianoRoll from "./components/PianoRoll/PianoRoll";
 import ClipEditor from "./components/ClipEditor/ClipEditor";
+import SheetMusic from "./components/SheetMusic/SheetMusic";
 import Visualizer from "./components/Visualizer/Visualizer";
 import { AgentPanel } from "./components/Agent/AgentPanel";
 import Browser from "./components/Browser/Browser";
@@ -115,6 +116,7 @@ const DOCK_TABS = [
   { id: "mixer", label: "Mixer", icon: "mixer" as const },
   { id: "pianoRoll", label: "Piano Roll", icon: "piano" as const },
   { id: "clipEditor", label: "Clip Editor", icon: "audioWave" as const },
+  { id: "sheetMusic", label: "Sheet Music", icon: "staff" as const },
   { id: "visualizer", label: "Visualizer", icon: "power" as const },
 ];
 
@@ -127,6 +129,7 @@ const POPOUT_DEFS: Record<PoppedOutTab, { label: string; title: string; width: n
   mixer: { label: "Mixer", title: "MyDAW — Mixer", width: 1100, height: 420 },
   pianoRoll: { label: "Piano Roll", title: "MyDAW — Piano Roll", width: 1100, height: 560 },
   clipEditor: { label: "Clip Editor", title: "MyDAW — Clip Editor", width: 1100, height: 420 },
+  sheetMusic: { label: "Sheet Music", title: "MyDAW — Sheet Music", width: 1000, height: 700 },
   visualizer: { label: "Visualizer", title: "MyDAW — Visualizer", width: 1100, height: 560 },
 };
 
@@ -255,6 +258,11 @@ export default function App() {
       ...POPOUT_DEFS.clipEditor,
       onClosed: () => setPoppedOut("clipEditor", false),
     }),
+    sheetMusic: usePopoutWindow({
+      name: "MyDAW-sheetMusic",
+      ...POPOUT_DEFS.sheetMusic,
+      onClosed: () => setPoppedOut("sheetMusic", false),
+    }),
     visualizer: usePopoutWindow({
       name: "MyDAW-visualizer",
       ...POPOUT_DEFS.visualizer,
@@ -288,6 +296,8 @@ export default function App() {
       <PianoRoll />
     ) : tab === "clipEditor" ? (
       <ClipEditor />
+    ) : tab === "sheetMusic" ? (
+      <SheetMusic />
     ) : (
       <Visualizer />
     );

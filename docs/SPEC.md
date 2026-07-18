@@ -771,7 +771,11 @@ drag across it to swipe just that range in.
   double-click midi clip → piano roll, audio clip → clip editor. Ruler: bars+beats per zoom,
   loop-region drag in upper ruler half, marker lane, playhead seek on click. Follow-playhead
   (store.followPlayhead): page-jump scrollX to playheadPx−10% width when the playhead leaves
-  [5%,80%] of the view (playback and locate; never per-frame scrolling). Automation lanes:
+  [5%,80%] of the view (playback and locate; never per-frame scrolling). The rule lives in
+  `lib/followPlayhead.ts` (`followScrollX` + `shouldFollow`) and is shared by EVERY pane that
+  shows musical time — timeline (store viewport), piano roll (local view ref; skipped while the
+  playhead is outside the open clip), sheet music (vertical, follows the system being played).
+  All of them stand down while `followSuspend.manualScrollSuspended()` is true. Automation lanes:
   expandable below track (per paramRef), draw/edit points. Audio clips render waveform from peaks
   (HTTP, cached, LOD per zoom). Right-click context menus.
 - Keyboard (`lib/keyboard.ts`): space play/stop, R record, C metronome on/off, ctrl+Z/Y undo/redo,
@@ -795,7 +799,22 @@ drag across it to swipe just that range in.
   toolbar (grid, strength, swing), scroll sync w/ timeline beat axis optional.
 - Clip editor (audio): waveform zoom view, trim handles, gain, fades, normalize button
   (computes gain, non-destructive), split at cursor.
-- Pop-out dock tabs: each bottom dock tab (Mixer / Piano Roll / Clip Editor) can pop out into its
+- Sheet music (bottom dock tab, `components/SheetMusic/`): engraves the active MIDI clip (or its
+  whole track) as notation. Four pure layers — `notation.ts` (line-of-fifths pitch SPELLING per key,
+  duration decomposition split at metric boundaries with ties, per-measure accidental state, stem
+  direction, beam grouping by beat), `layout.ts` (columns shared across staves so a grand staff
+  aligns, sub-linear duration spacing, greedy system packing + justification, clamped-slope beams
+  with a minimum stem length, page breaking), `glyphs.ts` (hand-authored SVG paths in staff-space
+  units — no music font dependency), `Score.tsx` (SVG render; the same tree is what prints).
+  Toolbar: source, clef (grand / treble / bass / alto + hand split point), key signature
+  (auto-detected via a weighted pitch-class profile, or picked), quantise grid, transposition,
+  staff size, continuous vs page view, paper size, bar numbers, note names. Print (`window.print`,
+  page view forced, app chrome hidden via `@media print`) and MusicXML 4.0 export (spelled pitches,
+  ties, beams, chords, per-staff `<backup>`) — both client-side, no engine round trip. Playback:
+  playhead + sounding-note highlight are driven off transportBus by ref/class mutation, never React
+  state, so the engraved SVG is not re-rendered at 20 Hz.
+- Pop-out dock tabs: each bottom dock tab (Mixer / Piano Roll / Clip Editor / Sheet Music /
+  Visualizer) can pop out into its
   own browser window (same-JS-context `window.open` + React portal — store/ws/buses shared, no
   duplication). `store.panels.poppedOut` tracks popped tabs; popped panes render regardless of
   the active tab (even with the dock closed) and the dock shows a "Dock back" placeholder for a
