@@ -80,7 +80,8 @@ export interface ScoreProps {
   /** Marquee rectangle in content coordinates, while rubber-band selecting on this page. */
   marquee?: { x1: number; y1: number; x2: number; y2: number } | null;
   onPickTick?: (tick: number) => void;
-  onNoteDown?: (noteId: number, e: React.PointerEvent) => void;
+  /** `pt` is the musical position under the pointer, so a drag knows where it began. */
+  onNoteDown?: (noteId: number, pt: ScorePoint | null, e: React.PointerEvent) => void;
   onStaffDown?: (pt: ScorePoint, e: React.PointerEvent) => void;
   onNoteContext?: (noteId: number, e: React.MouseEvent) => void;
   onStaffContext?: (pt: ScorePoint, e: React.MouseEvent) => void;
@@ -310,12 +311,14 @@ function Measure({
   layout,
   isLastOfScore,
   props,
+  onNoteDown,
 }: {
   m: LaidMeasure;
   sys: LaidSystem;
   layout: ScoreLayout;
   isLastOfScore: boolean;
   props: ScoreProps;
+  onNoteDown?: (noteId: number, e: React.PointerEvent) => void;
 }) {
   const sp = layout.sp;
   const parts: React.ReactNode[] = [];
@@ -353,7 +356,7 @@ function Measure({
         highlight={props.highlight}
         selected={props.selected}
         noteNames={props.noteNames}
-        onNoteDown={props.onNoteDown}
+        onNoteDown={onNoteDown}
         onNoteContext={props.onNoteContext}
       />,
     );
@@ -477,6 +480,13 @@ export default function Score(props: ScoreProps) {
     return null;
   };
 
+  /** Noteheads report the musical position they were grabbed at, so drags know their origin. */
+  const noteDown = (noteId: number, e: React.PointerEvent) => {
+    if (!props.onNoteDown) return;
+    const svg = (e.currentTarget as SVGElement).ownerSVGElement;
+    props.onNoteDown(noteId, svg ? locate(e.clientX, e.clientY, svg) : null, e);
+  };
+
   const onBackgroundPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (e.button !== 0) return;
     const pt = locate(e.clientX, e.clientY, e.currentTarget);
@@ -559,6 +569,7 @@ export default function Score(props: ScoreProps) {
                     page === layout.pages.length - 1 && sys === lastSystem && mi === sys.measures.length - 1
                   }
                   props={props}
+                  onNoteDown={props.onNoteDown ? noteDown : undefined}
                 />
               ))}
             </g>

@@ -175,6 +175,34 @@ export function splitAtBeat(refs: NoteRef[], absBeat: number): { patches: ClipPa
   return { patches: [...perClip.values()], split };
 }
 
+/**
+ * MOVE: shift notes in time and/or pitch — what dragging a notehead produces.
+ *
+ * `repitch` maps a stored pitch to its new value; the caller supplies it because "up one
+ * staff position" is a question about the key signature, which is a notation concept and
+ * does not belong down here. Notes stay inside their own clip: a note dragged past the
+ * clip's end would simply stop sounding, which is not what a drag looks like it did.
+ */
+export function moveNotes(
+  refs: NoteRef[],
+  deltaBeats: number,
+  repitch: (pitch: number) => number = (p) => p,
+): ClipPatch[] {
+  const out: ClipPatch[] = [];
+  for (const [clipId, list] of byClip(refs)) {
+    const update: NoteUpdate[] = [];
+    for (const r of list) {
+      const maxStart = Math.max(0, r.clip.lengthBeats - r.note.lengthBeats);
+      const startBeat = Math.max(0, Math.min(maxStart, r.note.startBeat + deltaBeats));
+      const pitch = Math.max(0, Math.min(127, repitch(r.note.pitch)));
+      if (startBeat === r.note.startBeat && pitch === r.note.pitch) continue;
+      update.push({ noteId: r.note.id, patch: { startBeat, pitch } });
+    }
+    if (update.length) out.push({ clipId, update });
+  }
+  return out;
+}
+
 /** Extend every selected note to meet the next one at the same pitch (Cubase legato). */
 export function legatoNotes(refs: NoteRef[]): ClipPatch[] {
   const perClip = new Map<number, ClipPatch>();

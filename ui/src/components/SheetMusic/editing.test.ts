@@ -4,6 +4,7 @@ import {
   deleteNotes,
   joinNotes,
   legatoNotes,
+  moveNotes,
   prunePatches,
   resolveNotes,
   setLength,
@@ -163,6 +164,51 @@ describe("split", () => {
     const c = clip(1, 0, [note(10, 0, 1, 60)]);
     expect(splitAtBeat(refs(c, [10]), 50).split).toBe(0);
     expect(splitAtBeat(refs(c, [10]), 0).split).toBe(0);
+  });
+});
+
+describe("move (drag)", () => {
+  it("shifts notes in time", () => {
+    const c = clip(1, 0, [note(10, 1, 1, 60), note(11, 2, 1, 62)]);
+    const p = moveNotes(refs(c, [10, 11]), 0.5);
+    expect(p[0].update).toEqual([
+      { noteId: 10, patch: { startBeat: 1.5, pitch: 60 } },
+      { noteId: 11, patch: { startBeat: 2.5, pitch: 62 } },
+    ]);
+  });
+
+  it("re-pitches through the caller's mapping", () => {
+    const c = clip(1, 0, [note(10, 0, 1, 60)]);
+    const p = moveNotes(refs(c, [10]), 0, (pitch) => pitch + 4);
+    expect(p[0].update![0].patch.pitch).toBe(64);
+  });
+
+  it("never drags a note out of its own clip", () => {
+    const c = clip(1, 0, [note(10, 2, 1, 60)]); // clip is 16 beats long
+    expect(moveNotes(refs(c, [10]), -5)[0].update![0].patch.startBeat).toBe(0); // clamped from −3
+    expect(moveNotes(refs(c, [10]), 100)[0].update![0].patch.startBeat).toBe(15); // 16 − length
+  });
+
+  it("does nothing when a note is already against the edge it is dragged toward", () => {
+    const c = clip(1, 0, [note(10, 0, 1, 60)]);
+    expect(moveNotes(refs(c, [10]), -5)).toEqual([]);
+  });
+
+  it("clamps pitch to the MIDI range", () => {
+    const c = clip(1, 0, [note(10, 0, 1, 120)]);
+    expect(moveNotes(refs(c, [10]), 0, (p) => p + 50)[0].update![0].patch.pitch).toBe(127);
+  });
+
+  it("emits nothing when the drag changed neither time nor pitch", () => {
+    const c = clip(1, 0, [note(10, 0, 1, 60)]);
+    expect(moveNotes(refs(c, [10]), 0)).toEqual([]);
+  });
+
+  it("keeps notes that cannot move from blocking the others", () => {
+    // note 10 is already at the start and cannot go left; note 11 still moves.
+    const c = clip(1, 0, [note(10, 0, 1, 60), note(11, 4, 1, 62)]);
+    const p = moveNotes(refs(c, [10, 11]), -1);
+    expect(p[0].update).toEqual([{ noteId: 11, patch: { startBeat: 3, pitch: 62 } }]);
   });
 });
 

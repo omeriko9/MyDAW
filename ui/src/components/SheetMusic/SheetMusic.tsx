@@ -40,14 +40,16 @@ import {
   durTicks,
   keyName,
   keySignatureAccidentals,
+  spellPitch,
   ticksToBeats,
   type SourceNote,
 } from "./notation";
-import { layoutScore, tickToPoint, type Clef, type ScoreLayout } from "./layout";
+import { layoutScore, pointToTick, tickToPoint, type Clef, type ScoreLayout } from "./layout";
 import {
   deleteNotes,
   joinNotes,
   legatoNotes,
+  moveNotes,
   prunePatches,
   resolveNotes,
   setLength,
@@ -182,6 +184,15 @@ export default function SheetMusic() {
   const headRef = useRef<Map<number, Element[]>>(new Map());
   const soundingRef = useRef<Set<number>>(new Set());
   const dragRef = useRef<{ page: number; x: number; y: number; moved: boolean; pt: ScorePoint } | null>(null);
+  const noteDragRef = useRef<{
+    noteId: number;
+    grab: ScorePoint;
+    dSteps: number;
+    dTicks: number;
+    moved: boolean;
+    px: number;
+    py: number;
+  } | null>(null);
 
   const transpose = Number(transposeStr) || 0;
   const splitPitch = clefMode === "grand" ? Number(splitStr) || 60 : null;
@@ -371,6 +382,8 @@ export default function SheetMusic() {
   headerRef.current = usePages ? sp * HEADER_SPACES : 0;
   const leftPadRef = useRef(leftPad);
   leftPadRef.current = leftPad;
+  const quantizeRef = useRef(quantize);
+  quantizeRef.current = quantize;
 
   const applyTransport = useCallback((beat: number, playing: boolean) => {
     const lay = layoutRef.current;
@@ -534,7 +547,7 @@ export default function SheetMusic() {
   /* ---- pointer handling: click = select / insert / locate, drag = marquee ---- */
 
   const onNoteDown = useCallback(
-    (noteId: number, e: React.PointerEvent) => {
+    (noteId: number, pt: ScorePoint | null, e: React.PointerEvent) => {
       if (noteId < 0) return; // live preview note
       e.stopPropagation();
       // Right-click must NOT collapse a multi-selection — the context menu acts on it.
@@ -547,8 +560,22 @@ export default function SheetMusic() {
           clipIds: useStore.getState().selection.clipIds,
           trackIds: useStore.getState().selection.trackIds,
         });
-      } else {
-        selectNotes([noteId], additive);
+        return; // de-selecting is not the start of a drag
+      }
+      if (!additive && !cur.includes(noteId)) selectNotes([noteId], false);
+      else if (additive) selectNotes([noteId], true);
+
+      // Arm a drag. It only becomes one once the pointer actually moves.
+      if (pt) {
+        noteDragRef.current = {
+          noteId,
+          grab: pt,
+          dSteps: 0,
+          dTicks: 0,
+          moved: false,
+          px: 0,
+          py: 0,
+        };
       }
     },
     [selectNotes, setSelection],
@@ -559,8 +586,85 @@ export default function SheetMusic() {
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
   }, []);
 
+  /* ---- dragging noteheads: pitch (vertical) and time (horizontal) ---- */
+
+  /** Content-space coordinates of a pointer event on a given page. */
+  const pageCoords = useCallback((page: number, e: PointerEvent): { x: number; y: number } | null => {
+    const svg = pageRefs.current[page]?.querySelector("svg.sm-page") as SVGSVGElement | null;
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    const scale = svg.viewBox.baseVal.width / Math.max(1, rect.width);
+    return {
+      x: (e.clientX - rect.left) * scale - marginRef.current - leftPadRef.current,
+      y: (e.clientY - rect.top) * scale - marginRef.current - (page === 0 ? headerRef.current : 0),
+    };
+  }, []);
+
+  /** Preview a drag by translating the selected noteheads — no re-engraving per frame. */
+  const previewDrag = useCallback((dx: number, dy: number) => {
+    for (const id of useStore.getState().selection.noteIds) {
+      for (const el of headRef.current.get(id) ?? []) {
+        (el as SVGElement).style.translate = `${dx}px ${dy}px`;
+      }
+    }
+  }, []);
+
+  const clearPreview = useCallback(() => {
+    for (const els of headRef.current.values()) {
+      for (const el of els) (el as SVGElement).style.translate = "";
+    }
+  }, []);
+
+  /** Commit a finished note drag. */
+  const commitNoteDrag = useCallback(
+    (dSteps: number, dTicks: number) => {
+      const refs = selectedRefs();
+      if (!refs.length || (dSteps === 0 && dTicks === 0)) return;
+      const deltaBeats = ticksToBeats(dTicks);
+      // Vertical movement is DIATONIC: one staff position, spelled by the key. That is
+      // what dragging on a staff means — chromatic steps would need accidentals the user
+      // never asked for.
+      const repitch = (pitch: number): number => {
+        if (dSteps === 0) return pitch;
+        const step = spellPitch(pitch + transpose, fifths).step;
+        return pitchFromStep(step + dSteps, fifths, transpose);
+      };
+      void apply(moveNotes(refs, deltaBeats, repitch), "Move");
+    },
+    [apply, fifths, selectedRefs, transpose],
+  );
+
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
+      const nd = noteDragRef.current;
+      if (nd) {
+        const c = pageCoords(nd.grab.page, e);
+        if (!c) return;
+        const dxPx = c.x - nd.grab.x;
+        const dyPx = c.y - nd.grab.y;
+        if (!nd.moved && Math.abs(dxPx) + Math.abs(dyPx) < 4) return;
+        nd.moved = true;
+
+        // vertical → whole staff positions
+        const dSteps = -Math.round(dyPx / (layoutRef.current.sp / 2));
+        // horizontal → the grid, measured in real musical position (measures differ in width)
+        const target = pointToTick(nd.grab.system, c.x);
+        const snap = quantizeRef.current > 0 ? quantizeRef.current : TPQ / 4;
+        let dTicks = 0;
+        if (target !== null) {
+          const snapped = Math.max(0, Math.round(target / snap) * snap);
+          dTicks = snapped - Math.round(nd.grab.tick / snap) * snap;
+        }
+        nd.dSteps = dSteps;
+        nd.dTicks = dTicks;
+        // Preview: snap vertically, follow the pointer horizontally (the committed x is
+        // quantised, but a sticky preview reads as lag).
+        nd.px = dxPx;
+        nd.py = (-dSteps * layoutRef.current.sp) / 2;
+        previewDrag(nd.px, nd.py);
+        return;
+      }
+
       const d = dragRef.current;
       if (!d) return;
       const wrap = pageRefs.current[d.page];
@@ -575,6 +679,14 @@ export default function SheetMusic() {
       setMarquee({ page: d.page, x1: d.x, y1: d.y, x2: x, y2: y });
     };
     const onUp = (e: PointerEvent) => {
+      const nd = noteDragRef.current;
+      noteDragRef.current = null;
+      if (nd) {
+        clearPreview();
+        if (nd.moved) commitNoteDrag(nd.dSteps, nd.dTicks);
+        return;
+      }
+
       const d = dragRef.current;
       dragRef.current = null;
       if (!d) return;
@@ -597,7 +709,7 @@ export default function SheetMusic() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [insertNote, notesInRect, selectNotes]);
+  }, [clearPreview, commitNoteDrag, insertNote, notesInRect, pageCoords, previewDrag, selectNotes]);
 
   const marqueeRef = useRef(marquee);
   marqueeRef.current = marquee;

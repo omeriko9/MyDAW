@@ -813,7 +813,11 @@ drag across it to swipe just that range in.
   Toolbar: edit mode + insert length, source, clef (grand / treble / bass / alto + hand split
   point), key signature (auto-detected via a weighted pitch-class profile, or picked), quantise
   grid, transposition, staff size, continuous vs page view, paper size, bar numbers, note names.
-  EDITING: click a notehead to select (shift/ctrl extends), drag the staff to marquee-select, edit
+  EDITING: click a notehead to select (shift/ctrl extends), drag the staff to marquee-select, DRAG a
+  notehead to move the whole selection — vertically in DIATONIC staff positions (spelled by the key,
+  so no accidental appears that the user did not ask for) and horizontally snapped to the quantise
+  grid, previewed by translating the glyphs (CSS `translate`, no re-engraving per frame) and
+  committed on release; notes are clamped inside their own clip. Edit
   mode + click writes a note at the clicked pitch/position (snapped to the quantise grid, auditioned
   via `midi/preview`), Delete removes, and right-click gives Set Length / Split (halves, thirds,
   quarters, at playhead) / Join (merges same-pitch notes into one — how a tie is produced) / Legato /
