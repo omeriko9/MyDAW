@@ -554,6 +554,11 @@ ws.on("event/dirty", (ev) => {
   useStore.setState({ dirty: ev.dirty });
 });
 
+// Open Recent changes live (save / save-as / import) — hello only seeds it at connect.
+ws.on("event/recentProjects", (ev) => {
+  useStore.setState({ recentProjects: ev.recentProjects });
+});
+
 ws.on("event/transport", (ev) => {
   transportBus.emit(ev);
   // Reconcile the metronome mirror when the event carries it (no-op when unchanged).

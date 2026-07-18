@@ -132,7 +132,9 @@ the entire drag.
   `project/importForeign`) since browsers cannot reveal full paths; `dialog/importProject` stays
   as the "Browse (native)…" fallback.
 - `project/recoveryInfo {}` → `{available:bool, autosavePath, mtime}`; `project/recover {}`.
-- Events: `event/projectChanged` (§5.8), `event/dirty {dirty:bool}`.
+- Events: `event/projectChanged` (§5.8), `event/dirty {dirty:bool}`,
+  `event/recentProjects {recentProjects:[{path,name,mtime}]}` (full replacement list, newest
+  first — fired whenever the Open Recent list changes: save, save-as, load, recover, import).
 
 ### 5.2 Commands — tracks
 - `cmd/track.add {kind:"audio"|"midi"|"instrument"|"folder"|"bus", name?, index?, channels?:1|2}`

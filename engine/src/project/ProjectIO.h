@@ -90,6 +90,7 @@ public:
     json recentProjects() const; // [{path,name,mtime}], newest first
     // Remember `path` (project dir OR an imported foreign file — .cpr/.mid; Open
     // Recent re-imports those) as the newest entry. Temp-dir paths are refused.
+    // Broadcasts event/recentProjects {recentProjects} so open UIs refresh live.
     void addRecent(const std::string& path, const std::string& name);
 
     // ----- relink (media/relink, SPEC §5.5) -----------------------------------

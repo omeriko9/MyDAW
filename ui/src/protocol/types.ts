@@ -1532,6 +1532,11 @@ export type RequestType = keyof RequestMap;
 export type RequestPayload<K extends RequestType> = RequestMap[K]["req"];
 export type ReplyPayload<K extends RequestType> = RequestMap[K]["reply"];
 
+/** Open Recent list changed (save / save-as / import) — full replacement, newest first. */
+export interface RecentProjectsEvent {
+  recentProjects: RecentProject[];
+}
+
 /* ============================================================================
  * Event map — every engine→client event with its payload type.
  * ========================================================================= */
@@ -1539,6 +1544,7 @@ export type ReplyPayload<K extends RequestType> = RequestMap[K]["reply"];
 export interface EventMap {
   "event/projectChanged": ProjectChangedEvent;
   "event/dirty": DirtyEvent;
+  "event/recentProjects": RecentProjectsEvent;
   "event/transport": TransportEvent;
   "event/meters": MetersEvent;
   "event/midiActivity": MidiActivityEvent;
@@ -1715,6 +1721,7 @@ export const SettingsMsg = {
 export const Ev = {
   projectChanged: "event/projectChanged",
   dirty: "event/dirty",
+  recentProjects: "event/recentProjects",
   transport: "event/transport",
   meters: "event/meters",
   midiActivity: "event/midiActivity",

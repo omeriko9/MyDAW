@@ -676,6 +676,10 @@ void ProjectIO::addRecent(const std::string& path, const std::string& name) {
     if (!writeTextFileAtomic(recentJsonPath(),
                              out.dump(2, ' ', false, json::error_handler_t::replace), err))
         Log::warn("ProjectIO: cannot write recent.json (%s)", err.c_str());
+    // Keep connected UIs live — hello only delivers the list at connect time, so an
+    // import/save mid-session would otherwise stay invisible until the next restart.
+    if (eventBus_)
+        eventBus_->broadcast("event/recentProjects", json{{"recentProjects", recentProjects()}});
 }
 
 // ----- relink -----------------------------------------------------------------
