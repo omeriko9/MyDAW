@@ -123,8 +123,12 @@ the entire drag.
   asioAvailable, vst3Available}, project: <Project §6>, pluginRegistry:[PluginInfo §5.6],
   recentProjects:[{path,name,mtime}], audioDevices: <as engine/getDevices>, midiInputs:[{id,name}],
   metronome:{enabled:bool, countInBars:0|1|2} /*engine metronome state — same object as §5.4*/}`
-- `project/new {}`, `project/load {path}`, `project/save {}`, `project/saveAs {path}`,
-  `project/loadRecent {path}`. Replies carry `{project}` on load/new. `project/save` with no path
+- `project/new {}`, `project/load {path}`, `project/save {}`, `project/saveAs {path?, auto?}`
+  (`auto:true` with no path → engine picks `<Documents>\MyDAW Projects\<name>`, deduped — used
+  by the UI to silently auto-save a never-saved project before a destructive load/import;
+  destructive flows auto-save instead of confirming, a discard-confirm appears only when the
+  auto-save FAILS), `project/loadRecent {path}`. Replies carry `{project}` on load/new.
+  `project/save` with no path
   yet → error `no_path` (UI then asks engine to open native dialog: `dialog/saveProject {}` →
   `{path|null}`; `dialog/openProject {}` → `{path|null}`; `dialog/importProject {}` →
   `{path|null}`; `dialog/importFiles {}` → `{paths:[..]|null}` — engine shows native IFileDialog).

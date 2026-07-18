@@ -10,8 +10,11 @@
 #endif
 #include <windows.h>
 
+#include <ShlObj.h> // SHGetKnownFolderPath (FOLDERID_Documents) for defaultSaveAsDir
+
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <sstream>
@@ -289,6 +292,36 @@ bool ProjectIO::saveAs(Model& model, const std::string& dir, std::string& err) {
         return false;
     }
     return true;
+}
+
+std::string ProjectIO::defaultSaveAsDir(const std::string& projectName) const {
+    std::string docs;
+    PWSTR w = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, nullptr, &w)))
+        docs = wideToUtf8(w);
+    if (w)
+        CoTaskMemFree(w);
+    if (docs.empty()) {
+        // Shell lookup failed (service down / restricted token) — best-effort fallback.
+        const char* prof = std::getenv("USERPROFILE");
+        docs = prof ? std::string(prof) + "\\Documents" : std::string("C:\\");
+    }
+    std::string name;
+    for (const char c : projectName)
+        name += (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' ||
+                 c == '|' || c == '?' || c == '*' || static_cast<unsigned char>(c) < 0x20)
+                    ? '_'
+                    : c;
+    while (!name.empty() && (name.back() == ' ' || name.back() == '.'))
+        name.pop_back(); // Windows forbids trailing space/dot in folder names
+    if (name.empty())
+        name = "Untitled";
+    const std::string root = pathJoin(docs, "MyDAW Projects");
+    // saveAs appends ".mydaw" to the dir — dedupe against the folder it will create.
+    std::string dir = pathJoin(root, name);
+    for (int n = 2; (dirExists(dir + ".mydaw") || fileExists(dir + ".mydaw")) && n < 1000; ++n)
+        dir = pathJoin(root, name + " " + std::to_string(n));
+    return dir;
 }
 
 bool ProjectIO::saveInternal(Model& model, const std::string& assetSourceDir,

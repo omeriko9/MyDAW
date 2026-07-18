@@ -55,6 +55,8 @@ export const loadProject = (path: string) => ws.request("project/load", { path }
 /** Fails with error code "no_path" if the project was never saved — then use dialogSaveProject. */
 export const saveProject = () => ws.request("project/save", {});
 export const saveProjectAs = (path: string) => ws.request("project/saveAs", { path });
+/** Engine-picked location (Documents\MyDAW Projects\<name>) — silent pre-load/import save. */
+export const autoSaveProjectAs = () => ws.request("project/saveAs", { auto: true });
 export const loadRecentProject = (path: string) => ws.request("project/loadRecent", { path });
 export const getRecoveryInfo = () => ws.request("project/recoveryInfo", {});
 export const recoverProject = () => ws.request("project/recover", {});

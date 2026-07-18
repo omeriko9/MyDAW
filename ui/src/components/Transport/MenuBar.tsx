@@ -121,7 +121,8 @@ function buildFileMenu(): MenuEntry[] {
         { label: "Media Files…", icon: "audioWave", onClick: () => void importFilesFlow() },
         {
           label: "Project (.cpr/.mid)…",
-          icon: "folder",
+          icon: "import",
+          shortcut: "Ctrl+I",
           title: importFormatsTip ?? undefined,
           onClick: () => importProjectFlow(),
         },

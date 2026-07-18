@@ -501,7 +501,16 @@ export interface ProjectLoadRequest {
 }
 
 export interface ProjectSaveAsRequest {
+  /** Omit together with auto:true — the engine picks Documents\MyDAW Projects\<name>. */
+  path?: string;
+  /** True = engine-picked default location (silent auto-save before load/import). */
+  auto?: boolean;
+}
+
+export interface ProjectSaveAsReply {
+  /** project.json path inside the (possibly engine-picked) project folder. */
   path: string;
+  project: Project;
 }
 
 export interface ProjectLoadRecentRequest {
@@ -1413,7 +1422,7 @@ export interface RequestMap {
   "project/new": { req: EmptyObject; reply: ProjectReply };
   "project/load": { req: ProjectLoadRequest; reply: ProjectReply };
   "project/save": { req: EmptyObject; reply: EmptyObject };
-  "project/saveAs": { req: ProjectSaveAsRequest; reply: EmptyObject };
+  "project/saveAs": { req: ProjectSaveAsRequest; reply: ProjectSaveAsReply };
   "project/loadRecent": { req: ProjectLoadRecentRequest; reply: ProjectReply };
   "project/recoveryInfo": { req: EmptyObject; reply: RecoveryInfoReply };
   "project/recover": { req: EmptyObject; reply: ProjectReply };

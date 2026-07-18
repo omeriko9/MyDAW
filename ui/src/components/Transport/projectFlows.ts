@@ -4,11 +4,14 @@
  *
  * SPEC §5.1: project/save with no path yet → error "no_path"; the UI then asks the
  * engine to open a native save dialog (dialog/saveProject) and retries via saveAs.
- * Destructive flows (New / Open / Recent / Recover) confirm first when dirty.
+ * Destructive flows (New / Close / Open / Recent / Import) AUTO-SAVE the current
+ * project first instead of nagging (autoSaveIfDirty) — a confirm only appears if
+ * the auto-save itself fails.
  */
 
 import { ws, WsRequestError } from "../../protocol/ws";
 import {
+  autoSaveProjectAs,
   dialogImportFiles,
   dialogImportProject,
   dialogOpenProject,
@@ -43,20 +46,43 @@ function logFlowError(what: string, e: unknown, toast = true): void {
   }
 }
 
-/** Confirm discarding unsaved changes; true = proceed. */
-export async function confirmDiscardIfDirty(title: string): Promise<boolean> {
+/**
+ * Auto-save the current project before a destructive replace (New / Close / Open /
+ * Recent / Import) — no "unsaved changes?" nag: a saved project saves silently in
+ * place; a never-saved one is saved to an engine-picked folder (project/saveAs
+ * {auto:true} → Documents\MyDAW Projects\<name>, deduped) with a toast saying where
+ * it went. Only a FAILED save falls back to the old discard-confirm, so work is
+ * never silently lost. Returns true = proceed with the destructive flow.
+ */
+async function autoSaveIfDirty(title: string): Promise<boolean> {
   if (!useStore.getState().dirty) return true;
-  return confirmDialog({
-    title,
-    message: "The current project has unsaved changes. Discard them?",
-    confirmLabel: "Discard",
-    danger: true,
-  });
+  try {
+    await saveProject();
+    return true;
+  } catch (e) {
+    if (e instanceof WsRequestError && e.code === "no_path") {
+      try {
+        const { project } = await autoSaveProjectAs();
+        showToast(`"${project.name}" auto-saved to Documents\\MyDAW Projects.`, "info");
+        return true;
+      } catch (e2) {
+        logFlowError("auto-save", e2, false);
+      }
+    } else {
+      logFlowError("auto-save", e, false);
+    }
+    return confirmDialog({
+      title,
+      message: "Auto-saving the current project failed. Discard its unsaved changes?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+  }
 }
 
 export async function newProjectFlow(): Promise<void> {
   try {
-    if (!(await confirmDiscardIfDirty("New Project"))) return;
+    if (!(await autoSaveIfDirty("New Project"))) return;
     await newProject();
   } catch (e) {
     logFlowError("new project", e);
@@ -87,7 +113,7 @@ export async function newWindowFlow(): Promise<void> {
  */
 export async function closeProjectFlow(): Promise<void> {
   try {
-    if (!(await confirmDiscardIfDirty("Close Project"))) return;
+    if (!(await autoSaveIfDirty("Close Project"))) return;
     await newProject();
   } catch (e) {
     logFlowError("close project", e);
@@ -96,7 +122,7 @@ export async function closeProjectFlow(): Promise<void> {
 
 export async function openProjectFlow(): Promise<void> {
   try {
-    if (!(await confirmDiscardIfDirty("Open Project"))) return;
+    if (!(await autoSaveIfDirty("Open Project"))) return;
     const { path } = await dialogOpenProject();
     if (!path) return; // user cancelled the native dialog
     await loadProject(path);
@@ -107,7 +133,7 @@ export async function openProjectFlow(): Promise<void> {
 
 export async function loadRecentFlow(path: string): Promise<void> {
   try {
-    if (!(await confirmDiscardIfDirty("Open Recent Project"))) return;
+    if (!(await autoSaveIfDirty("Open Recent Project"))) return;
     await loadRecentProject(path);
     // Recents include imported foreign projects (.cpr/.mid) — the engine re-imports
     // those, so run the same post-import plugin loading as Import Project.
@@ -188,13 +214,13 @@ export function importProjectFlow(): void {
 }
 
 /**
- * Import a foreign project file by absolute path — destructive like Open, so it confirms
- * first when dirty. project/importForeign: the engine adopts the imported model (dirty,
+ * Import a foreign project file by absolute path — destructive like Open, so the current
+ * project auto-saves first. project/importForeign: the engine adopts the imported model (dirty,
  * no save path) and broadcasts the full project via event/projectChanged.
  * Throws on import failure ("no_provider" | "import_failed") — callers display the error.
  */
 export async function importForeignPathFlow(path: string): Promise<"imported" | "cancelled"> {
-  if (!(await confirmDiscardIfDirty("Import Project"))) return "cancelled";
+  if (!(await autoSaveIfDirty("Import Project"))) return "cancelled";
   await importForeignProject(path);
   await offerPluginRecreation();
   return "imported";
@@ -203,7 +229,7 @@ export async function importForeignPathFlow(path: string): Promise<"imported" | 
 /** Old native-picker import flow — kept as the PastePathDialog "Browse (native)…" fallback. */
 export async function importProjectNativeFlow(): Promise<void> {
   try {
-    if (!(await confirmDiscardIfDirty("Import Project"))) return;
+    if (!(await autoSaveIfDirty("Import Project"))) return;
     const { path } = await dialogImportProject();
     if (!path) return; // user cancelled the native dialog
     await importForeignProject(path);
@@ -268,7 +294,7 @@ export async function importPickedPaths(paths: string[]): Promise<ImportPathsRes
   const mediaPaths = paths.filter((p) => !projExts.has(extensionOf(p)));
 
   if (projectPaths.length > 0) {
-    if (!(await confirmDiscardIfDirty("Import Project"))) return { kind: "none" };
+    if (!(await autoSaveIfDirty("Import Project"))) return { kind: "none" };
     const path = projectPaths[0];
     await importForeignProject(path);
     await offerPluginRecreation();

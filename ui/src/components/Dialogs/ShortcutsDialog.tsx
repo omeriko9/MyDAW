@@ -57,6 +57,7 @@ const GROUPS: Array<{ title: string; items: Binding[] }> = [
       { keys: ["Esc"], what: "Clear selection / cancel gesture" },
       { keys: ["Ctrl+S"], what: "Save project" },
       { keys: ["Ctrl+Shift+S"], what: "Save project as…" },
+      { keys: ["Ctrl+I"], what: "Import project (.cpr / MIDI)" },
     ],
   },
   {

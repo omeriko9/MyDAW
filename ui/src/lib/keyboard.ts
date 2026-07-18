@@ -20,6 +20,7 @@
  *   Delete / Backspace    delete selection (per focus context: notes or clips)
  *   Ctrl+S                save (no_path → native Save As flow)
  *   Ctrl+Shift+S          save as (always the native Save As flow)
+ *   Ctrl+I                import project (.cpr / MIDI — paste-path dialog)
  *   B                     split selected clips at playhead
  *   Q                     quantize to grid — selected notes when the piano roll is
  *                         visible, else the selected MIDI clips (transport "Q" button)
@@ -75,7 +76,11 @@ import {
 } from "../store/actions";
 import { copySelection, cutSelection, findClipById, pasteAt } from "./clipboard";
 import { toggleMetronome } from "../store/metronome";
-import { saveProjectAsFlow, saveProjectFlow } from "../components/Transport/projectFlows";
+import {
+  importProjectFlow,
+  saveProjectAsFlow,
+  saveProjectFlow,
+} from "../components/Transport/projectFlows";
 import { closeContextMenu } from "../components/common/ContextMenu";
 import {
   MAX_ZOOM_X,
@@ -504,14 +509,15 @@ function onKeyDown(e: KeyboardEvent): void {
         else defaultSelectAll();
         return;
       case "i":
-        // Ctrl+Shift+I toggles the agent panel (browser devtools may claim it; the
-        // toolbar icon and View menu remain reliable). Plain Ctrl+I is unused.
-        if (!e.shiftKey) return;
+        // Ctrl+I = Import Project (.cpr / MIDI). Ctrl+Shift+I toggles the agent panel
+        // (browser devtools may claim it; the toolbar icon and View menu remain reliable).
         consume();
         if (e.repeat) return;
-        {
+        if (e.shiftKey) {
           const st = useStore.getState();
           st.setPanels({ agent: !st.panels.agent });
+        } else {
+          importProjectFlow();
         }
         return;
       default:

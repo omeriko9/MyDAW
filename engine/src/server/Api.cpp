@@ -299,7 +299,11 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         return json{{"path", app_.projectIO.projectJsonPath()}};
     }
     if (type == "project/saveAs") {
-        const std::string path = getOr(p, "path", "");
+        std::string path = getOr(p, "path", "");
+        // auto:true — engine picks <Documents>\MyDAW Projects\<name> (deduped). Used by
+        // the UI to silently save a never-saved project before load/import replaces it.
+        if (path.empty() && getOr(p, "auto", false))
+            path = app_.projectIO.defaultSaveAsDir(app_.model.project.name);
         if (path.empty()) {
             ec = "bad_request";
             em = "path required";

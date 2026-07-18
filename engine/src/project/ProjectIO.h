@@ -63,6 +63,12 @@ public:
     bool hasPath() const { return !projectDir_.empty(); }
     std::string projectJsonPath() const; // "" when no path
 
+    // Engine-picked location for an automatic Save As (project/saveAs {auto:true} — the
+    // UI auto-saves a never-saved project before load/import replaces it):
+    // <Documents>\MyDAW Projects\<sanitized name>, deduped " 2"/" 3"… against the
+    // "<dir>.mydaw" folder saveAs will create. Falls back to %USERPROFILE%\Documents.
+    std::string defaultSaveAsDir(const std::string& projectName) const;
+
     // ----- dirty tracking ----------------------------------------------------
     // Broadcasts event/dirty {dirty} via the EventBus on transitions.
     void markDirty();

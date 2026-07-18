@@ -194,8 +194,8 @@ export default function PastePathDialog() {
       <div className="col gap2">
         <div className="dim">
           Browsers can't read full file paths, so paste or type the absolute path of the
-          project file to import. It opens as a new project (unsaved changes are confirmed
-          first).
+          project file to import. It opens as a new project (the current project is
+          auto-saved first).
         </div>
         <div className="row gap1">
           <input

@@ -2517,14 +2517,16 @@
     },
     "ProjectSaveAsRequest": {
       "additionalProperties": false,
+      "description": "Provide path, or auto:true to save to an engine-picked default (Documents\\MyDAW Projects\\<name>, deduped).",
       "properties": {
+        "auto": {
+          "type": "boolean"
+        },
         "path": {
           "type": "string"
         }
       },
-      "required": [
-        "path"
-      ],
+      "required": [],
       "type": "object"
     },
     "ProjectUiState": {
@@ -6757,7 +6759,7 @@
     {
       "name": "project/saveAs",
       "category": "project",
-      "description": "Save the current project to a new explicit path.",
+      "description": "Save the current project to a new explicit path, or with auto:true to an engine-picked default folder.",
       "target": "engine",
       "mode": "write",
       "traits": [

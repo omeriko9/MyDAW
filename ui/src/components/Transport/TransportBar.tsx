@@ -50,7 +50,7 @@ import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
 import TempoMapEditor from "./TempoMapEditor";
 import { DEFAULT_GRID, setGridLocal } from "./gridLocal";
-import { saveProjectFlow } from "./projectFlows";
+import { importProjectFlow, saveProjectFlow } from "./projectFlows";
 import "./transport.css";
 
 const fire = (p: Promise<unknown>): void => {
@@ -585,6 +585,11 @@ export default function TransportBar() {
           />
           <span className="tb-master-label">Master</span>
         </div>
+        <IconButton
+          icon="import"
+          tooltip="Import Project (.cpr / MIDI) — Ctrl+I"
+          onClick={() => importProjectFlow()}
+        />
         <IconButton
           icon="warning"
           tooltip="Panic — all notes off / reset"

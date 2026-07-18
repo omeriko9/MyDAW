@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "3dae54283a8f518910b17f24f487796c90c8e62831522be8240aaea502a4d919";
+export const AGENT_CATALOG_SHA256 = "d72b8f10a5d614adf4c6a5556fd7dc598d8c9397e6b03ed14378131358725f64";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2545,14 +2545,16 @@ export const AGENT_CATALOG: AgentCatalog = {
     },
     "ProjectSaveAsRequest": {
       "additionalProperties": false,
+      "description": "Provide path, or auto:true to save to an engine-picked default (Documents\\MyDAW Projects\\<name>, deduped).",
       "properties": {
+        "auto": {
+          "type": "boolean"
+        },
         "path": {
           "type": "string"
         }
       },
-      "required": [
-        "path"
-      ],
+      "required": [],
       "type": "object"
     },
     "ProjectUiState": {
@@ -6785,7 +6787,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "project/saveAs",
       "category": "project",
-      "description": "Save the current project to a new explicit path.",
+      "description": "Save the current project to a new explicit path, or with auto:true to an engine-picked default folder.",
       "target": "engine",
       "mode": "write",
       "traits": [
