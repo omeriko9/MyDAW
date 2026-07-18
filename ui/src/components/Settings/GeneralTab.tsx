@@ -7,6 +7,13 @@ import React, { useEffect, useState } from "react";
 import type { AppSettings } from "../../protocol/types";
 import { applyTheme, THEMES, useThemeName, type ThemeName } from "../../lib/theme";
 import { getSettings, setSettings } from "../../store/actions";
+import { usePrefState } from "../../lib/prefs";
+import {
+  RECOVERY_MODE_DEFAULT,
+  RECOVERY_MODE_PREF,
+  isRecoveryMode,
+  type RecoveryMode,
+} from "../Transport/projectFlows";
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 
@@ -53,6 +60,11 @@ export function GeneralTab() {
   };
 
   const theme = useThemeName();
+  const [recovery, setRecovery] = usePrefState<RecoveryMode>(
+    RECOVERY_MODE_PREF,
+    RECOVERY_MODE_DEFAULT,
+    isRecoveryMode,
+  );
 
   return (
     <div className="col gap2">
@@ -82,6 +94,22 @@ export function GeneralTab() {
             onCommit={commitAutosave}
           />
           <span className="sett-note">autosaves only while the project is dirty</span>
+        </div>
+        <span className="sett-label">Crash recovery</span>
+        <div className="row gap1">
+          <Select
+            value={recovery}
+            options={[
+              { value: "auto", label: "Recover automatically" },
+              { value: "ask", label: "Ask every time" },
+              { value: "never", label: "Never recover" },
+            ]}
+            onChange={(v) => setRecovery(v as RecoveryMode)}
+            width={180}
+          />
+          <span className="sett-note">
+            after an unclean shutdown; saved per user
+          </span>
         </div>
       </div>
       <div className="sett-note">

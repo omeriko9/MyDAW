@@ -132,10 +132,15 @@ the entire drag.
   yet → error `no_path` (UI then asks engine to open native dialog: `dialog/saveProject {}` →
   `{path|null}`; `dialog/openProject {}` → `{path|null}`; `dialog/importProject {}` →
   `{path|null}`; `dialog/importFiles {}` → `{paths:[..]|null}` — engine shows native IFileDialog).
-  File>Import>Project… in the UI prefers a web paste-path dialog (absolute path →
-  `project/importForeign`) since browsers cannot reveal full paths; `dialog/importProject` stays
-  as the "Browse (native)…" fallback.
-- `project/recoveryInfo {}` → `{available:bool, autosavePath, mtime}`; `project/recover {}`.
+  File>Import>Project… (also Ctrl+I / the transport-bar Import button) opens the NATIVE picker
+  `dialog/importProject` directly, then `project/importForeign` with the returned absolute path;
+  the web paste-path dialog is the fallback for when that picker cannot be shown (browsers
+  cannot reveal full paths on their own).
+- `project/recoveryInfo {}` → `{available:bool, autosavePath, mtime}`; `project/recover {}`. The UI
+  checks once per app load and honours the per-user pref `mydaw.project.recoveryMode`
+  (Settings → General → Crash recovery): `auto` (DEFAULT — recover silently + toast, prompt only
+  if the recover call fails), `ask` (the Recover/Discard dialog), `never` (skip the check
+  entirely; the autosave stays on disk, it is just never offered).
 - Events: `event/projectChanged` (§5.8), `event/dirty {dirty:bool}`,
   `event/recentProjects {recentProjects:[{path,name,mtime}]}` (full replacement list, newest
   first — fired whenever the Open Recent list changes: save, save-as, load, recover, import).

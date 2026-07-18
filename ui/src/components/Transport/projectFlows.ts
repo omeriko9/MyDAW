@@ -24,10 +24,12 @@ import {
   loadProject,
   loadRecentProject,
   newProject,
+  recoverProject,
   recreatePlugins,
   saveProject,
   saveProjectAs,
 } from "../../store/actions";
+import { loadPref, oneOf } from "../../lib/prefs";
 import { useStore } from "../../store/store";
 import { confirmDialog } from "../Dialogs/confirm";
 import { openImportPathDialog } from "../Dialogs/PastePathDialog";
@@ -204,13 +206,30 @@ export async function offerPluginRecreation(): Promise<void> {
 }
 
 /**
- * Import a foreign project (e.g. .cpr / Standard MIDI File) as a NEW project.
- * Entry point (File → Import → Project…) opens the paste-path dialog — browsers cannot
- * read full OS paths and the native picker is flaky, so typing/pasting a path is the
- * primary flow; the dialog's "Browse (native)…" button falls back to the old picker.
+ * Import a foreign project (.cpr / Standard MIDI File) as a NEW project — File → Import →
+ * Project…, Ctrl+I and the transport-bar button all land here. Opens the engine's NATIVE
+ * file browser immediately (IFileDialog on an STA thread; the engine returns the absolute
+ * path, which the browser itself could never read). The paste-path dialog is only a
+ * fallback for when the engine cannot show the picker at all.
  */
 export function importProjectFlow(): void {
-  openImportPathDialog();
+  void (async () => {
+    let path: string | null = null;
+    try {
+      ({ path } = await dialogImportProject());
+    } catch (e) {
+      logFlowError("import project", e, false);
+      showToast("Couldn't open the file browser — paste the project path instead.", "info");
+      openImportPathDialog();
+      return;
+    }
+    if (!path) return; // user cancelled the native dialog
+    try {
+      await importForeignPathFlow(path);
+    } catch (e) {
+      logFlowError("import project", e); // "no_provider" | "import_failed"
+    }
+  })();
 }
 
 /**
@@ -226,14 +245,15 @@ export async function importForeignPathFlow(path: string): Promise<"imported" | 
   return "imported";
 }
 
-/** Old native-picker import flow — kept as the PastePathDialog "Browse (native)…" fallback. */
+/**
+ * Native picker → import, used by the PastePathDialog's "Browse (native)…" button.
+ * The picker comes FIRST: cancelling it must not have auto-saved anything.
+ */
 export async function importProjectNativeFlow(): Promise<void> {
   try {
-    if (!(await autoSaveIfDirty("Import Project"))) return;
     const { path } = await dialogImportProject();
     if (!path) return; // user cancelled the native dialog
-    await importForeignProject(path);
-    await offerPluginRecreation();
+    await importForeignPathFlow(path);
   } catch (e) {
     logFlowError("import project", e); // "no_provider" | "import_failed" land here
   }
@@ -324,18 +344,50 @@ export async function importFilesFlow(): Promise<void> {
 }
 
 /* ============================================================================
- * Crash-recovery offer (SPEC §5.1 / §6) — checked once per app load after the
- * first successful connection; DialogsHost (U5) renders store.dialogs.recovery.
+ * Crash recovery (SPEC §5.1 / §6) — checked once per app load after the first
+ * successful connection. This is the ONLY place that decides; RecoveryDialog (U5)
+ * just renders store.dialogs.recovery when the mode is "ask".
  * ========================================================================= */
+
+export type RecoveryMode = "auto" | "ask" | "never";
+/** Settings → General; per-user (localStorage), read synchronously at check time. */
+export const RECOVERY_MODE_PREF = "project.recoveryMode";
+export const RECOVERY_MODES: RecoveryMode[] = ["auto", "ask", "never"];
+export const RECOVERY_MODE_DEFAULT: RecoveryMode = "auto";
+export const isRecoveryMode = oneOf<string>(...RECOVERY_MODES);
+
+/**
+ * Default "auto": after an unclean shutdown the autosave is restored silently (with a
+ * toast) instead of prompting — the prompt was pure friction, and the answer is almost
+ * always "yes, give me my work back". "ask" restores the old prompt; "never" skips
+ * recovery entirely (the autosave stays on disk, it is simply not offered).
+ */
+export function recoveryMode(): RecoveryMode {
+  return loadPref<RecoveryMode>(RECOVERY_MODE_PREF, RECOVERY_MODE_DEFAULT, isRecoveryMode);
+}
 
 let recoveryChecked = false;
 
 export async function checkRecoveryOnce(): Promise<void> {
   if (recoveryChecked) return;
   recoveryChecked = true;
+  const mode = recoveryMode();
+  if (mode === "never") return; // don't even ask the engine
   try {
     const info = await getRecoveryInfo();
-    if (info.available) {
+    if (!info.available) return;
+    if (mode === "ask") {
+      useStore.getState().setDialogs({ recovery: info });
+      return;
+    }
+    try {
+      const { project } = await recoverProject();
+      useStore.getState().setProject(project);
+      showToast("Recovered your unsaved project from the last session.", "success");
+    } catch (e) {
+      // Auto-recovery failed — fall back to the prompt rather than silently dropping
+      // the user's work on the floor.
+      logFlowError("auto-recovery", e, false);
       useStore.getState().setDialogs({ recovery: info });
     }
   } catch (e) {

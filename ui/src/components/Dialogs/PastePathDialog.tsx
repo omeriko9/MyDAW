@@ -1,11 +1,11 @@
 /**
  * PastePathDialog (owned by U2) — "Import Project by path".
  *
- * Browsers cannot read full OS paths from a file picker and the engine's native dialog
- * is flaky, so the primary import flow is: paste/type the absolute path of the project
- * file (.cpr / .mid / …) → project/importForeign {path}. Failures (the engine's
- * "import_failed" / "no_provider" text) display inline; "Browse (native)…" falls back
- * to the old dialog/importProject → importForeign flow.
+ * FALLBACK path for Import Project: paste/type the absolute path of the project file
+ * (.cpr / .mid / …) → project/importForeign {path}. The primary flow is now the engine's
+ * native file browser (projectFlows.importProjectFlow); this dialog opens only when the
+ * engine cannot show that picker, or on demand. Failures (the engine's "import_failed" /
+ * "no_provider" text) display inline; "Browse (native)…" retries the native picker.
  *
  * Opened imperatively via openImportPathDialog() (module-level open flag — the dialogs
  * store slice is owned elsewhere); <PastePathDialog /> is mounted once from DialogsHost.

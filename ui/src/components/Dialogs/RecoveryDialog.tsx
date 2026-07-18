@@ -1,12 +1,12 @@
 /**
- * Crash-recovery prompt (U5) — once per app session, after the first successful
- * session/hello, query project/recoveryInfo; if an autosave is available offer
- * Recover / Discard (SPEC §5.1, §6 crash recovery).
+ * Crash-recovery prompt (U5) — a pure renderer of store.dialogs.recovery. WHETHER to
+ * prompt is decided in one place only, projectFlows.checkRecoveryOnce (Settings →
+ * General → Crash recovery: auto / ask / never); this dialog is what "ask" shows.
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import { useStore } from "../../store/store";
-import { getRecoveryInfo, recoverProject } from "../../store/actions";
+import { recoverProject } from "../../store/actions";
 import { Modal } from "../common/Modal";
 
 function errText(e: unknown): string {
@@ -25,21 +25,8 @@ export default function RecoveryDialog() {
   const recovery = useStore((s) => s.dialogs.recovery);
   const setDialogs = useStore((s) => s.setDialogs);
   const setProject = useStore((s) => s.setProject);
-  const engineInfo = useStore((s) => s.engineInfo);
-  const checked = useRef(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  /* hello completed ⇒ engineInfo is set; check recovery exactly once per session */
-  useEffect(() => {
-    if (!engineInfo || checked.current) return;
-    checked.current = true;
-    getRecoveryInfo()
-      .then((info) => {
-        if (info.available) setDialogs({ recovery: info });
-      })
-      .catch((e) => console.error("[recovery] recoveryInfo failed:", e));
-  }, [engineInfo, setDialogs]);
 
   const open = recovery !== null && recovery.available;
   const close = () => setDialogs({ recovery: null });
@@ -83,6 +70,10 @@ export default function RecoveryDialog() {
         </div>
         {recovery?.autosavePath ? <div className="dlg-path">{recovery.autosavePath}</div> : null}
         {when ? <div className="dim">Autosaved {when}</div> : null}
+        <div className="dim">
+          Settings → General → Crash recovery can restore this automatically instead of
+          asking.
+        </div>
         {err ? <div className="dlg-error">{err}</div> : null}
       </div>
     </Modal>
