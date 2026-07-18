@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "d11fe04aeef7372a8bf86ba22ced38f2c480c6d74cf02f3455babcecc32a7350";
+export const AGENT_CATALOG_SHA256 = "bded4c53b8e9e4d0a91571646ce14f1bbf6b4747fb2ede1b308df681af76ad60";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -148,8 +148,12 @@ export const AGENT_CATALOG: AgentCatalog = {
     },
     "AutomationAddPoint": {
       "additionalProperties": false,
-      "description": "add-point shape per SPEC §5.3: {t, v, curve?} (t = beat, v = value).",
+      "description": "add-point shape per SPEC §5.3: {t, v, curve?} where t = beat and v = value. The read views return {beat, value, curve}; those spellings are accepted here too, so points can be round-tripped. curve is the bend from THIS point to the next (-1..1).",
       "properties": {
+        "beat": {
+          "description": "alias for t",
+          "type": "number"
+        },
         "curve": {
           "type": "number"
         },
@@ -158,11 +162,57 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "v": {
           "type": "number"
+        },
+        "value": {
+          "description": "alias for v",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "AutomationClearRequest": {
+      "additionalProperties": false,
+      "description": "Remove automation points from a lane. With no span the whole lane is cleared (and the lane itself removed). A span may be given in beats or 1-based bars.",
+      "properties": {
+        "fromBar": {
+          "type": "number"
+        },
+        "fromBeat": {
+          "type": "number"
+        },
+        "paramRef": {
+          "description": "\"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\"",
+          "type": "string"
+        },
+        "toBar": {
+          "type": "number"
+        },
+        "toBeat": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
         }
       },
       "required": [
-        "t",
-        "v"
+        "trackId",
+        "paramRef"
+      ],
+      "type": "object"
+    },
+    "AutomationGetTargetsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "description": "case-insensitive substring filter over target names (e.g. \"cutoff\")",
+          "type": "string"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
       ],
       "type": "object"
     },
@@ -241,6 +291,60 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "AutomationRampRequest": {
+      "additionalProperties": false,
+      "description": "Write a value ramp over a span of musical time. Give the span in beats (fromBeat/toBeat) OR in 1-BASED bars (fromBar/toBar, matching the ruler and how people speak); bars are converted against the project's time-signature map, including meter changes. By default the ramp REPLACES any existing points inside the span. Two points are enough for a straight ramp because the engine interpolates between them; `steps` is only for shapes interpolation cannot express.",
+      "properties": {
+        "curve": {
+          "description": "bend of the ramp, -1..1 (0 = linear, <0 = fast start, >0 = slow start)",
+          "type": "number"
+        },
+        "fromBar": {
+          "description": "1-based bar the ramp starts at",
+          "type": "number"
+        },
+        "fromBeat": {
+          "type": "number"
+        },
+        "fromValue": {
+          "description": "value at the start (see automation/getTargets for the range)",
+          "type": "number"
+        },
+        "paramRef": {
+          "description": "\"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\"",
+          "type": "string"
+        },
+        "replaceRange": {
+          "description": "clear existing points inside the span first (default true)",
+          "type": "boolean"
+        },
+        "steps": {
+          "description": "0 or 1 = a plain two-point ramp (default); >1 writes that many intermediate points",
+          "type": "number"
+        },
+        "toBar": {
+          "description": "1-based bar the ramp ends at",
+          "type": "number"
+        },
+        "toBeat": {
+          "type": "number"
+        },
+        "toValue": {
+          "description": "value at the end",
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "paramRef",
+        "fromValue",
+        "toValue"
+      ],
+      "type": "object"
+    },
     "AutomationSetRequest": {
       "additionalProperties": false,
       "properties": {
@@ -273,6 +377,90 @@ export const AGENT_CATALOG: AgentCatalog = {
       "required": [
         "trackId",
         "paramRef"
+      ],
+      "type": "object"
+    },
+    "AutomationTarget": {
+      "additionalProperties": false,
+      "description": "One automatable target on a track, with the exact paramRef to pass to cmd/automation.set / .ramp / .clear. Plugin parameter NAMES are only available while the plugin is running: source \"live\" carries real names and units, source \"model\" means the plugin is not loaded and only numeric ids are known.",
+      "properties": {
+        "instanceId": {
+          "description": "plugin targets only",
+          "type": "number"
+        },
+        "kind": {
+          "description": "\"track\" | \"send\" | \"plugin\"",
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "name": {
+          "description": "human-readable, e.g. \"Pro-Q 3 — Band 1 Freq\"",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "paramId": {
+          "description": "plugin targets only",
+          "type": "number"
+        },
+        "paramName": {
+          "type": "string"
+        },
+        "paramRef": {
+          "type": "string"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "source": {
+          "description": "\"live\" | \"model\"",
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "value": {
+          "description": "current value",
+          "type": "number"
+        },
+        "valueText": {
+          "description": "formatted current value, live plugins only",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paramRef",
+        "name",
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "AutomationTargetsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "items": {
+            "$ref": "#/schemas/AutomationTarget"
+          },
+          "type": "array"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "trackName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "trackId",
+        "targets"
       ],
       "type": "object"
     },
@@ -3378,6 +3566,108 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "type": "object"
     },
+    "UiLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "browser": {
+          "type": "boolean"
+        },
+        "inspector": {
+          "type": "boolean"
+        },
+        "minimap": {
+          "type": "boolean"
+        },
+        "agent": {
+          "type": "boolean"
+        },
+        "bottomTab": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "mixer",
+                "pianoRoll",
+                "clipEditor",
+                "sheetMusic",
+                "visualizer"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "browser",
+        "inspector",
+        "minimap",
+        "agent",
+        "bottomTab"
+      ]
+    },
+    "UiSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "noteIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "trackIds",
+        "clipIds",
+        "noteIds"
+      ]
+    },
+    "UiViewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zoomX": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "zoomY": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scrollX": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scrollY": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "zoomX",
+        "zoomY",
+        "scrollX",
+        "scrollY"
+      ]
+    },
     "UndoRedoReply": {
       "additionalProperties": false,
       "description": "Reply also triggers a full event/projectChanged (SPEC §5.3).",
@@ -3500,115 +3790,129 @@ export const AGENT_CATALOG: AgentCatalog = {
         "gain"
       ],
       "type": "object"
-    },
-    "UiSelection": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "trackIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        },
-        "clipIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        },
-        "noteIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "trackIds",
-        "clipIds",
-        "noteIds"
-      ]
-    },
-    "UiLayout": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "browser": {
-          "type": "boolean"
-        },
-        "inspector": {
-          "type": "boolean"
-        },
-        "minimap": {
-          "type": "boolean"
-        },
-        "agent": {
-          "type": "boolean"
-        },
-        "bottomTab": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "mixer",
-                "pianoRoll",
-                "clipEditor",
-                "sheetMusic",
-                "visualizer"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "browser",
-        "inspector",
-        "minimap",
-        "agent",
-        "bottomTab"
-      ]
-    },
-    "UiViewport": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "zoomX": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "zoomY": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "scrollX": {
-          "type": "number",
-          "minimum": 0
-        },
-        "scrollY": {
-          "type": "number",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "zoomX",
-        "zoomY",
-        "scrollX",
-        "scrollY"
-      ]
     }
   },
   "operations": [
     {
+      "name": "automation/getTargets",
+      "category": "automation",
+      "description": "List every automatable target on a track (volume, pan, sends, plugin params) with its exact paramRef, human name, current value and range.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationGetTargetsRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/AutomationTargetsReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "match": "cutoff"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/automation.clear",
+      "category": "automation",
+      "description": "Remove automation points from a lane, either entirely or only within a span of bars/beats.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationClearRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "volume",
+            "fromBar": 4,
+            "toBar": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/automation.ramp",
+      "category": "automation",
+      "description": "Ramp an automated value from one level to another across a span of bars or beats (e.g. open a filter from bar 4 to bar 8).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationRampRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "plugin:31:2",
+            "fromBar": 4,
+            "toBar": 8,
+            "fromValue": 0.2,
+            "toValue": 0.9
+          }
+        },
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "volume",
+            "fromBeat": 0,
+            "toBeat": 16,
+            "fromValue": 0,
+            "toValue": 1
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/automation.set",
       "category": "automation",
-      "description": "Add, update, and remove points in a channel automation lane.",
+      "description": "Add, update, and remove points in a channel automation lane. Adjacent points interpolate, so a pair of points is already a ramp (see cmd/automation.ramp).",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -3635,7 +3939,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         {
           "input": {
             "trackId": 7,
-            "paramRef": "track:7:volume",
+            "paramRef": "volume",
             "add": [
               {
                 "t": 0,
@@ -3679,7 +3983,7 @@ export const AGENT_CATALOG: AgentCatalog = {
               {
                 "controller": 1,
                 "beat": 0,
-                "value": 64
+                "value": 0.5
               }
             ]
           }
@@ -6132,7 +6436,7 @@ export const AGENT_CATALOG: AgentCatalog = {
       "examples": [
         {
           "input": {
-            "paramRef": "track:7:volume"
+            "paramRef": "volume"
           }
         }
       ]
@@ -6170,7 +6474,7 @@ export const AGENT_CATALOG: AgentCatalog = {
       "examples": [
         {
           "input": {
-            "paramRef": "track:7:volume"
+            "paramRef": "volume"
           }
         }
       ]
@@ -7746,7 +8050,9 @@ export const AGENT_CATALOG: AgentCatalog = {
             "type": "string",
             "enum": [
               "dark",
-              "light"
+              "light",
+              "slate",
+              "sepia"
             ]
           }
         },
@@ -7762,7 +8068,9 @@ export const AGENT_CATALOG: AgentCatalog = {
             "type": "string",
             "enum": [
               "dark",
-              "light"
+              "light",
+              "slate",
+              "sepia"
             ]
           }
         },
@@ -7958,6 +8266,9 @@ export const AGENT_CATALOG: AgentCatalog = {
   ]
 };
 export const ENGINE_OPERATION_NAMES = [
+  "automation/getTargets",
+  "cmd/automation.clear",
+  "cmd/automation.ramp",
   "cmd/automation.set",
   "cmd/cc.edit",
   "cmd/clip.addAudio",
@@ -8075,6 +8386,8 @@ export const UI_OPERATION_NAMES = [
   "ui/viewport.set"
 ] as const;
 export const BATCHABLE_OPERATION_NAMES = [
+  "cmd/automation.clear",
+  "cmd/automation.ramp",
   "cmd/automation.set",
   "cmd/cc.edit",
   "cmd/clip.addAudio",
@@ -8289,6 +8602,18 @@ export const REQUEST_COVERAGE = {
   "cmd/automation.set": {
     "kind": "operation",
     "operation": "cmd/automation.set"
+  },
+  "cmd/automation.ramp": {
+    "kind": "operation",
+    "operation": "cmd/automation.ramp"
+  },
+  "cmd/automation.clear": {
+    "kind": "operation",
+    "operation": "cmd/automation.clear"
+  },
+  "automation/getTargets": {
+    "kind": "operation",
+    "operation": "automation/getTargets"
   },
   "cmd/marker.add": {
     "kind": "operation",
@@ -8571,7 +8896,7 @@ export interface UiOperationMap {
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };
   "ui/selection.get": { req: {  }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
   "ui/selection.set": { req: { "selection": { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; }; "mode"?: "replace" | "add" | "toggle"; }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
-  "ui/theme.set": { req: { "theme": "dark" | "light"; }; reply: { "theme": "dark" | "light"; } };
+  "ui/theme.set": { req: { "theme": "dark" | "light" | "slate" | "sepia"; }; reply: { "theme": "dark" | "light" | "slate" | "sepia"; } };
   "ui/tool.set": { req: { "tool": "select" | "draw" | "erase" | "split"; }; reply: { "tool": "select" | "draw" | "erase" | "split"; } };
   "ui/viewport.set": { req: (unknown) | (unknown) | (unknown) | (unknown) | (unknown); reply: { "zoomX": number; "zoomY": number; "scrollX": number; "scrollY": number; } };
 }
@@ -8583,10 +8908,42 @@ export type UiOperationHandlers = {
 };
 
 export const ENGINE_OPERATION_EXAMPLES = {
+  "automation/getTargets": [
+    {
+      "trackId": 7,
+      "match": "cutoff"
+    }
+  ],
+  "cmd/automation.clear": [
+    {
+      "trackId": 7,
+      "paramRef": "volume",
+      "fromBar": 4,
+      "toBar": 8
+    }
+  ],
+  "cmd/automation.ramp": [
+    {
+      "trackId": 7,
+      "paramRef": "plugin:31:2",
+      "fromBar": 4,
+      "toBar": 8,
+      "fromValue": 0.2,
+      "toValue": 0.9
+    },
+    {
+      "trackId": 7,
+      "paramRef": "volume",
+      "fromBeat": 0,
+      "toBeat": 16,
+      "fromValue": 0,
+      "toValue": 1
+    }
+  ],
   "cmd/automation.set": [
     {
       "trackId": 7,
-      "paramRef": "track:7:volume",
+      "paramRef": "volume",
       "add": [
         {
           "t": 0,
@@ -8602,7 +8959,7 @@ export const ENGINE_OPERATION_EXAMPLES = {
         {
           "controller": 1,
           "beat": 0,
-          "value": 64
+          "value": 0.5
         }
       ]
     }
@@ -9056,12 +9413,12 @@ export const ENGINE_OPERATION_EXAMPLES = {
   ],
   "midimap/learn": [
     {
-      "paramRef": "track:7:volume"
+      "paramRef": "volume"
     }
   ],
   "midimap/remove": [
     {
-      "paramRef": "track:7:volume"
+      "paramRef": "volume"
     }
   ],
   "plugin/closeEditor": [

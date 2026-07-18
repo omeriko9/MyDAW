@@ -30,6 +30,7 @@ import {
 } from "../../store/actions";
 import { Section } from "./Section";
 import { EqSection } from "./EqSection";
+import { inAppOnly, openBestEditor } from "../PluginEditor/openEditor";
 import {
   ColorSwatches,
   GainDbDrag,
@@ -440,7 +441,16 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
                   ps && (ps.state === "crashed" || ps.state === "timeout" || ps.state === "failed");
                 const warnState = ps && (ps.state === "loading" || ps.state === "restarting");
                 return (
-                  <div className={"insp-item" + (ins.bypass ? " bypassed" : "")} key={ins.instanceId}>
+                  <div
+                    className={"insp-item clickable" + (ins.bypass ? " bypassed" : "")}
+                    key={ins.instanceId}
+                    onDoubleClick={() => void openBestEditor(ins)}
+                    title={
+                      inAppOnly(ins)
+                        ? "Double-click to open the editor"
+                        : "Double-click to open the plug-in's own window"
+                    }
+                  >
                     <span className="faint mono" style={{ flex: "0 0 auto" }}>
                       {i + 1}
                     </span>

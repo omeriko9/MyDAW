@@ -324,7 +324,7 @@ bool readBool(const json& where, const char* key, bool& value, bool& present,
 
 void addTrackFields(FieldSet& fields) {
     static const char* names[] = {
-        "id", "kind", "name", "color", "height", "parentId", "channels", "volume",
+        "id", "index", "kind", "name", "color", "height", "parentId", "channels", "volume",
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
         "outputTarget", "frozen", "frozenAssetId", "midiTarget", "vcaId", "eq",
         "clipCount", "insertCount", "sendCount", "automationLaneCount", "takeFolderCount",
@@ -332,6 +332,9 @@ void addTrackFields(FieldSet& fields) {
     fields.insert(std::begin(names), std::end(names));
 }
 
+// index is the track's 1-based position in the arrangement — what a user means by
+// "channel 3". It is not stored on the track (order is the vector's), so the callers
+// below stamp it while walking the list.
 json trackSummary(const Track& track) {
     json item{{"id", track.id}, {"kind", trackKindToString(track.kind)},
               {"name", track.name}, {"color", track.color}, {"channels", track.channels},
@@ -701,10 +704,22 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
         inspectTracks(app, budget);
         if (hasTrackId && !ensureTrack(app, trackId, errCode, errMsg))
             return json();
+        // 1-based arrangement position, so "channel 3" is answerable. Master is not
+        // numbered — it is not a channel in the strip-counting sense.
+        const auto indexOf = [&](const Track& t) -> int {
+            const auto& list = app.model.project.tracks;
+            for (size_t i = 0; i < list.size(); ++i)
+                if (list[i].id == t.id)
+                    return static_cast<int>(i) + 1;
+            return 0;
+        };
         if (single) {
             Track* track = app.model.trackById(trackId);
             budget.inspect(track->eq.bands.size(), "track EQ bands");
-            items.push_back(trackSummary(*track));
+            json item = trackSummary(*track);
+            if (const int ix = indexOf(*track))
+                item["index"] = ix;
+            items.push_back(std::move(item));
         } else {
             std::string kind;
             std::string name;
@@ -745,7 +760,10 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 if (hasName && track.name != name)
                     return;
                 budget.inspect(track.eq.bands.size(), "track EQ bands");
-                items.push_back(trackSummary(track));
+                json item = trackSummary(track);
+                if (const int ix = indexOf(track))
+                    item["index"] = ix;
+                items.push_back(std::move(item));
             };
             for (Track& track : app.model.project.tracks)
                 add(track);

@@ -941,6 +941,8 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/notes.quantize")   return notesQuantize(p, r);
     if (type == "cmd/cc.edit")          return ccEdit(p, r);
     if (type == "cmd/automation.set")   return automationSet(p, r);
+    if (type == "cmd/automation.ramp")  return automationRamp(p, r);
+    if (type == "cmd/automation.clear") return automationClear(p, r);
     if (type == "cmd/marker.add")       return markerAdd(p, r);
     if (type == "cmd/marker.set")       return markerSet(p, r);
     if (type == "cmd/marker.remove")    return markerRemove(p, r);
@@ -2665,6 +2667,205 @@ json CommandProcessor::automationSet(const json& p, CmdResult& r) {
     // already-empty lane IS a change.
     r.mutated = anyOp || laneExisted == laneRemoved;
     r.label = "Edit Automation";
+    r.structural = r.mutated;
+    r.scope = "track";
+    r.eventTrackIds.push_back(trackId);
+    return json::object();
+}
+
+namespace {
+
+/** True for the paramRefs an automation lane may address (SPEC §5.3). */
+bool validParamRef(const std::string& ref) {
+    return ref == "volume" || ref == "pan" || startsWith(ref, "send:") || startsWith(ref, "plugin:");
+}
+
+/**
+ * Beat where a 0-based bar starts, honouring every time-signature change. Mirrors
+ * TempoMap::beatAtBar, recomputed from the model so commands do not need the runtime map.
+ */
+double beatAtBar0(const Model& m, int bar) {
+    const auto& sigs = m.project.timeSigMap;
+    if (sigs.empty())
+        return static_cast<double>(bar) * 4.0;
+    double startBeat = 0.0;
+    size_t k = 0;
+    for (size_t i = 1; i < sigs.size(); ++i) {
+        if (sigs[i].bar > bar)
+            break;
+        const double bpb = static_cast<double>(sigs[i - 1].num) * 4.0 / static_cast<double>(sigs[i - 1].den);
+        startBeat += static_cast<double>(sigs[i].bar - sigs[i - 1].bar) * bpb;
+        k = i;
+    }
+    const double bpb = static_cast<double>(sigs[k].num) * 4.0 / static_cast<double>(sigs[k].den);
+    return startBeat + static_cast<double>(bar - sigs[k].bar) * bpb;
+}
+
+/**
+ * Resolve a musical position given as either beats or a bar number. Bars are 1-BASED
+ * here — "bar 4" is what the user says and what the ruler shows, while the model counts
+ * from 0. Returns false when neither key is present.
+ */
+bool positionOf(const Model& m, const json& p, const char* beatKey, const char* barKey,
+                double& out) {
+    if (hasKey(p, beatKey)) {
+        out = std::max(0.0, getOr<double>(p, beatKey, 0.0));
+        return true;
+    }
+    if (hasKey(p, barKey)) {
+        const int bar1 = static_cast<int>(std::lround(getOr<double>(p, barKey, 1.0)));
+        out = std::max(0.0, beatAtBar0(m, std::max(0, bar1 - 1)));
+        return true;
+    }
+    return false;
+}
+
+/** Drop every point of `lane` inside [from, to] (inclusive). Returns how many went. */
+int erasePointsInRange(AutomationLane& lane, double from, double to) {
+    const size_t before = lane.points.size();
+    lane.points.erase(std::remove_if(lane.points.begin(), lane.points.end(),
+                                     [&](const AutomationPoint& pt) {
+                                         return pt.beat >= from - 1e-9 && pt.beat <= to + 1e-9;
+                                     }),
+                      lane.points.end());
+    return static_cast<int>(before - lane.points.size());
+}
+
+/** Remove a lane that has been left with no points (§5.3 contract). */
+void dropEmptyLane(Model& m, uint64_t trackId, const std::string& paramRef) {
+    Track* t = m.trackById(trackId);
+    if (!t)
+        return;
+    for (auto it = t->automation.begin(); it != t->automation.end(); ++it) {
+        if (it->paramRef == paramRef && it->points.empty()) {
+            t->automation.erase(it);
+            return;
+        }
+    }
+}
+
+} // namespace
+
+/**
+ * cmd/automation.ramp — write a value ramp over a span of musical time.
+ *
+ * This exists because "fade the cutoff up from bar 4 to bar 8" is one intention, and
+ * expressing it as hand-placed points is where callers (agents especially) go wrong: they
+ * either emit one point and expect a range fill, or emit dozens to fake a slope. Two
+ * points and the engine's own interpolation ARE a ramp; `steps` is only for shapes that
+ * interpolation cannot express.
+ *
+ * Positions may be given in beats (fromBeat/toBeat) or in 1-based bars (fromBar/toBar),
+ * converted here against the real time-signature map — callers should not be re-deriving
+ * bar arithmetic, and getting it wrong after a meter change is silent.
+ */
+json CommandProcessor::automationRamp(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
+    if (!m.trackById(trackId))
+        return r.fail("not_found", "unknown trackId");
+    const std::string paramRef = getOr(p, "paramRef", "");
+    if (!validParamRef(paramRef))
+        return r.fail("bad_request",
+                      "bad paramRef: " + paramRef +
+                          " (expected \"volume\", \"pan\", \"send:<index>\" or "
+                          "\"plugin:<instanceId>:<paramId>\")");
+
+    double fromBeat = 0.0;
+    double toBeat = 0.0;
+    if (!positionOf(m, p, "fromBeat", "fromBar", fromBeat))
+        return r.fail("bad_request", "fromBeat or fromBar required");
+    if (!positionOf(m, p, "toBeat", "toBar", toBeat))
+        return r.fail("bad_request", "toBeat or toBar required");
+    if (toBeat < fromBeat)
+        std::swap(fromBeat, toBeat);
+    if (!hasKey(p, "fromValue") || !hasKey(p, "toValue"))
+        return r.fail("bad_request", "fromValue and toValue required");
+
+    const double fromValue = getOr<double>(p, "fromValue", 0.0);
+    const double toValue = getOr<double>(p, "toValue", 0.0);
+    const double curve = clampd(getOr<double>(p, "curve", 0.0), -1.0, 1.0);
+    const int steps = std::max(0, std::min(512, static_cast<int>(getOr<double>(p, "steps", 0.0))));
+    const bool replaceRange = getOr<bool>(p, "replaceRange", true);
+
+    AutomationLane* lane = m.automationLane(trackId, paramRef, true);
+    if (replaceRange)
+        erasePointsInRange(*lane, fromBeat, toBeat);
+
+    const auto addPoint = [&](double beat, double value, double bend) {
+        AutomationPoint pt;
+        pt.id = m.nextId();
+        pt.beat = std::max(0.0, beat);
+        pt.value = value;
+        pt.curve = bend;
+        lane->points.push_back(pt);
+    };
+
+    if (steps <= 1 || toBeat <= fromBeat) {
+        // The straight case: two points. The engine interpolates between them, so the
+        // bend lives on the FIRST point.
+        addPoint(fromBeat, fromValue, curve);
+        if (toBeat > fromBeat)
+            addPoint(toBeat, toValue, 0.0);
+    } else {
+        for (int i = 0; i <= steps; ++i) {
+            const double f = static_cast<double>(i) / static_cast<double>(steps);
+            addPoint(fromBeat + (toBeat - fromBeat) * f, fromValue + (toValue - fromValue) * f,
+                     curve);
+        }
+    }
+
+    sortLanePoints(*lane);
+    r.mutated = true;
+    r.label = "Automation Ramp";
+    r.structural = true;
+    r.scope = "track";
+    r.eventTrackIds.push_back(trackId);
+    return json::object();
+}
+
+/**
+ * cmd/automation.clear — remove automation from a lane, optionally only within a span.
+ * Without a range the whole lane goes (which the point-by-point API could only do by
+ * reading every id first).
+ */
+json CommandProcessor::automationClear(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
+    if (!m.trackById(trackId))
+        return r.fail("not_found", "unknown trackId");
+    const std::string paramRef = getOr(p, "paramRef", "");
+    if (!validParamRef(paramRef))
+        return r.fail("bad_request", "bad paramRef: " + paramRef);
+
+    AutomationLane* lane = m.automationLane(trackId, paramRef, false);
+    if (!lane) {
+        r.mutated = false;
+        r.label = "Clear Automation";
+        return json::object();
+    }
+
+    double fromBeat = 0.0;
+    double toBeat = 0.0;
+    const bool hasFrom = positionOf(m, p, "fromBeat", "fromBar", fromBeat);
+    const bool hasTo = positionOf(m, p, "toBeat", "toBar", toBeat);
+    int removed = 0;
+    if (hasFrom || hasTo) {
+        if (!hasFrom)
+            fromBeat = 0.0;
+        if (!hasTo)
+            toBeat = std::numeric_limits<double>::max();
+        if (toBeat < fromBeat)
+            std::swap(fromBeat, toBeat);
+        removed = erasePointsInRange(*lane, fromBeat, toBeat);
+    } else {
+        removed = static_cast<int>(lane->points.size());
+        lane->points.clear();
+    }
+    dropEmptyLane(m, trackId, paramRef);
+
+    r.mutated = removed > 0;
+    r.label = "Clear Automation";
     r.structural = r.mutated;
     r.scope = "track";
     r.eventTrackIds.push_back(trackId);

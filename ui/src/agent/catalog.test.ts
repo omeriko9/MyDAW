@@ -50,6 +50,9 @@ const REQUEST_TYPES = [
   "cmd/notes.quantize",
   "cmd/cc.edit",
   "cmd/automation.set",
+  "cmd/automation.ramp",
+  "cmd/automation.clear",
+  "automation/getTargets",
   "cmd/marker.add",
   "cmd/marker.set",
   "cmd/marker.remove",
@@ -255,9 +258,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(100);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(103);
     expect(UI_OPERATION_NAMES).toHaveLength(13);
-    expect(AGENT_CATALOG.operations).toHaveLength(113);
+    expect(AGENT_CATALOG.operations).toHaveLength(116);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

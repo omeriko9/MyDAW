@@ -11,9 +11,11 @@
          style mirrors theme.css --bg/--text for both values. -->
     <script>
       (function () {
+        var ok = { dark: 1, light: 1, slate: 1, sepia: 1 };
         var t = "dark";
         try {
-          if (JSON.parse(localStorage.getItem("mydaw.ui.theme")) === "light") t = "light";
+          var saved = JSON.parse(localStorage.getItem("mydaw.ui.theme"));
+          if (ok[saved]) t = saved;
         } catch (e) {}
         document.documentElement.dataset.theme = t;
       })();
@@ -30,6 +32,16 @@
       html[data-theme="light"] body {
         background: #f2f3f7;
         color: #2a2d38;
+      }
+      html[data-theme="slate"],
+      html[data-theme="slate"] body {
+        background: #363b47;
+        color: #eef1f7;
+      }
+      html[data-theme="sepia"],
+      html[data-theme="sepia"] body {
+        background: #ddd0b8;
+        color: #33291d;
       }
     </style>
   </head>

@@ -142,6 +142,175 @@
 }
 
 /* ============================================================================
+ * Slate — mid-tone cool blue-grey with light type. Neither dark nor light: the
+ * surfaces sit around 40% luminance, which keeps waveforms and meters vivid
+ * without the black-hole feel of the dark theme under bright room light.
+ * ==========================================================================*/
+
+:root[data-theme="slate"] {
+  --bg: #363b47;
+  --panel: #414755;
+  --panel2: #4b5262;
+  --panel3: #565d70;
+  --border: #4d5464;
+  --border-light: #616a7e;
+  --text: #eef1f7;
+  --text-dim: #b9c0cf;
+  --text-faint: #8b93a5;
+  --accent: #7aa2ff;
+  --accent-hover: #92b4ff;
+  --accent-soft: #3f4a6b;
+  --danger: #f07b7b;
+  --danger-soft: #5a3438;
+  --warn: #e8b96a;
+  --warn-soft: #574627;
+  --ok: #86d08a;
+  --ok-soft: #33513a;
+  --selection: rgba(122, 162, 255, 0.28);
+  --playhead: #f4f6fb;
+  --shadow: 0 4px 16px rgba(10, 14, 24, 0.4);
+  --shadow-sm: 0 2px 6px rgba(10, 14, 24, 0.3);
+
+  --on-accent: #17202f;
+  --accent-active: #6b93f5;
+  --panel-pressed: #3a404d;
+  --bg-sunken: #303542;
+  --groove: #272b35;
+  --tooltip-bg: #1e222b;
+  --tooltip-text: #eef1f7;
+  --scroll-thumb: #5c6577;
+  --scroll-thumb-hover: #6f798d;
+  --accent-border: #5f74a8;
+  --danger-border: #7d4a4e;
+  --danger-text: #ffb0b0;
+  --warn-border: #7a6438;
+  --warn-text: #f5d093;
+  --ok-border: #4c7554;
+  --ok-text: #a7e0ab;
+  --knob-face: #4a5162;
+  --knob-face-hi: #5a6274;
+  --knob-edge: #6a7386;
+  --pointer: #e4e8f1;
+  --thumb: #d5dae5;
+  --thumb-hover: #ffffff;
+
+  color-scheme: dark;
+}
+
+/* ============================================================================
+ * Sepia — warm paper with dark type. The counterpart to Slate: mid-tone, but
+ * reached from the light side. Easy on the eyes for long editing sessions and
+ * the closest thing to reading a printed score.
+ * ==========================================================================*/
+
+:root[data-theme="sepia"] {
+  --bg: #ddd0b8;
+  --panel: #eadfc9;
+  --panel2: #e0d3b9;
+  --panel3: #d4c5a7;
+  --border: #c9b895;
+  --border-light: #b8a480;
+  --text: #33291d;
+  --text-dim: #6b5d47;
+  --text-faint: #92836a;
+  --accent: #a8622a;
+  --accent-hover: #94551f;
+  --accent-soft: #f0dfc4;
+  --danger: #a83c32;
+  --danger-soft: #f2d8d1;
+  --warn: #8a6516;
+  --warn-soft: #f0e2c0;
+  --ok: #4a7a3c;
+  --ok-soft: #dfe9d3;
+  --meter-green: #4f9a4a;
+  --meter-yellow: #c9a227;
+  --meter-red: #c1453c;
+  --selection: rgba(168, 98, 42, 0.22);
+  --playhead: #2a2118;
+  --shadow: 0 4px 16px rgba(70, 55, 30, 0.22);
+  --shadow-sm: 0 2px 6px rgba(70, 55, 30, 0.16);
+
+  --on-accent: #fdf6ea;
+  --accent-active: #82471a;
+  --panel-pressed: #cfc0a1;
+  --bg-sunken: #d3c4a9;
+  --groove: #c3b192;
+  --tooltip-bg: #33291d;
+  --tooltip-text: #f3e9d7;
+  --scroll-thumb: #bda98a;
+  --scroll-thumb-hover: #a68f6d;
+  --accent-border: #cba277;
+  --danger-border: #d9b3ab;
+  --danger-text: #8c2f26;
+  --warn-border: #d6c08a;
+  --warn-text: #6d4f11;
+  --ok-border: #b3c9a4;
+  --ok-text: #3a6330;
+  --knob-face: #e7dbc2;
+  --knob-face-hi: #f5edda;
+  --knob-edge: #b9a37f;
+  --pointer: #453829;
+  --thumb: #8a7757;
+  --thumb-hover: #6b5b40;
+
+  color-scheme: light;
+}
+
+/* ============================================================================
+ * Per-pane surface tints
+ * ----------------------------------------------------------------------------
+ * Each editor gets a slightly different background so you can tell at a glance
+ * which pane the pointer is in, especially when several are docked or popped
+ * out. The shifts are small (a few percent of luminance plus a hue nudge) and
+ * every one keeps the theme's --text contrast, so nothing becomes harder to
+ * read. Canvas-drawn panes resolve these through themeVar()/resolvePalette().
+ * ==========================================================================*/
+
+:root {
+  --pane-arrange: #16171c;
+  --pane-mixer: #191a21;
+  --pane-piano: #171a20;
+  --pane-sheet: #14171d;
+  --pane-clip: #1a181f;
+  --pane-viz: #131419;
+  --pane-browser: #191b22;
+}
+
+:root[data-theme="light"] {
+  --pane-arrange: #f2f3f7;
+  --pane-mixer: #eef1f7;
+  --pane-piano: #f1f4f8;
+  --pane-sheet: #f5f4f0;
+  --pane-clip: #f4f1f6;
+  --pane-viz: #eef0f4;
+  --pane-browser: #eff1f6;
+}
+
+:root[data-theme="slate"] {
+  --pane-arrange: #363b47;
+  --pane-mixer: #3a4150;
+  --pane-piano: #343c4a;
+  --pane-sheet: #333a44;
+  --pane-clip: #3b3a4a;
+  --pane-viz: #31363f;
+  --pane-browser: #383e4c;
+}
+
+:root[data-theme="sepia"] {
+  --pane-arrange: #ddd0b8;
+  --pane-mixer: #d9cdb4;
+  --pane-piano: #e0d3b6;
+  --pane-sheet: #e6dcc4;
+  --pane-clip: #dccdb9;
+  --pane-viz: #d6c9b1;
+  --pane-browser: #dbcfb6;
+}
+
+/* The tokens are defined here; each pane APPLIES its own in its component stylesheet
+   (timeline.css, mixer.css, …). Applying them here would not work: component CSS is
+   imported after this file, so an equal-specificity rule there wins. */
+
+/* ============================================================================
  * Base typography & document
  * ==========================================================================*/
 

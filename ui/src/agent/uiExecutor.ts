@@ -38,7 +38,7 @@ const asNumber = (v: unknown): number | undefined =>
 const asIntArray = (v: unknown): number[] =>
   Array.isArray(v) ? v.filter((n): n is number => typeof n === "number") : [];
 
-const THEMES = new Set<ThemeName>(["dark", "light"]);
+const THEMES = new Set<ThemeName>(["dark", "light", "slate", "sepia"]);
 const TOOLS = new Set<Tool>(["select", "draw", "erase", "split"]);
 const PANES = new Set<FocusedPane>(["timeline", "pianoRoll", "clipEditor", "sheetMusic", "mixer"]);
 const DIALOGS = new Set(["settings", "export", "shortcuts", "recreatePlugins"]);

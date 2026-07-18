@@ -18,6 +18,7 @@ import { useShallow } from "zustand/react/shallow";
 import type { PluginInstance, PluginStateEvent, Track } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import * as actions from "../../store/actions";
+import { openBestEditor } from "../PluginEditor/openEditor";
 import {
   clearInsertDrag,
   endInsertDrag,
@@ -332,11 +333,12 @@ export function InsertSlots({ track }: { track: Track }) {
               onDragOver={slotDragOver(idx)}
               onDrop={slotDrop(idx)}
               onClick={() => openEditor(ins.instanceId)}
+              onDoubleClick={() => void openBestEditor(ins)}
               onContextMenu={slotContext(ins, idx)}
               title={
                 dormant
                   ? `${ins.name} — NOT LOADED (imported plugin without a live instance). Click the badge or use File ▸ Recreate Plugins to load or substitute it.`
-                  : `${ins.name} — click: editor · right-click: native UI · Alt+right-click: options · drag: reorder, or move to another channel · Alt+drag: copy (with settings) · drop outside: remove`
+                  : `${ins.name} — click: in-app editor · double-click: the plug-in's own window · right-click: native UI · Alt+right-click: options · drag: reorder, or move to another channel · Alt+drag: copy (with settings) · drop outside: remove`
               }
             >
               <button

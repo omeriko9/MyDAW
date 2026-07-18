@@ -25,7 +25,9 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  background: var(--bg);
+  /* the pane tint (lib/theme.css) — every editor gets its own so they are
+     distinguishable at a glance; the canvas rows below are tinted to match */
+  background: var(--pane-piano, var(--bg));
   user-select: none;
   overflow: hidden;
 }
@@ -45,6 +47,38 @@
   --pr-key-border: #b9c0d0;
   --pr-outside: rgba(125, 133, 155, 0.18);
   --pr-vel-bg: #eef0f6;
+}
+
+/* Slate — mid-tone rows, light type. */
+:root[data-theme="slate"] .pr-root {
+  --pr-row-white: #3c434f;
+  --pr-row-black: #353b46;
+  --pr-grid-fine: #464e5c;
+  --pr-grid-beat: #525b6b;
+  --pr-grid-bar: #6c7688;
+  --pr-grid-octave: #5a6373;
+  --pr-key-white: #cdd3df;
+  --pr-key-black: #2f3540;
+  --pr-key-text: #4a5160;
+  --pr-key-border: #7d8697;
+  --pr-outside: rgba(20, 24, 32, 0.35);
+  --pr-vel-bg: #333944;
+}
+
+/* Sepia — warm paper rows, dark type. */
+:root[data-theme="sepia"] .pr-root {
+  --pr-row-white: #e7dcc4;
+  --pr-row-black: #dbcfb3;
+  --pr-grid-fine: #cfc0a0;
+  --pr-grid-beat: #bfad89;
+  --pr-grid-bar: #a08c66;
+  --pr-grid-octave: #b3a07c;
+  --pr-key-white: #f3ead6;
+  --pr-key-black: #4a3f2e;
+  --pr-key-text: #8a7b60;
+  --pr-key-border: #b09a75;
+  --pr-outside: rgba(120, 100, 65, 0.2);
+  --pr-vel-bg: #ded2b8;
 }
 
 /* ---- toolbar ---- */

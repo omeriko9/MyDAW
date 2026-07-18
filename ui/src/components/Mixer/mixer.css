@@ -6,7 +6,9 @@
 .mixer-root {
   height: 100%;
   min-height: 0;
-  background: var(--bg);
+  /* pane tint (lib/theme.css --pane-*): each editor gets its own shade so
+     they are distinguishable at a glance, per theme */
+  background: var(--pane-mixer, var(--bg));
   display: flex;
   flex-direction: column;
 }

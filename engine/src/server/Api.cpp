@@ -38,6 +38,7 @@
 #include "util/Log.h"
 #include "util/Paths.h"
 #include "util/Spawn.h"
+#include "util/Strings.h"
 
 namespace mydaw {
 
@@ -366,6 +367,8 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
     }
     if (type == "project/getUnresolvedPlugins")
         return unresolvedPluginsJson();
+    if (type == "automation/getTargets")
+        return automationTargetsJson(p, ec, em);
 
     // --- §5.4 transport & engine ---------------------------------------------------
     if (type.rfind("transport/", 0) == 0)
@@ -682,6 +685,126 @@ json Api::importForeignPath(const std::string& path, std::string& ec, std::strin
     // provider routing). addRecent's temp-dir filter still applies.
     app_.projectIO.addRecent(path, fileName(path));
     return json{{"project", toJson(app_.model.project)}};
+}
+
+/**
+ * automation/getTargets — everything on a track that automation can address, with the
+ * exact paramRef to use and a human name to match against.
+ *
+ * Without this, addressing "the cutoff" means guessing: paramRefs have to be assembled by
+ * hand from two other queries, and a plugin that is not currently live reports parameter
+ * IDs with no names at all, so there is nothing to match a word like "cutoff" against.
+ * Here the names come from the live host when there is one, and the reply says which.
+ */
+json Api::automationTargetsJson(const json& p, std::string& ec, std::string& em) {
+    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
+    const Track* track = app_.model.trackById(trackId);
+    if (!track) {
+        ec = "not_found";
+        em = "unknown trackId";
+        return json();
+    }
+
+    const std::string filter = lower(getOr(p, "match", ""));
+    const auto keep = [&](const std::string& name) {
+        return filter.empty() || lower(name).find(filter) != std::string::npos;
+    };
+
+    json targets = json::array();
+    const auto add = [&](json t) { targets.push_back(std::move(t)); };
+
+    if (keep("volume")) {
+        add(json{{"paramRef", "volume"},
+                 {"name", "Volume"},
+                 {"kind", "track"},
+                 {"unit", "linear gain (1 = 0 dB)"},
+                 {"min", 0.0},
+                 {"max", 4.0},
+                 {"value", track->volume}});
+    }
+    if (keep("pan")) {
+        add(json{{"paramRef", "pan"},
+                 {"name", "Pan"},
+                 {"kind", "track"},
+                 {"unit", "-1 = left, +1 = right"},
+                 {"min", -1.0},
+                 {"max", 1.0},
+                 {"value", track->pan}});
+    }
+
+    for (size_t i = 0; i < track->sends.size(); ++i) {
+        const Track* dest = app_.model.trackById(track->sends[i].destTrackId);
+        const std::string name = "Send " + std::to_string(i + 1) +
+                                 (dest ? " to " + dest->name : std::string());
+        if (!keep(name))
+            continue;
+        add(json{{"paramRef", "send:" + std::to_string(i)},
+                 {"name", name},
+                 {"kind", "send"},
+                 {"unit", "linear level"},
+                 {"min", 0.0},
+                 {"max", 2.0},
+                 {"value", track->sends[i].level}});
+    }
+
+    HostProcessManager* host = app_.host.get();
+    BuiltinEffectManager* builtin = app_.builtin.get();
+    for (const PluginInstance& pi : track->inserts) {
+        const bool isBuiltin = builtin && builtin->has(pi.instanceId);
+        const bool live = isBuiltin || (host && host->node(pi.instanceId) != nullptr);
+        json params = json::array();
+        if (isBuiltin)
+            params = builtin->getParams(pi.instanceId);
+        else if (live)
+            params = host->getParams(pi.instanceId);
+
+        if (live && params.is_array() && !params.empty()) {
+            for (const json& pr : params) {
+                const std::string pname = getOr(pr, "name", "");
+                const uint64_t pid = getOr<uint64_t>(pr, "id", 0);
+                const std::string label = pi.name + " — " + pname;
+                if (!keep(label))
+                    continue;
+                add(json{{"paramRef", "plugin:" + std::to_string(pi.instanceId) + ":" +
+                                          std::to_string(pid)},
+                         {"name", label},
+                         {"paramName", pname},
+                         {"kind", "plugin"},
+                         {"instanceId", pi.instanceId},
+                         {"paramId", pid},
+                         {"plugin", pi.name},
+                         {"unit", getOr(pr, "label", std::string())},
+                         {"min", 0.0},
+                         {"max", 1.0},
+                         {"value", getOr<double>(pr, "value", 0.0)},
+                         {"valueText", getOr(pr, "valueText", std::string())},
+                         {"source", "live"}});
+            }
+        } else {
+            // Not running: the stored map has values but no names. Say so rather than
+            // returning anonymous ids that cannot be matched by name.
+            for (const auto& [pid, value] : pi.paramValues) {
+                const std::string label = pi.name + " — param " + std::to_string(pid);
+                if (!keep(label))
+                    continue;
+                add(json{{"paramRef",
+                          "plugin:" + std::to_string(pi.instanceId) + ":" + std::to_string(pid)},
+                         {"name", label},
+                         {"kind", "plugin"},
+                         {"instanceId", pi.instanceId},
+                         {"paramId", pid},
+                         {"plugin", pi.name},
+                         {"min", 0.0},
+                         {"max", 1.0},
+                         {"value", value},
+                         {"source", "model"},
+                         {"note", "plugin not running — parameter names unavailable; "
+                                  "load the plugin to match by name"}});
+            }
+        }
+    }
+
+    return json{{"trackId", trackId}, {"trackName", track->name}, {"targets", std::move(targets)}};
 }
 
 // ---------------------------------------------------------------------------

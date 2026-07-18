@@ -851,6 +851,69 @@ export interface AutomationPointUpdate {
   patch: AutomationPointPatch;
 }
 
+/**
+ * A span of musical time given either in beats or in 1-BASED bars (what the ruler shows
+ * and what people say). Bars are converted engine-side against the time-signature map,
+ * so a meter change mid-project cannot silently skew the result.
+ */
+export interface AutomationSpan {
+  fromBeat?: number;
+  toBeat?: number;
+  fromBar?: number;
+  toBar?: number;
+}
+
+export interface AutomationRampRequest extends AutomationSpan {
+  trackId: number;
+  /** "volume" | "pan" | "send:<index>" | "plugin:<instanceId>:<paramId>" */
+  paramRef: string;
+  fromValue: number;
+  toValue: number;
+  /** Bend, -1..1 (0 = linear). */
+  curve?: number;
+  /** 0/1 = a plain two-point ramp; >1 writes that many intermediate points. */
+  steps?: number;
+  /** Clear existing points inside the span first (default true). */
+  replaceRange?: boolean;
+}
+
+export interface AutomationClearRequest extends AutomationSpan {
+  trackId: number;
+  paramRef: string;
+}
+
+export interface AutomationGetTargetsRequest {
+  trackId: number;
+  /** Case-insensitive substring filter over target names, e.g. "cutoff". */
+  match?: string;
+}
+
+/** One automatable target, with the paramRef to pass to the automation commands. */
+export interface AutomationTarget {
+  paramRef: string;
+  name: string;
+  /** "track" | "send" | "plugin" */
+  kind: string;
+  value: number;
+  min?: number;
+  max?: number;
+  unit?: string;
+  plugin?: string;
+  paramName?: string;
+  instanceId?: number;
+  paramId?: number;
+  valueText?: string;
+  /** "live" = names from the running plugin; "model" = ids only (plugin not loaded). */
+  source?: string;
+  note?: string;
+}
+
+export interface AutomationTargetsReply {
+  trackId: number;
+  trackName?: string;
+  targets: AutomationTarget[];
+}
+
 export interface AutomationSetRequest {
   trackId: number;
   /** "volume" | "pan" | "send:<index>" | "plugin:<instanceId>:<paramId>" */
@@ -1461,6 +1524,9 @@ export interface RequestMap {
   "cmd/notes.quantize": { req: NotesQuantizeRequest; reply: EmptyObject };
   "cmd/cc.edit": { req: CcEditRequest; reply: EmptyObject };
   "cmd/automation.set": { req: AutomationSetRequest; reply: EmptyObject };
+  "cmd/automation.ramp": { req: AutomationRampRequest; reply: EmptyObject };
+  "cmd/automation.clear": { req: AutomationClearRequest; reply: EmptyObject };
+  "automation/getTargets": { req: AutomationGetTargetsRequest; reply: AutomationTargetsReply };
   "cmd/marker.add": { req: MarkerAddRequest; reply: MarkerAddReply };
   "cmd/marker.set": { req: MarkerSetRequest; reply: EmptyObject };
   "cmd/marker.remove": { req: MarkerRemoveRequest; reply: EmptyObject };
@@ -1638,6 +1704,9 @@ export const CcCmd = {
 
 export const AutomationCmd = {
   set: "cmd/automation.set",
+  ramp: "cmd/automation.ramp",
+  clear: "cmd/automation.clear",
+  getTargets: "automation/getTargets",
 } as const satisfies Record<string, RequestType>;
 
 export const MarkerCmd = {

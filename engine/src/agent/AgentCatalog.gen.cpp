@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d11fe04aeef7372a8bf86ba22ced38f2c480c6d74cf02f3455babcecc32a7350";
+const char kAgentCatalogSha256[] = "bded4c53b8e9e4d0a91571646ce14f1bbf6b4747fb2ede1b308df681af76ad60";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -128,8 +128,12 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     },
     "AutomationAddPoint": {
       "additionalProperties": false,
-      "description": "add-point shape per SPEC §5.3: {t, v, curve?} (t = beat, v = value).",
+      "description": "add-point shape per SPEC §5.3: {t, v, curve?} where t = beat and v = value. The read views return {beat, value, curve}; those spellings are accepted here too, so points can be round-tripped. curve is the bend from THIS point to the next (-1..1).",
       "properties": {
+        "beat": {
+          "description": "alias for t",
+          "type": "number"
+        },
         "curve": {
           "type": "number"
         },
@@ -138,11 +142,57 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "v": {
           "type": "number"
+        },
+        "value": {
+          "description": "alias for v",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "AutomationClearRequest": {
+      "additionalProperties": false,
+      "description": "Remove automation points from a lane. With no span the whole lane is cleared (and the lane itself removed). A span may be given in beats or 1-based bars.",
+      "properties": {
+        "fromBar": {
+          "type": "number"
+        },
+        "fromBeat": {
+          "type": "number"
+        },
+        "paramRef": {
+          "description": "\"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\"",
+          "type": "string"
+        },
+        "toBar": {
+          "type": "number"
+        },
+        "toBeat": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
         }
       },
       "required": [
-        "t",
-        "v"
+        "trackId",
+        "paramRef"
+      ],
+      "type": "object"
+    },
+    "AutomationGetTargetsRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "match": {
+          "description": "case-insensitive substring filter over target names (e.g. \"cutoff\")",
+          "type": "string"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId"
       ],
       "type": "object"
     },
@@ -221,6 +271,60 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "AutomationRampRequest": {
+      "additionalProperties": false,
+      "description": "Write a value ramp over a span of musical time. Give the span in beats (fromBeat/toBeat) OR in 1-BASED bars (fromBar/toBar, matching the ruler and how people speak); bars are converted against the project's time-signature map, including meter changes. By default the ramp REPLACES any existing points inside the span. Two points are enough for a straight ramp because the engine interpolates between them; `steps` is only for shapes interpolation cannot express.",
+      "properties": {
+        "curve": {
+          "description": "bend of the ramp, -1..1 (0 = linear, <0 = fast start, >0 = slow start)",
+          "type": "number"
+        },
+        "fromBar": {
+          "description": "1-based bar the ramp starts at",
+          "type": "number"
+        },
+        "fromBeat": {
+          "type": "number"
+        },
+        "fromValue": {
+          "description": "value at the start (see automation/getTargets for the range)",
+          "type": "number"
+        },
+        "paramRef": {
+          "description": "\"volume\" | \"pan\" | \"send:<index>\" | \"plugin:<instanceId>:<paramId>\"",
+          "type": "string"
+        },
+        "replaceRange": {
+          "description": "clear existing points inside the span first (default true)",
+          "type": "boolean"
+        },
+        "steps": {
+          "description": "0 or 1 = a plain two-point ramp (default); >1 writes that many intermediate points",
+          "type": "number"
+        },
+        "toBar": {
+          "description": "1-based bar the ramp ends at",
+          "type": "number"
+        },
+        "toBeat": {
+          "type": "number"
+        },
+        "toValue": {
+          "description": "value at the end",
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "paramRef",
+        "fromValue",
+        "toValue"
+      ],
+      "type": "object"
+    },
     "AutomationSetRequest": {
       "additionalProperties": false,
       "properties": {
@@ -253,6 +357,90 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "required": [
         "trackId",
         "paramRef"
+      ],
+      "type": "object"
+    },
+    "AutomationTarget": {
+      "additionalProperties": false,
+      "description": "One automatable target on a track, with the exact paramRef to pass to cmd/automation.set / .ramp / .clear. Plugin parameter NAMES are only available while the plugin is running: source \"live\" carries real names and units, source \"model\" means the plugin is not loaded and only numeric ids are known.",
+      "properties": {
+        "instanceId": {
+          "description": "plugin targets only",
+          "type": "number"
+        },
+        "kind": {
+          "description": "\"track\" | \"send\" | \"plugin\"",
+          "type": "string"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "name": {
+          "description": "human-readable, e.g. \"Pro-Q 3 — Band 1 Freq\"",
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "paramId": {
+          "description": "plugin targets only",
+          "type": "number"
+        },
+        "paramName": {
+          "type": "string"
+        },
+        "paramRef": {
+          "type": "string"
+        },
+        "plugin": {
+          "type": "string"
+        },
+        "source": {
+          "description": "\"live\" | \"model\"",
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "value": {
+          "description": "current value",
+          "type": "number"
+        },
+        "valueText": {
+          "description": "formatted current value, live plugins only",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paramRef",
+        "name",
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "AutomationTargetsReply": {
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "items": {
+            "$ref": "#/schemas/AutomationTarget"
+          },
+          "type": "array"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "trackName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "trackId",
+        "targets"
       ],
       "type": "object"
     },
@@ -3358,6 +3546,108 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "type": "object"
     },
+    "UiLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "browser": {
+          "type": "boolean"
+        },
+        "inspector": {
+          "type": "boolean"
+        },
+        "minimap": {
+          "type": "boolean"
+        },
+        "agent": {
+          "type": "boolean"
+        },
+        "bottomTab": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "mixer",
+                "pianoRoll",
+                "clipEditor",
+                "sheetMusic",
+                "visualizer"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "browser",
+        "inspector",
+        "minimap",
+        "agent",
+        "bottomTab"
+      ]
+    },
+    "UiSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trackIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        },
+        "noteIds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "trackIds",
+        "clipIds",
+        "noteIds"
+      ]
+    },
+    "UiViewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zoomX": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "zoomY": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scrollX": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scrollY": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "zoomX",
+        "zoomY",
+        "scrollX",
+        "scrollY"
+      ]
+    },
     "UndoRedoReply": {
       "additionalProperties": false,
       "description": "Reply also triggers a full event/projectChanged (SPEC §5.3).",
@@ -3480,115 +3770,129 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "gain"
       ],
       "type": "object"
-    },
-    "UiSelection": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "trackIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        },
-        "clipIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        },
-        "noteIds": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "trackIds",
-        "clipIds",
-        "noteIds"
-      ]
-    },
-    "UiLayout": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "browser": {
-          "type": "boolean"
-        },
-        "inspector": {
-          "type": "boolean"
-        },
-        "minimap": {
-          "type": "boolean"
-        },
-        "agent": {
-          "type": "boolean"
-        },
-        "bottomTab": {
-          "anyOf": [
-            {
-              "type": "string",
-              "enum": [
-                "mixer",
-                "pianoRoll",
-                "clipEditor",
-                "sheetMusic",
-                "visualizer"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "browser",
-        "inspector",
-        "minimap",
-        "agent",
-        "bottomTab"
-      ]
-    },
-    "UiViewport": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "zoomX": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "zoomY": {
-          "type": "number",
-          "exclusiveMinimum": 0
-        },
-        "scrollX": {
-          "type": "number",
-          "minimum": 0
-        },
-        "scrollY": {
-          "type": "number",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "zoomX",
-        "zoomY",
-        "scrollX",
-        "scrollY"
-      ]
     }
   },
   "operations": [
     {
+      "name": "automation/getTargets",
+      "category": "automation",
+      "description": "List every automatable target on a track (volume, pan, sends, plugin params) with its exact paramRef, human name, current value and range.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationGetTargetsRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/AutomationTargetsReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "match": "cutoff"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/automation.clear",
+      "category": "automation",
+      "description": "Remove automation points from a lane, either entirely or only within a span of bars/beats.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationClearRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "volume",
+            "fromBar": 4,
+            "toBar": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/automation.ramp",
+      "category": "automation",
+      "description": "Ramp an automated value from one level to another across a span of bars or beats (e.g. open a filter from bar 4 to bar 8).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/AutomationRampRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "plugin:31:2",
+            "fromBar": 4,
+            "toBar": 8,
+            "fromValue": 0.2,
+            "toValue": 0.9
+          }
+        },
+        {
+          "input": {
+            "trackId": 7,
+            "paramRef": "volume",
+            "fromBeat": 0,
+            "toBeat": 16,
+            "fromValue": 0,
+            "toValue": 1
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/automation.set",
       "category": "automation",
-      "description": "Add, update, and remove points in a channel automation lane.",
+      "description": "Add, update, and remove points in a channel automation lane. Adjacent points interpolate, so a pair of points is already a ramp (see cmd/automation.ramp).",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -3615,7 +3919,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         {
           "input": {
             "trackId": 7,
-            "paramRef": "track:7:volume",
+            "paramRef": "volume",
             "add": [
               {
                 "t": 0,
@@ -3659,7 +3963,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               {
                 "controller": 1,
                 "beat": 0,
-                "value": 64
+                "value": 0.5
               }
             ]
           }
@@ -6112,7 +6416,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "examples": [
         {
           "input": {
-            "paramRef": "track:7:volume"
+            "paramRef": "volume"
           }
         }
       ]
@@ -6150,7 +6454,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "examples": [
         {
           "input": {
-            "paramRef": "track:7:volume"
+            "paramRef": "volume"
           }
         }
       ]
@@ -7726,7 +8030,9 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "type": "string",
             "enum": [
               "dark",
-              "light"
+              "light",
+              "slate",
+              "sepia"
             ]
           }
         },
@@ -7742,7 +8048,9 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "type": "string",
             "enum": [
               "dark",
-              "light"
+              "light",
+              "slate",
+              "sepia"
             ]
           }
         },
@@ -8080,6 +8388,8 @@ const char kAgentPromptsJson[] = R"MYDAW_AGENT({
 }
 )MYDAW_AGENT";
 constexpr std::string_view kBatchableOperationNames[] = {
+    "cmd/automation.clear",
+    "cmd/automation.ramp",
     "cmd/automation.set",
     "cmd/cc.edit",
     "cmd/clip.addAudio",

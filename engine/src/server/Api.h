@@ -57,6 +57,7 @@ private:
     json sessionHello();
     json loadProjectPath(const std::string& path, std::string& ec, std::string& em);
     json importForeignPath(const std::string& path, std::string& ec, std::string& em);
+    json automationTargetsJson(const json& p, std::string& ec, std::string& em);
     json unresolvedPluginsJson(); // project/getUnresolvedPlugins (§5.6)
     json handleTransport(const std::string& type, const json& p, std::string& ec,
                          std::string& em);

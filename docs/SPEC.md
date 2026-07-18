@@ -225,7 +225,24 @@ the entire drag.
 - `cmd/notes.quantize {clipId, noteIds?:[], grid:<beats>, strength:0..1, swing:0..1}`
 - `cmd/automation.set {trackId, paramRef, add:[{t,v,curve?}], remove:[pointIds], update:[{pointId,patch}]}`
   `paramRef`: `"volume"|"pan"|"send:<index>"|"plugin:<instanceId>:<paramId>"`. A set that leaves
-  the lane with zero points removes the lane — lanes never persist empty.
+  the lane with zero points removes the lane — lanes never persist empty. `add` also accepts the
+  read-side spelling `{beat, value, curve}` so points can be written back as they were read.
+  Adjacent points INTERPOLATE (curve = the bend from that point to the next), so two points are a
+  ramp — which is what the next two commands express directly.
+- `cmd/automation.ramp {trackId, paramRef, fromBeat|fromBar, toBeat|toBar, fromValue, toValue,
+  curve?, steps?, replaceRange?}` — write a ramp across a span. Bars are **1-based** (what the ruler
+  shows) and converted engine-side against the time-signature map, so a meter change cannot skew
+  them; `replaceRange` (default true) clears existing points inside the span first; `steps > 1`
+  writes intermediate points for shapes interpolation cannot express.
+- `cmd/automation.clear {trackId, paramRef, fromBeat|fromBar?, toBeat|toBar?}` — remove points in a
+  span, or the whole lane when no span is given (the lane goes with it).
+- `automation/getTargets {trackId, match?}` → `{trackId, trackName, targets:[{paramRef, name, kind,
+  value, min?, max?, unit?, plugin?, paramId?, instanceId?, valueText?, source}]}` — every
+  automatable target on a channel (volume, pan, each send, every plugin parameter) with the exact
+  `paramRef` to use. `match` is a case-insensitive substring over the names, so "cutoff" finds the
+  parameter without the caller assembling paramRefs by hand. `source` is `"live"` when the names
+  came from a running plugin and `"model"` when the plugin is not loaded (ids only — names are not
+  stored in the project).
 - `cmd/marker.add {beat,name}` / `cmd/marker.set {markerId,patch}` / `cmd/marker.remove {markerId}`
 - `cmd/tempo.set {bpm}` ; `cmd/timesig.set {num, den}` (v1: single tempo/timesig; schema is a map
   for future) ; `cmd/loop.set {startBeat,endBeat,enabled}`
@@ -868,9 +885,17 @@ drag across it to swipe just that range in.
   snap selector, swing, tool buttons, CPU/xrun badge, panic, master meter mini, save indicator
   (dirty dot), undo/redo buttons, export button. Project-flow failures surface as error toasts
   (ToastHost + `showToast(message, kind)`, mounted from DialogsHost).
-- Theme: dark (default) + light, CSS vars in `theme.css` (dark on `:root`, light overrides under
-  `:root[data-theme="light"]`; `lib/theme.ts` stamps the attribute — incl. pop-out documents —
-  and broadcasts `mydaw:themechange` so canvas palettes re-resolve). Switcher in View → Theme and
+- Theme: **dark** (default), **slate** (mid-tone cool blue-grey, light type), **sepia** (warm paper,
+  dark type) and **light**. CSS vars in `theme.css` — dark on `:root`, every other theme restating
+  the same contract under `:root[data-theme="…"]`; `lib/theme.ts` stamps the attribute (incl.
+  pop-out documents) and broadcasts `mydaw:themechange` so canvas palettes re-resolve. `index.html`
+  stamps the saved theme pre-paint against an allow-list so there is no flash.
+  Each theme also defines PER-PANE surface tints (`--pane-arrange|mixer|piano|sheet|clip|viz|browser`)
+  so the editors are distinguishable at a glance; every pane APPLIES its own token in its component
+  stylesheet (applying them in theme.css would lose to the later-imported component CSS at equal
+  specificity). The shifts are small and every pane keeps ≥ 4.5:1 text contrast. Canvas panes pick
+  their tint up through `themeVar()` / `resolvePalette()` (the piano roll additionally restates its
+  row/grid tokens per theme on `.pr-root`). Switcher in View → Theme and
   Settings → General; choice persists per user (`lib/prefs.ts`, localStorage `mydaw.*`).
   Inter/system-ui, 13 px base, crisp 1 px borders, subtle radii (6), Lucide-like inline
   SVG icons (hand-drawn paths, no dependency). UI prefs (panel sizes/visibility, viewport zoom,

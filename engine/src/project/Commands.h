@@ -166,6 +166,8 @@ private:
     json notesQuantize(const json& p, CmdResult& r);
     json ccEdit(const json& p, CmdResult& r);
     json automationSet(const json& p, CmdResult& r);
+    json automationRamp(const json& p, CmdResult& r);
+    json automationClear(const json& p, CmdResult& r);
     json markerAdd(const json& p, CmdResult& r);
     json markerSet(const json& p, CmdResult& r);
     json markerRemove(const json& p, CmdResult& r);

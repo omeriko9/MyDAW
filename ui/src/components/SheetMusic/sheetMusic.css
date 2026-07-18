@@ -7,7 +7,9 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  background: var(--bg-sunken);
+  /* pane tint (lib/theme.css --pane-*): each editor gets its own shade so
+     they are distinguishable at a glance, per theme */
+  background: var(--pane-sheet, var(--bg-sunken));
   overflow: hidden;
 }
 

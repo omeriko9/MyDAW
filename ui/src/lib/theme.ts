@@ -1,8 +1,10 @@
 /**
- * Theme switching (owned by F4) — dark (default) / light.
+ * Theme switching (owned by F4) — dark (default) / slate / sepia / light.
  *
  * The palette lives in CSS custom properties (theme.css): dark values on :root,
- * light overrides under :root[data-theme="light"]. Switching = stamping the
+ * every other theme restating the same contract under :root[data-theme="…"].
+ * Each theme also defines per-pane surface tints (--pane-*) so the editors are
+ * distinguishable at a glance. Switching = stamping the
  * data-theme attribute on every live document (main window + pop-out panes) and
  * broadcasting THEME_EVENT so canvas renderers re-resolve their cached colors
  * (layout.ts themeVar / prDraw palettes key their caches by theme).
@@ -14,17 +16,25 @@
 import { useEffect, useState } from "react";
 import { loadPref, oneOf, savePref } from "./prefs";
 
-export type ThemeName = "dark" | "light";
+/**
+ * Slate and Sepia are deliberately mid-tone rather than another dark/light pair:
+ * Slate is a cool blue-grey with light type, Sepia a warm paper with dark type.
+ */
+export type ThemeName = "dark" | "light" | "slate" | "sepia";
 
 /** window CustomEvent fired (on the MAIN window) after the theme changed. */
 export const THEME_EVENT = "mydaw:themechange";
 
 export const THEMES: Array<{ value: ThemeName; label: string }> = [
   { value: "dark", label: "Dark" },
+  { value: "slate", label: "Slate" },
+  { value: "sepia", label: "Sepia" },
   { value: "light", label: "Light" },
 ];
 
-let current: ThemeName = loadPref<ThemeName>("ui.theme", "dark", oneOf<ThemeName>("dark", "light"));
+const isThemeName = oneOf<ThemeName>("dark", "light", "slate", "sepia");
+
+let current: ThemeName = loadPref<ThemeName>("ui.theme", "dark", isThemeName);
 
 /** Pop-out documents that must be stamped along with the main one. */
 const extraDocs = new Set<Document>();
@@ -39,8 +49,12 @@ export function getTheme(): ThemeName {
 
 /** Resolved theme of the document an element lives in (pop-outs have their own). */
 export function themeOf(el: Element): ThemeName {
-  return el.ownerDocument.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const t = el.ownerDocument.documentElement.dataset.theme;
+  return isThemeName(t) ? (t as ThemeName) : "dark";
 }
+
+/** True for themes whose surfaces are light enough to need dark type. */
+export const isLightTheme = (t: ThemeName): boolean => t === "light" || t === "sepia";
 
 /**
  * Track a pop-out document: stamped immediately and on every later switch.
