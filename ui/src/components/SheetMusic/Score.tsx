@@ -1,35 +1,42 @@
 /**
- * Score.tsx — draws a laid-out score as SVG.
+ * Score.tsx — draws a laid-out score as SVG, and is the pane's hit-testing surface.
  *
- * Purely presentational: every coordinate already exists in the ScoreLayout, so this file
- * only decides ink. SVG (not canvas) because the same element tree is what the browser
- * hands to the printer — vector at 600 dpi, no re-render at print resolution — and
- * because noteheads become hit targets for free.
+ * Purely presentational plus geometry: every coordinate already exists in the ScoreLayout,
+ * so this file decides ink and turns pointer events back into musical positions
+ * ({staff, tick, step}) for the editor. SVG rather than canvas because the same element
+ * tree is what the printer receives — vector at any DPI — and noteheads become hit
+ * targets for free.
+ *
+ * Glyphs are real Bravura outlines (see bravura.ts); they render in font units through
+ * glyphAt(), which also flips the y axis.
  */
 
 import React from "react";
 import {
-  ACC_DOUBLE_SHARP,
-  ACC_FLAT,
-  ACC_NATURAL,
-  ACC_SHARP,
-  CLEF_ALTO,
-  CLEF_BASS,
-  CLEF_BASS_DOTS,
-  CLEF_TREBLE,
-  DOT_R,
-  bracePath,
-  digitPath,
+  BBOX,
+  BRAVURA,
+  BRACE_H,
+  DOT_W,
+  accidentalGlyph,
+  clefGlyph,
+  digitGlyph,
+  digitWidth,
   digitsWidth,
-  flagPath,
-  noteheadPath,
-  restPath,
+  flagGlyph,
+  glyphAt,
+  noteheadGlyph,
+  noteheadHalfWidth,
+  restGlyph,
+  restWidth,
   tiePath,
+  unitScale,
 } from "./glyphs";
 import {
   CLEF_ANCHOR,
   keySignatureSteps,
+  prefixSlots,
   stepY,
+  yToStep,
   type Clef,
   type LaidElement,
   type LaidMeasure,
@@ -41,80 +48,82 @@ const STAFF_LINES = 5;
 /** Title block height in staff spaces — must clear title, subtitle AND the tempo mark. */
 export const HEADER_SPACES = 9;
 
+/** A musical position resolved from a pointer event. */
+export interface ScorePoint {
+  page: number;
+  system: LaidSystem;
+  staff: number;
+  /** Absolute tick under the pointer (unsnapped). */
+  tick: number;
+  /** Diatonic step under the pointer. */
+  step: number;
+  /** Content-space coordinates, for drawing a marquee. */
+  x: number;
+  y: number;
+}
+
 export interface ScoreProps {
   layout: ScoreLayout;
-  /** Index into layout.pages. */
   page: number;
-  /** Note ids currently sounding — drawn in the accent colour. */
   highlight?: ReadonlySet<number>;
   selected?: ReadonlySet<number>;
-  /** Playhead position within this page, if it falls here. */
-  playhead?: { system: LaidSystem; x: number } | null;
-  onPickTick?: (tick: number) => void;
-  onPickNote?: (noteId: number, additive: boolean) => void;
   showBarNumbers?: boolean;
-  /** Added to measure indices when numbering bars (the score may start mid-project). */
   barOffset?: number;
-  /** Print the letter name inside each notehead — a learning aid, off by default. */
   noteNames?: boolean;
-  /** Page box; when absent the SVG sizes itself to the content. */
   pageWidth?: number;
   pageHeight?: number;
   margin?: number;
-  /** Extra room left of the staves — the grand-staff brace lives out here. */
   leftPad?: number;
   header?: { title: string; subtitle?: string; part?: string; tempo?: number; pageNo?: number; pages?: number };
+  /** Edit mode changes the cursor and enables note insertion. */
+  editing?: boolean;
+  /** Marquee rectangle in content coordinates, while rubber-band selecting on this page. */
+  marquee?: { x1: number; y1: number; x2: number; y2: number } | null;
+  onPickTick?: (tick: number) => void;
+  onNoteDown?: (noteId: number, e: React.PointerEvent) => void;
+  onStaffDown?: (pt: ScorePoint, e: React.PointerEvent) => void;
+  onNoteContext?: (noteId: number, e: React.MouseEvent) => void;
+  onStaffContext?: (pt: ScorePoint, e: React.MouseEvent) => void;
 }
 
 const LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
 
-function accPath(alter: number): string {
-  if (alter === 1) return ACC_SHARP;
-  if (alter === -1) return ACC_FLAT;
-  if (alter === 2) return ACC_DOUBLE_SHARP;
-  return ACC_NATURAL;
+/** Draw one Bravura glyph with its origin at (x, y) px. */
+function G({
+  name,
+  x,
+  y,
+  sp,
+  className = "sm-ink",
+}: {
+  name: string;
+  x: number;
+  y: number;
+  sp: number;
+  className?: string;
+}) {
+  const d = BRAVURA[name];
+  if (!d) return null;
+  return <path d={d} className={className} transform={glyphAt(x, y, sp)} />;
 }
 
-/** One staff's five lines. */
 function StaffLines({ y, width, sp, x }: { y: number; width: number; sp: number; x: number }) {
   const lines = [];
   for (let i = 0; i < STAFF_LINES; i++) {
     const ly = y + i * sp;
     lines.push(
-      <line key={i} x1={x} y1={ly} x2={x + width} y2={ly} className="sm-staffline" strokeWidth={Math.max(0.6, sp * 0.09)} />,
+      <line
+        key={i}
+        x1={x}
+        y1={ly}
+        x2={x + width}
+        y2={ly}
+        className="sm-staffline"
+        strokeWidth={Math.max(0.6, sp * 0.09)}
+      />,
     );
   }
   return <>{lines}</>;
-}
-
-function Clef({ clef, x, y, sp }: { clef: Clef; x: number; y: number; sp: number }) {
-  const cy = y + CLEF_ANCHOR[clef] * sp;
-  const t = `translate(${x} ${cy}) scale(${sp})`;
-  if (clef === "treble") {
-    return (
-      <path
-        d={CLEF_TREBLE}
-        transform={t}
-        className="sm-ink"
-        fill="none"
-        strokeWidth={0.24}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        stroke="currentColor"
-      />
-    );
-  }
-  if (clef === "bass") {
-    return (
-      <g transform={t}>
-        <path d={CLEF_BASS} className="sm-ink" />
-        {CLEF_BASS_DOTS.map(([dx, dy], i) => (
-          <circle key={i} cx={dx} cy={dy} r={0.16} className="sm-ink" />
-        ))}
-      </g>
-    );
-  }
-  return <path d={CLEF_ALTO} transform={t} className="sm-ink" />;
 }
 
 function KeySignature({
@@ -130,17 +139,12 @@ function KeySignature({
   y: number;
   sp: number;
 }) {
-  const steps = keySignatureSteps(fifths, clef);
   return (
     <>
-      {steps.map((s, i) => (
-        <path
-          key={i}
-          d={accPath(s.alter)}
-          className="sm-ink"
-          transform={`translate(${x + i * 1.05 * sp} ${y + stepY(s.step, clef, sp)}) scale(${sp})`}
-        />
-      ))}
+      {keySignatureSteps(fifths, clef).map((s, i) => {
+        const g = accidentalGlyph(s.alter);
+        return g ? <G key={i} name={g} x={x + i * 1.05 * sp} y={y + stepY(s.step, clef, sp)} sp={sp} /> : null;
+      })}
     </>
   );
 }
@@ -159,15 +163,14 @@ function TimeSignature({
   sp: number;
 }) {
   const draw = (text: string, cy: number) => {
-    const w = digitsWidth(text);
-    return text.split("").map((ch, i) => (
-      <path
-        key={`${cy}-${i}`}
-        d={digitPath(ch)}
-        className="sm-ink"
-        transform={`translate(${x + (i + 0.5) * 1.28 * sp - w * sp * 0 } ${cy}) scale(${sp * 1.05})`}
-      />
-    ));
+    const total = digitsWidth(text);
+    const slot = Math.max(digitsWidth(String(num)), digitsWidth(String(den)));
+    let cx = x + ((slot - total) / 2) * sp; // centre the shorter row over the longer
+    return text.split("").map((ch, i) => {
+      const el = <G key={`${cy}-${i}`} name={digitGlyph(ch)} x={cx} y={cy} sp={sp} />;
+      cx += digitWidth(ch) * sp;
+      return el;
+    });
   };
   return (
     <>
@@ -181,47 +184,40 @@ function Element({
   el,
   staffY,
   sp,
-  clef,
   highlight,
   selected,
   noteNames,
-  onPickNote,
+  onNoteDown,
+  onNoteContext,
 }: {
   el: LaidElement;
   staffY: number;
   sp: number;
-  clef: Clef;
   highlight?: ReadonlySet<number>;
   selected?: ReadonlySet<number>;
   noteNames?: boolean;
-  onPickNote?: (noteId: number, additive: boolean) => void;
+  onNoteDown?: (noteId: number, e: React.PointerEvent) => void;
+  onNoteContext?: (noteId: number, e: React.MouseEvent) => void;
 }) {
   const g: React.ReactNode[] = [];
 
   if (el.source.kind === "rest") {
-    g.push(
-      <path
-        key="rest"
-        d={restPath(el.source.dur.value)}
-        className="sm-ink"
-        transform={`translate(${el.x} ${staffY + el.restY}) scale(${sp})`}
-      />,
-    );
+    const name = restGlyph(el.source.dur.value);
+    g.push(<G key="rest" name={name} x={el.x - (restWidth(el.source.dur.value) / 2) * sp} y={staffY + el.restY} sp={sp} />);
     for (let d = 0; d < el.dots; d++) {
       g.push(
-        <circle
+        <G
           key={`d${d}`}
-          cx={el.x + (0.85 + d * 0.42) * sp}
-          cy={staffY + el.dotY}
-          r={DOT_R * sp}
-          className="sm-ink"
+          name="augmentationDot"
+          x={el.x + (0.75 + d * (DOT_W + 0.18)) * sp}
+          y={staffY + el.dotY}
+          sp={sp}
         />,
       );
     }
     return <g>{g}</g>;
   }
 
-  // ledger lines
   el.ledgers.forEach((l, i) =>
     g.push(
       <line
@@ -231,12 +227,11 @@ function Element({
         x2={el.x + l.x2}
         y2={staffY + l.y}
         className="sm-staffline"
-        strokeWidth={Math.max(0.7, sp * 0.11)}
+        strokeWidth={Math.max(0.7, sp * 0.13)}
       />,
     ),
   );
 
-  // stem
   if (el.stem) {
     g.push(
       <line
@@ -246,77 +241,61 @@ function Element({
         x2={el.x + el.stem.x}
         y2={staffY + el.stem.y2}
         className="sm-ink-stroke"
-        strokeWidth={sp * 0.13}
-        strokeLinecap="round"
+        strokeWidth={sp * 0.12}
       />,
     );
-    for (let f = 0; f < el.flags; f++) {
-      g.push(
-        <path
-          key={`f${f}`}
-          d={flagPath(el.stemUp, f)}
-          className="sm-ink"
-          transform={`translate(${el.x + el.stem.x} ${staffY + el.stem.y2}) scale(${sp})`}
-        />,
-      );
+    if (el.flags > 0) {
+      const fg = flagGlyph(el.source.dur.value, el.stemUp);
+      if (fg) g.push(<G key="flag" name={fg} x={el.x + el.stem.x} y={staffY + el.stem.y2} sp={sp} />);
     }
   }
 
-  // heads, accidentals, dots
   el.heads.forEach((h, i) => {
     const on = highlight?.has(h.noteId);
     const sel = selected?.has(h.noteId);
     const cls = "sm-head" + (on ? " playing" : "") + (sel ? " selected" : "");
+    const half = noteheadHalfWidth(h.value) * sp;
+
     if (h.accidental !== null) {
-      g.push(
-        <path
-          key={`a${i}`}
-          d={accPath(h.accidental)}
-          className="sm-ink"
-          transform={`translate(${el.x + h.accX} ${staffY + h.y}) scale(${sp})`}
-        />,
-      );
+      const ag = accidentalGlyph(h.accidental);
+      if (ag) g.push(<G key={`a${i}`} name={ag} x={el.x + h.accX} y={staffY + h.y} sp={sp} />);
     }
+
     g.push(
       <path
         key={`h${i}`}
-        d={noteheadPath(h.value)}
+        d={BRAVURA[noteheadGlyph(h.value)]}
         className={cls}
-        fillRule="evenodd"
         data-nid={h.noteId}
-        transform={`translate(${el.x + h.dx} ${staffY + h.y}) scale(${sp})`}
-        onPointerDown={
-          onPickNote
-            ? (e) => {
-                e.stopPropagation();
-                onPickNote(h.noteId, e.shiftKey || e.ctrlKey);
-              }
-            : undefined
-        }
+        transform={glyphAt(el.x + h.dx - half, staffY + h.y, sp)}
+        onPointerDown={onNoteDown ? (e) => onNoteDown(h.noteId, e) : undefined}
+        onContextMenu={onNoteContext ? (e) => onNoteContext(h.noteId, e) : undefined}
       />,
     );
+
     if (noteNames) {
       g.push(
         <text
           key={`n${i}`}
           x={el.x + h.dx}
-          y={staffY + h.y + sp * 0.28}
+          y={staffY + h.y + sp * 0.3}
           className="sm-headname"
-          fontSize={sp * 0.72}
+          fontSize={sp * 0.78}
           textAnchor="middle"
         >
           {LETTERS[((h.step % 7) + 7) % 7]}
         </text>,
       );
     }
+
     for (let d = 0; d < el.dots; d++) {
       g.push(
-        <circle
+        <G
           key={`hd${i}-${d}`}
-          cx={el.x + h.dx + (0.95 + d * 0.42) * sp}
-          cy={staffY + el.dotY}
-          r={DOT_R * sp}
-          className="sm-ink"
+          name="augmentationDot"
+          x={el.x + h.dx + half + (0.28 + d * (DOT_W + 0.18)) * sp}
+          y={staffY + el.dotY}
+          sp={sp}
         />,
       );
     }
@@ -341,26 +320,28 @@ function Measure({
   const sp = layout.sp;
   const parts: React.ReactNode[] = [];
   const staffCount = layout.staffCount;
+  const slots = prefixSlots(sp, m.showClef, m.showKey, m.showMeter, layout.fifths);
 
-  // prefix: clef / key / meter, per staff
   for (let s = 0; s < staffCount; s++) {
     const clef = layout.clefs[s] ?? "treble";
     const y = sys.y + (sys.staffY[s] ?? 0);
-    let px = m.x + 0.6 * sp;
     if (m.showClef) {
-      parts.push(<Clef key={`c${s}`} clef={clef} x={px + 1.4 * sp} y={y} sp={sp} />);
-      px += 3.1 * sp;
+      parts.push(
+        <G key={`c${s}`} name={clefGlyph(clef)} x={m.x + slots.clef} y={y + CLEF_ANCHOR[clef] * sp} sp={sp} />,
+      );
     }
     if (m.showKey && layout.fifths !== 0) {
-      parts.push(<KeySignature key={`k${s}`} fifths={layout.fifths} clef={clef} x={px + 0.4 * sp} y={y} sp={sp} />);
-      px += (Math.abs(layout.fifths) * 1.05 + 0.5) * sp;
+      parts.push(
+        <KeySignature key={`k${s}`} fifths={layout.fifths} clef={clef} x={m.x + slots.key} y={y} sp={sp} />,
+      );
     }
     if (m.showMeter) {
-      parts.push(<TimeSignature key={`t${s}`} num={m.meter.num} den={m.meter.den} x={px + 0.3 * sp} y={y} sp={sp} />);
+      parts.push(
+        <TimeSignature key={`t${s}`} num={m.meter.num} den={m.meter.den} x={m.x + slots.meter} y={y} sp={sp} />,
+      );
     }
   }
 
-  // elements
   for (const el of m.elements) {
     const y = sys.y + (sys.staffY[el.staff] ?? 0);
     parts.push(
@@ -369,16 +350,15 @@ function Measure({
         el={el}
         staffY={y}
         sp={sp}
-        clef={layout.clefs[el.staff] ?? "treble"}
         highlight={props.highlight}
         selected={props.selected}
         noteNames={props.noteNames}
-        onPickNote={props.onPickNote}
+        onNoteDown={props.onNoteDown}
+        onNoteContext={props.onNoteContext}
       />,
     );
   }
 
-  // beams
   m.beams.forEach((b, i) => {
     const y = sys.y + (sys.staffY[b.staff] ?? 0);
     const th = sp * 0.5;
@@ -391,7 +371,6 @@ function Measure({
     );
   });
 
-  // ties
   m.ties.forEach((t, i) => {
     const y = sys.y + (sys.staffY[t.staff] ?? 0);
     parts.push(
@@ -404,14 +383,20 @@ function Measure({
     );
   });
 
-  // barline at the measure's right edge, spanning all staves
   const top = sys.y + (sys.staffY[0] ?? 0);
   const bottom = sys.y + (sys.staffY[staffCount - 1] ?? 0) + 4 * sp;
   const bx = m.x + m.width;
   if (isLastOfScore) {
     parts.push(
       <g key="final">
-        <line x1={bx - sp * 0.55} y1={top} x2={bx - sp * 0.55} y2={bottom} className="sm-ink-stroke" strokeWidth={sp * 0.11} />
+        <line
+          x1={bx - sp * 0.55}
+          y1={top}
+          x2={bx - sp * 0.55}
+          y2={bottom}
+          className="sm-ink-stroke"
+          strokeWidth={sp * 0.11}
+        />
         <rect x={bx - sp * 0.32} y={top} width={sp * 0.32} height={bottom - top} className="sm-ink" />
       </g>,
     );
@@ -431,13 +416,7 @@ function Measure({
 
   if (m.dynamic) {
     parts.push(
-      <text
-        key="dyn"
-        x={m.contentX}
-        y={bottom + sp * 1.9}
-        className="sm-dynamic"
-        fontSize={sp * 1.7}
-      >
+      <text key="dyn" x={m.contentX} y={bottom + sp * 1.9} className="sm-dynamic" fontSize={sp * 1.7}>
         {m.dynamic}
       </text>,
     );
@@ -453,43 +432,73 @@ export default function Score(props: ScoreProps) {
   if (!pg) return null;
 
   const margin = props.margin ?? 0;
+  const leftPad = props.leftPad ?? 0;
   const headerH = props.header && page === 0 ? HEADER_SPACES * sp : 0;
   const contentW = props.pageWidth ? props.pageWidth - margin * 2 : layout.width;
-  const contentH = props.pageHeight ? props.pageHeight - margin * 2 : pg.height + sp * 2;
-  const svgW = props.pageWidth ?? layout.width + (props.leftPad ?? 0);
+  const svgW = props.pageWidth ?? layout.width + leftPad;
   const svgH = props.pageHeight ?? pg.height + sp * 4;
-
   const lastSystem = pg.systems[pg.systems.length - 1];
 
-  const onBackgroundClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!props.onPickTick) return;
-    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-    const scale = svgW / rect.width;
-    const x = (e.clientX - rect.left) * scale - margin - (props.leftPad ?? 0);
-    const y = (e.clientY - rect.top) * scale - margin - headerH;
-    // nearest system by vertical distance
-    let best: { sys: (typeof pg.systems)[number]; d: number } | null = null;
+  /** Pointer event → musical position on this page. */
+  const locate = (clientX: number, clientY: number, svg: SVGSVGElement): ScorePoint | null => {
+    const rect = svg.getBoundingClientRect();
+    const scale = svgW / Math.max(1, rect.width);
+    const x = (clientX - rect.left) * scale - margin - leftPad;
+    const y = (clientY - rect.top) * scale - margin - headerH;
+
+    let best: { sys: LaidSystem; d: number } | null = null;
     for (const s of pg.systems) {
       const d = y < s.y ? s.y - y : y > s.y + s.height ? y - (s.y + s.height) : 0;
       if (!best || d < best.d) best = { sys: s, d };
     }
-    if (!best) return;
-    for (const m of best.sys.measures) {
-      if (x >= m.x && x < m.x + m.width) {
-        const frac = Math.max(0, Math.min(1, (x - m.contentX) / Math.max(1, m.contentW)));
-        props.onPickTick(m.startTick + frac * m.ticks);
-        return;
+    if (!best) return null;
+    const sys = best.sys;
+
+    // nearest staff within the system
+    let staff = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < layout.staffCount; i++) {
+      const top = sys.y + (sys.staffY[i] ?? 0);
+      const d = y < top ? top - y : y > top + 4 * sp ? y - (top + 4 * sp) : 0;
+      if (d < bestD) {
+        bestD = d;
+        staff = i;
       }
     }
+    const staffTopY = sys.y + (sys.staffY[staff] ?? 0);
+    const step = yToStep(y - staffTopY, layout.clefs[staff] ?? "treble", sp);
+
+    for (const m of sys.measures) {
+      if (x >= m.x && x < m.x + m.width) {
+        const frac = Math.max(0, Math.min(1, (x - m.contentX) / Math.max(1, m.contentW)));
+        return { page, system: sys, staff, tick: m.startTick + frac * m.ticks, step, x, y };
+      }
+    }
+    return null;
+  };
+
+  const onBackgroundPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    const pt = locate(e.clientX, e.clientY, e.currentTarget);
+    if (!pt) return;
+    if (props.onStaffDown) props.onStaffDown(pt, e);
+    else props.onPickTick?.(pt.tick);
+  };
+
+  const onBackgroundContext = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!props.onStaffContext) return;
+    const pt = locate(e.clientX, e.clientY, e.currentTarget as unknown as SVGSVGElement);
+    if (pt) props.onStaffContext(pt, e);
   };
 
   return (
     <svg
-      className="sm-page"
+      className={"sm-page" + (props.editing ? " editing" : "")}
       width={svgW}
       height={svgH}
       viewBox={`0 0 ${svgW} ${svgH}`}
-      onClick={onBackgroundClick}
+      onPointerDown={onBackgroundPointerDown}
+      onContextMenu={onBackgroundContext}
       role="img"
       aria-label="Sheet music"
     >
@@ -501,24 +510,25 @@ export default function Score(props: ScoreProps) {
             {props.header.title}
           </text>
           {props.header.subtitle ? (
-            <text x={contentW / 2 + margin} y={margin + sp * 4.9} textAnchor="middle" className="sm-subtitle" fontSize={sp * 1.2}>
+            <text
+              x={contentW / 2 + margin}
+              y={margin + sp * 4.9}
+              textAnchor="middle"
+              className="sm-subtitle"
+              fontSize={sp * 1.2}
+            >
               {props.header.subtitle}
             </text>
           ) : null}
-          {props.header.part ? (
-            <text x={margin} y={margin + sp * 6.6} className="sm-part" fontSize={sp * 1.15}>
-              {props.header.part}
-            </text>
-          ) : null}
           {props.header.tempo ? (
-            <text x={margin + (props.leftPad ?? 0)} y={margin + sp * 7.9} className="sm-tempo" fontSize={sp * 1.1}>
+            <text x={margin + leftPad} y={margin + sp * 7.9} className="sm-tempo" fontSize={sp * 1.1}>
               {`♩ = ${Math.round(props.header.tempo)}`}
             </text>
           ) : null}
         </g>
       ) : null}
 
-      <g transform={`translate(${margin + (props.leftPad ?? 0)} ${margin + headerH})`} className="sm-music">
+      <g transform={`translate(${margin + leftPad} ${margin + headerH})`} className="sm-music">
         {pg.systems.map((sys, si) => {
           const staffCount = layout.staffCount;
           const top = sys.y + (sys.staffY[0] ?? 0);
@@ -528,13 +538,15 @@ export default function Score(props: ScoreProps) {
               {Array.from({ length: staffCount }, (_, s) => (
                 <StaffLines key={s} x={0} y={sys.y + (sys.staffY[s] ?? 0)} width={sys.width} sp={sp} />
               ))}
-              {/* system spine + brace */}
               <line x1={0} y1={top} x2={0} y2={bottom} className="sm-ink-stroke" strokeWidth={sp * 0.13} />
               {staffCount > 1 ? (
                 <path
                   className="sm-ink"
-                  d={bracePath((bottom - top) / sp)}
-                  transform={`translate(${-sp * 0.85} ${top}) scale(${sp})`}
+                  d={BRAVURA.brace}
+                  // The brace outline is a fixed height; stretch it to span the system.
+                  transform={`translate(${-sp * 0.9} ${bottom}) scale(${unitScale(sp)} ${
+                    -unitScale(sp) * ((bottom - top) / sp / BRACE_H)
+                  })`}
                 />
               ) : null}
               {sys.measures.map((m, mi) => (
@@ -553,18 +565,13 @@ export default function Score(props: ScoreProps) {
           );
         })}
 
-        {props.playhead ? (
-          <line
-            className="sm-playhead"
-            x1={props.playhead.x}
-            x2={props.playhead.x}
-            y1={props.playhead.system.y - sp * 1.2}
-            y2={
-              props.playhead.system.y +
-              (props.playhead.system.staffY[layout.staffCount - 1] ?? 0) +
-              4 * sp +
-              sp * 1.2
-            }
+        {props.marquee ? (
+          <rect
+            className="sm-marquee"
+            x={Math.min(props.marquee.x1, props.marquee.x2)}
+            y={Math.min(props.marquee.y1, props.marquee.y2)}
+            width={Math.abs(props.marquee.x2 - props.marquee.x1)}
+            height={Math.abs(props.marquee.y2 - props.marquee.y1)}
           />
         ) : null}
       </g>
@@ -577,3 +584,22 @@ export default function Score(props: ScoreProps) {
     </svg>
   );
 }
+
+/** Bounding box of a laid element's noteheads, for marquee hit-testing. */
+export function elementBox(el: LaidElement, staffY: number, sp: number): {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+} {
+  const half = noteheadHalfWidth(el.heads[0]?.value ?? 4) * sp;
+  const ys = el.heads.map((h) => staffY + h.y);
+  return {
+    x1: el.x - half,
+    x2: el.x + half,
+    y1: Math.min(...ys) - sp * 0.5,
+    y2: Math.max(...ys) + sp * 0.5,
+  };
+}
+
+export { BBOX };

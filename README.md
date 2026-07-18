@@ -20,6 +20,10 @@ never takes down your session.
 - **Built-in instruments & effects** — modeled Piano, PolySynth (with factory presets),
   sampler, and a stock effects suite (EQ-style utility, gate, compressor, limiter,
   delay, reverb).
+- **Sheet music** — your MIDI engraved as real notation: proper pitch spelling for the key,
+  tied/dotted rhythms, beaming, grand staff, and a live view while you record. Edit on the
+  staff (write, delete, join, split, transpose), then print it or export MusicXML for
+  MuseScore/Dorico/Sibelius.
 - **Room View** — place your channels in a 3D room: left/right = pan, near/far = level.
 - **Export** — WAV (16/24/32-bit), MP3, FLAC, AAC, with loudness normalization; MIDI
   file export; Cubase Track Archive export.
@@ -79,3 +83,9 @@ Quick sanity check (headless): `node scripts/smoke-test.mjs`
 See [LICENSE](LICENSE). Note: building with VST3 support fetches the Steinberg VST3 SDK
 (GPLv3/proprietary dual license); `-DMYDAW_NO_VST3=ON` builds without it. The VST2 ABI
 header is a clean-room declaration — the Steinberg VST2 SDK is neither included nor needed.
+
+Third-party assets: the sheet-music view draws with glyph outlines from the **Bravura**
+music font (© Steinberg Media Technologies GmbH, SIL Open Font License 1.1 —
+[docs/licenses/Bravura-OFL-1.1.txt](docs/licenses/Bravura-OFL-1.1.txt)). Only the ~40 glyphs
+used are vendored as path data in `ui/src/components/SheetMusic/bravura.ts`; no font file is
+shipped or loaded at runtime.

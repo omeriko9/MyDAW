@@ -22,7 +22,15 @@ import {
   type NotatedElement,
   type NotatedMeasure,
 } from "./notation";
-import { accidentalWidth, digitsWidth, HEAD_RX, noteheadWidth, WHOLE_RX } from "./glyphs";
+import {
+  accidentalWidth,
+  clefWidth,
+  digitsWidth,
+  HEAD_HALF,
+  noteheadHalfWidth,
+  noteheadWidth,
+  stemAttach,
+} from "./glyphs";
 
 export type Clef = "treble" | "bass" | "alto";
 
@@ -164,6 +172,10 @@ const MAX_BEAM_SLOPE = 0.28; // px per px
 export const stepY = (step: number, clef: Clef, sp: number): number =>
   ((CLEF_TOP_STEP[clef] - step) * sp) / 2;
 
+/** Inverse of stepY — which line/space a y coordinate falls on. */
+export const yToStep = (y: number, clef: Clef, sp: number): number =>
+  CLEF_TOP_STEP[clef] - Math.round((y * 2) / sp);
+
 /** Staff positions for a key signature's accidentals, in draw order. */
 export function keySignatureSteps(fifths: number, clef: Clef): { step: number; alter: number }[] {
   const accs = keySignatureAccidentals(fifths);
@@ -181,10 +193,27 @@ function prefixWidth(
   meter: { num: number; den: number },
 ): number {
   let w = 0.6 * sp;
-  if (showClef) w += 3.1 * sp;
+  if (showClef) w += clefWidth("treble") * sp;
   if (showKey && fifths !== 0) w += (Math.abs(fifths) * 1.05 + 0.5) * sp;
   if (showMeter) w += (Math.max(digitsWidth(String(meter.num)), digitsWidth(String(meter.den))) + 0.9) * sp;
   return w;
+}
+
+/** Where the clef/key/meter prefix items sit inside a measure, in px from measure x. */
+export function prefixSlots(
+  sp: number,
+  showClef: boolean,
+  showKey: boolean,
+  showMeter: boolean,
+  fifths: number,
+): { clef: number; key: number; meter: number } {
+  let x = 0.6 * sp;
+  const clef = x;
+  if (showClef) x += clefWidth("treble") * sp;
+  const key = x;
+  if (showKey && fifths !== 0) x += (Math.abs(fifths) * 1.05 + 0.5) * sp;
+  const meter = x;
+  return { clef, key, meter };
 }
 
 /**
@@ -221,7 +250,7 @@ function buildColumns(measure: NotatedMeasure, sp: number): Column[] {
     const next = i + 1 < sorted.length ? sorted[i + 1] : end;
     // Accidentals and wide (whole-note) heads need room before/at the column.
     let accWidth = 0;
-    let headWidth = HEAD_RX * 2;
+    let headWidth = HEAD_HALF * 2;
     for (const el of byStaff.values()) {
       let acc = 0;
       for (const h of el.heads) if (h.accidental !== null) acc += accidentalWidth(h.accidental);
@@ -279,10 +308,11 @@ function layElement(
   }
 
   const filled = el.dur.value >= 4;
-  const headHalf = (el.dur.value === 1 ? WHOLE_RX : HEAD_RX) * sp;
-  let accCursor = -headHalf - 0.35 * sp;
+  const headHalf = noteheadHalfWidth(el.dur.value) * sp;
+  let accCursor = -headHalf - 0.25 * sp;
 
-  // Accidentals stack leftward, furthest-out first, so they never overlap.
+  // Accidentals stack leftward, furthest-out first, so they never overlap. accX is the
+  // glyph's LEFT edge (SMuFL registers accidentals there).
   const withAcc = el.heads.filter((h) => h.accidental !== null);
   const accX = new Map<number, number>();
   withAcc
@@ -291,7 +321,7 @@ function layElement(
     .forEach((h) => {
       const w = accidentalWidth(h.accidental!) * sp;
       accCursor -= w;
-      accX.set(h.noteId, accCursor + w * 0.5);
+      accX.set(h.noteId, accCursor);
     });
 
   for (const h of el.heads) {
@@ -315,7 +345,7 @@ function layElement(
   // Ledger lines, once per occupied line position outside the staff.
   const top = CLEF_TOP_STEP[clef];
   const bottom = top - 8;
-  const lx = 1.05 * sp;
+  const lx = (headHalf / sp + 0.3) * sp;
   const seen = new Set<number>();
   for (const h of el.heads) {
     const s = h.spelled.step;
@@ -334,15 +364,17 @@ function layElement(
     }
   }
 
-  // Stem: from the head at the near end to IDEAL_STEM beyond the far one.
+  // Stem: from the head at the near end to IDEAL_STEM beyond the far one. The x offset
+  // is the font's own stem anchor, so the stem meets the notehead where it should.
   if (el.dur.value >= 2) {
     const ys = out.heads.map((h) => h.y);
     const lo = Math.min(...ys);
     const hi = Math.max(...ys);
-    const sx = el.stemUp ? headHalf - 0.06 * sp : -headHalf + 0.06 * sp;
+    const at = stemAttach(el.dur.value, el.stemUp);
+    const sx = at.dx * sp;
     out.stem = el.stemUp
-      ? { x: sx, y1: hi, y2: lo - IDEAL_STEM * sp }
-      : { x: sx, y1: lo, y2: hi + IDEAL_STEM * sp };
+      ? { x: sx, y1: hi + at.dy * sp, y2: lo - IDEAL_STEM * sp }
+      : { x: sx, y1: lo + at.dy * sp, y2: hi + IDEAL_STEM * sp };
     if (el.beam === null) out.flags = flagCount(el.dur.value);
   }
 
@@ -566,7 +598,7 @@ export function layoutScore(measures: NotatedMeasure[], opt: LayoutOptions): Sco
             m.ties.push({
               x1: prev.x,
               y1: prev.y,
-              x2: el.x + h.dx - HEAD_RX * opt.sp * 0.4,
+              x2: el.x + h.dx - HEAD_HALF * opt.sp * 0.7,
               y2: h.y,
               dir: prev.up ? 1 : -1,
               staff: el.staff,
@@ -574,7 +606,7 @@ export function layoutScore(measures: NotatedMeasure[], opt: LayoutOptions): Sco
           }
           if (h.tieTo) {
             pending.set(key, {
-              x: el.x + h.dx + HEAD_RX * opt.sp * 0.4,
+              x: el.x + h.dx + HEAD_HALF * opt.sp * 0.7,
               y: h.y,
               staff: el.staff,
               up: el.stemUp,

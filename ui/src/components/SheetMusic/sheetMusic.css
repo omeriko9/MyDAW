@@ -127,10 +127,22 @@
   shape-rendering: crispEdges;
 }
 
+/* Only noteheads are clickable. Everything else is decoration and must stay transparent
+   to hit-testing — a dynamic mark or a bar number drawn over a low note would otherwise
+   swallow the click meant for the note (and text elements hit their whole glyph box). */
+.sm-page .sm-ink,
+.sm-page .sm-ink-stroke,
+.sm-page .sm-staffline,
+.sm-page .sm-paper,
+.sm-page text {
+  pointer-events: none;
+}
+
 .sm-head {
   fill: currentColor;
   stroke: none;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .sm-head.selected {
@@ -140,6 +152,31 @@
 /* A note that is sounding right now — toggled imperatively during playback. */
 .sm-head.playing {
   fill: var(--accent);
+}
+
+.sm-page.editing {
+  cursor: crosshair;
+}
+
+.sm-page.editing .sm-head {
+  cursor: pointer;
+}
+
+.sm-marquee {
+  fill: var(--accent);
+  fill-opacity: 0.12;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
+
+.sm-selcount {
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  padding: 0 2px;
 }
 
 .sm-scroll.paged .sm-head.playing {
