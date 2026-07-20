@@ -764,6 +764,41 @@ body {
   margin: 4px 6px;
 }
 
+/* Icon row (MenuIconRow) — Cubase-style toolbox strip at the top of a menu */
+.ctx-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+}
+.ctx-icon-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.ctx-icon-btn:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+.ctx-icon-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
 /* ============================================================================
  * Modal (Modal.tsx)
  * ==========================================================================*/

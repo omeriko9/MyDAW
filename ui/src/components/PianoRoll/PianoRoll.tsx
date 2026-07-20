@@ -1590,21 +1590,24 @@ function Editor({ track, clip }: EditorProps) {
     if (hit && !useStore.getState().selection.noteIds.includes(hit.note.id)) {
       setNoteSelection([hit.note.id]);
     }
-    // Cubase-style toolbox on empty space (split has no piano-roll role — omitted).
+    // Cubase-style hovering toolbox: an icon strip at the top of EVERY right-click
+    // menu (split has no piano-roll role — omitted). Clicking picks the tool.
     const s = useStore.getState();
-    const tools: MenuEntry[] = (
-      [
-        { tool: "select", label: "Select", icon: "pointer", shortcut: "1" },
-        { tool: "draw", label: "Draw", icon: "pencil", shortcut: "2" },
-        { tool: "erase", label: "Erase", icon: "eraser", shortcut: "3" },
-      ] as const
-    ).map((t) => ({
-      label: t.label,
-      icon: t.icon,
-      shortcut: t.shortcut,
-      checked: s.tool === t.tool,
-      onClick: () => useStore.getState().setTool(t.tool),
-    }));
+    const toolRow: MenuEntry = {
+      type: "icons",
+      buttons: (
+        [
+          { tool: "select", label: "Select tool (1)", icon: "pointer" },
+          { tool: "draw", label: "Draw tool (2)", icon: "pencil" },
+          { tool: "erase", label: "Erase tool (3)", icon: "eraser" },
+        ] as const
+      ).map((t) => ({
+        icon: t.icon,
+        label: t.label,
+        active: s.tool === t.tool,
+        onClick: () => useStore.getState().setTool(t.tool),
+      })),
+    };
     // MIDI functions run on the selection AT CLICK TIME (the hit note was selected
     // above if it wasn't already) — pure math from lib/midiFunctions via editNotes.
     const applyFn = (fn: (notes: Note[]) => MF.NotesPatch): void => {
@@ -1645,6 +1648,8 @@ function Editor({ track, clip }: EditorProps) {
     ];
     const items: MenuEntry[] = hit
       ? [
+          toolRow,
+          "separator",
           { label: "Duplicate", icon: "plus", onClick: duplicateSelected },
           { label: "Quantize", icon: "magnet", shortcut: "Q", onClick: doQuantize },
           { label: "Functions", icon: "sliders", submenu: fnItems },
@@ -1652,7 +1657,7 @@ function Editor({ track, clip }: EditorProps) {
           { label: "Delete", icon: "trash", danger: true, shortcut: "Del", onClick: deleteSelected },
         ]
       : [
-          ...tools,
+          toolRow,
           "separator",
           {
             label: "Add Note Here",

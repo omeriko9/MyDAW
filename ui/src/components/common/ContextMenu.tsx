@@ -40,10 +40,33 @@ export interface MenuItemDef {
   onClick?: () => void;
 }
 
-export type MenuEntry = MenuItemDef | { type: "separator" } | "separator";
+/** One button in an icon row (Cubase-style toolbox strip at the top of a menu). */
+export interface MenuIconDef {
+  icon: IconName;
+  /** Tooltip text (HTML title). */
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}
+
+export interface MenuIconRow {
+  type: "icons";
+  buttons: MenuIconDef[];
+}
+
+export type MenuEntry = MenuItemDef | { type: "separator" } | "separator" | MenuIconRow;
 
 function isSep(e: MenuEntry): e is "separator" | { type: "separator" } {
   return e === "separator" || (typeof e === "object" && "type" in e && e.type === "separator");
+}
+
+function isIcons(e: MenuEntry): e is MenuIconRow {
+  return typeof e === "object" && "type" in e && e.type === "icons";
+}
+
+/** Regular activatable/highlightable entry (not a separator or icon row). */
+function isItem(e: MenuEntry): e is MenuItemDef {
+  return typeof e === "object" && !("type" in e);
 }
 
 /* ============================================================================
@@ -104,7 +127,7 @@ function nextEnabled(items: MenuEntry[], from: number, dir: 1 | -1): number {
   for (let k = 0; k < n; k++) {
     i = (i + dir + n) % n;
     const it = items[i];
-    if (!isSep(it) && !it.disabled) return i;
+    if (isItem(it) && !it.disabled) return i;
   }
   return -1;
 }
@@ -149,7 +172,7 @@ function MenuOverlay({ x, y, items }: { x: number; y: number; items: MenuEntry[]
     const it = lvl.items[index];
     const base = c.slice(0, depth + 1);
     base[depth] = { ...base[depth], hi: index };
-    if (it && !isSep(it) && !it.disabled && it.submenu && it.submenu.length > 0) {
+    if (it && isItem(it) && !it.disabled && it.submenu && it.submenu.length > 0) {
       const el = itemEls.current.get(`${depth}:${index}`);
       if (el) {
         const r = el.getBoundingClientRect();
@@ -175,7 +198,7 @@ function MenuOverlay({ x, y, items }: { x: number; y: number; items: MenuEntry[]
     const lvl = chainRef.current[depth];
     if (!lvl) return;
     const it = lvl.items[index];
-    if (!it || isSep(it) || it.disabled) return;
+    if (!it || !isItem(it) || it.disabled) return;
     if (it.submenu && it.submenu.length > 0) {
       if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
       syncSubmenu(depth, index);
@@ -222,7 +245,7 @@ function MenuOverlay({ x, y, items }: { x: number; y: number; items: MenuEntry[]
         stop();
         if (lvl.hi >= 0) {
           const it = lvl.items[lvl.hi];
-          if (it && !isSep(it) && it.submenu && it.submenu.length > 0 && !it.disabled) {
+          if (it && isItem(it) && it.submenu && it.submenu.length > 0 && !it.disabled) {
             if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
             syncSubmenu(depth, lvl.hi);
             // highlight the submenu's first enabled item
@@ -278,6 +301,10 @@ function MenuOverlay({ x, y, items }: { x: number; y: number; items: MenuEntry[]
           depth={d}
           onHover={onItemHover}
           onActivate={activate}
+          onIconClick={(b) => {
+            close();
+            b.onClick();
+          }}
           registerEl={registerEl}
         />
       ))}
@@ -294,12 +321,14 @@ function MenuList({
   depth,
   onHover,
   onActivate,
+  onIconClick,
   registerEl,
 }: {
   level: Level;
   depth: number;
   onHover: (depth: number, index: number) => void;
   onActivate: (depth: number, index: number) => void;
+  onIconClick: (b: MenuIconDef) => void;
   registerEl: (depth: number, index: number, el: HTMLElement | null) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -344,6 +373,23 @@ function MenuList({
     >
       {level.items.map((it, i) => {
         if (isSep(it)) return <div key={i} className="ctx-sep" role="separator" />;
+        if (isIcons(it)) {
+          return (
+            <div key={i} className="ctx-icons" role="group">
+              {it.buttons.map((b) => (
+                <button
+                  key={b.label}
+                  type="button"
+                  className={"ctx-icon-btn" + (b.active ? " on" : "")}
+                  title={b.label}
+                  onClick={() => onIconClick(b)}
+                >
+                  <Icon name={b.icon} size={16} />
+                </button>
+              ))}
+            </div>
+          );
+        }
         const hi = i === level.hi;
         const cls =
           "ctx-item" +
