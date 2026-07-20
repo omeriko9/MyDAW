@@ -265,3 +265,95 @@
   padding-top: 8px;
   font-size: 11px;
 }
+
+/* ============================================================================
+ * QuickHelpOverlay (UI_IMPROVE.md §7.3) — hold "?" for the pane's gesture card.
+ * Not a modal: pointer-events none, keyboard stays live underneath.
+ * ==========================================================================*/
+
+.qh-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.25);
+  animation: m-fade-in var(--dur-fast) var(--ease-out);
+}
+
+.qh-card {
+  min-width: 380px;
+  max-width: min(560px, 92vw);
+  max-height: 80vh;
+  overflow: hidden;
+  padding: 14px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation:
+    m-fade-in var(--dur-fast) var(--ease-out),
+    m-rise-up-in var(--dur-move) var(--ease-out);
+}
+
+.qh-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.qh-title-note {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.qh-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.qh-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+.qh-keys {
+  flex: 0 0 148px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.qh-sep {
+  margin: 0 3px;
+  color: var(--text-faint);
+}
+.qh-kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  font-size: 11px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--text);
+}
+.qh-what {
+  min-width: 0;
+  color: var(--text-dim);
+}
+
+.qh-foot {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+}

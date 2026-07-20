@@ -15,6 +15,63 @@ export interface ShortcutGroup {
   items: ShortcutBinding[];
 }
 
+/* ============================================================================
+ * Per-pane quick-help (UI_IMPROVE.md §7.3) — shown while "?" is HELD, for the
+ * pane keyboard input currently routes to. Curated: the gestures/modifiers a
+ * user can't discover by looking, not an exhaustive list.
+ * ========================================================================= */
+
+export type QuickHelpPane = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic";
+
+export const PANE_HINTS: Record<QuickHelpPane, { title: string; items: ShortcutBinding[] }> = {
+  timeline: {
+    title: "Arrangement",
+    items: [
+      { keys: ["Drag edge"], what: "Trim clip · corner handles set fades (audio)" },
+      { keys: ["Alt+drag"], what: "Copy clips · Shift bypasses snap" },
+      { keys: ["Ctrl+wheel", "Alt+wheel"], what: "Zoom time / track height (G, H keys too)" },
+      { keys: ["Right-drag"], what: "Pan the grid (middle-drag too)" },
+      { keys: ["Drag empty"], what: "Rubber-band select — Shift/Ctrl adds" },
+      { keys: ["B"], what: "Split selected clips at the playhead" },
+      { keys: ["F"], what: "Fit selection (or everything) into view" },
+      { keys: ["2×click"], what: "Open clip in its editor · empty MIDI lane: new clip" },
+      { keys: ["Ctrl+click", "Alt+click"], what: "Ruler: set loop start / end" },
+    ],
+  },
+  pianoRoll: {
+    title: "Piano Roll",
+    items: [
+      { keys: ["2×click"], what: "Add a note (select tool) · draw tool drags them out" },
+      { keys: ["Alt+drag"], what: "Copy notes · Shift bypasses snap" },
+      { keys: ["Drag edge"], what: "Resize note (sets the next draw length)" },
+      { keys: ["Ctrl+wheel", "Alt+wheel"], what: "Zoom time / row height (G, H keys too)" },
+      { keys: ["↑", "↓", "←", "→"], what: "Transpose / nudge selection (Shift = octave / bar)" },
+      { keys: ["Right-click"], what: "Tool icons + quantize, functions, lane options" },
+      { keys: ["Lane drag"], what: "Paint velocity · CC lanes: click adds, pencil draws streams" },
+      { keys: ["Q"], what: "Quantize selected notes" },
+    ],
+  },
+  clipEditor: {
+    title: "Clip Editor",
+    items: [
+      { keys: ["Drag edge"], what: "Trim the clip (reveals/hides source audio)" },
+      { keys: ["Drag handle"], what: "Fade in / fade out" },
+      { keys: ["Click"], what: "Set the split cursor (Split at Cursor in the toolbar)" },
+      { keys: ["Ctrl+wheel"], what: "Zoom around the pointer (G, H keys too)" },
+      { keys: ["F"], what: "Fit the whole waveform" },
+    ],
+  },
+  sheetMusic: {
+    title: "Sheet Music",
+    items: [
+      { keys: ["Click", "Drag"], what: "Select noteheads (drag = marquee)" },
+      { keys: ["Drag note"], what: "Change pitch (diatonic) and position" },
+      { keys: ["Right-click"], what: "Insert notes, join/split, legato, transpose" },
+      { keys: ["Pencil toggle"], what: "Edit mode — choose the insert length beside it" },
+    ],
+  },
+};
+
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: "Transport",

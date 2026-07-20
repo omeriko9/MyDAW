@@ -165,6 +165,9 @@ export interface DialogsState {
   shortcuts: boolean;
   /** Command palette (Ctrl+K / Help menu) — run any command, jump to bar/marker/track */
   palette: boolean;
+  /** Quick-help card while "?" is HELD — the pane whose hints to show, or null.
+   *  (Literal union mirrors keyboard.ts KeyContextName; importing it would cycle.) */
+  quickHelp: "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic" | null;
   /** "Recreate Plugins…" dialog (File menu; auto-opened once after Import Project) */
   recreatePlugins: boolean;
   /** Room View — perspective pan/level panner (mixer toolbar button) */
@@ -424,7 +427,7 @@ export const useStore = create<DawState>((set) => ({
   panels: prefPanels,
   activeMidiClipId: null,
   activeAudioClipId: null,
-  dialogs: { settings: false, export: false, shortcuts: false, palette: false, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
+  dialogs: { settings: false, export: false, shortcuts: false, palette: false, quickHelp: null, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
 
   setProject: (project) => set({ project }),
   setEngineStatus: (engineStatus) => set({ engineStatus }),

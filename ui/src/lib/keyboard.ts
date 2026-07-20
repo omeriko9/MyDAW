@@ -782,8 +782,12 @@ function onKeyDown(e: KeyboardEvent): void {
       return;
     }
     case "?": {
+      // Hold = transient quick-help card for the key-routing pane (UI_IMPROVE.md
+      // §7.3); a quick tap (release < 300ms) opens the full cheat sheet instead.
       consume();
-      if (!e.repeat) useStore.getState().setDialogs({ shortcuts: true });
+      if (e.repeat || helpHold !== null) return;
+      helpHold = { code: e.code, at: performance.now() };
+      useStore.getState().setDialogs({ quickHelp: keyRoutingPane(useStore.getState()) });
       return;
     }
     default:
@@ -829,6 +833,27 @@ export function invokeEditAction(
   }
 }
 
+/* Quick-help hold state ("?" — UI_IMPROVE.md §7.3). Keyed by e.code because "?"
+   is Shift+/ on most layouts and keyup may report "/" once Shift lifts first. */
+const HELP_TAP_MS = 300;
+let helpHold: { code: string; at: number } | null = null;
+
+function endHelpHold(asTap: boolean): void {
+  if (helpHold === null) return;
+  const wasTap = asTap && performance.now() - helpHold.at < HELP_TAP_MS;
+  helpHold = null;
+  const s = useStore.getState();
+  s.setDialogs({ quickHelp: null, ...(wasTap ? { shortcuts: true } : {}) });
+}
+
+function onKeyUp(e: KeyboardEvent): void {
+  if (helpHold !== null && e.code === helpHold.code) endHelpHold(true);
+}
+
+function onWindowBlur(): void {
+  endHelpHold(false);
+}
+
 let installed = false;
 
 /** Install the global handler (idempotent). Returns an uninstall function. */
@@ -836,8 +861,12 @@ export function initKeyboard(): () => void {
   if (installed) return () => {};
   installed = true;
   window.addEventListener("keydown", onKeyDown, false); // bubble phase by contract
+  window.addEventListener("keyup", onKeyUp, false);
+  window.addEventListener("blur", onWindowBlur, false);
   return () => {
     installed = false;
+    window.removeEventListener("keyup", onKeyUp, false);
+    window.removeEventListener("blur", onWindowBlur, false);
     window.removeEventListener("keydown", onKeyDown, false);
   };
 }
