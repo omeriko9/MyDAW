@@ -26,6 +26,9 @@ import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { REVEAL_BEAT_EVENT, type RevealBeatDetail } from "../../lib/reveal";
 import { animateViewport, cancelViewportAnimation } from "../../lib/viewportAnim";
 import NavigatorPill from "./NavigatorPill";
+import XrayPill from "./XrayPill";
+import { oneOf, usePrefState } from "../../lib/prefs";
+import { type LensId } from "../../lib/xray";
 import { beatToPx, bpmAtBeat } from "../../lib/time";
 import {
   MAX_ZOOM_X,
@@ -180,6 +183,12 @@ export default function Timeline() {
   const setViewport = useStore((s) => s.setViewport);
   const showMinimap = useStore((s) => s.panels.minimap);
   const isKeyTarget = useIsKeyTarget("timeline");
+  /** X-ray lens (lib/xray): analytical clip recoloring, persisted per user. */
+  const [lens, setLens] = usePrefState<LensId>(
+    "ui.xrayLens",
+    "off",
+    oneOf<LensId>("off", "density", "register", "energy"),
+  );
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(EMPTY_SET);
   const [heightOverride, setHeightOverride] = useState<{ trackId: number; height: number } | null>(
@@ -364,7 +373,7 @@ export default function Timeline() {
           {showMinimap && <Minimap viewW={view.w} />}
           <Ruler />
           <div className="tl-canvas-wrap" ref={wrapRef}>
-            <ClipCanvas rows={rows} />
+            <ClipCanvas rows={rows} lens={lens} />
             <PlayheadOverlay />
             {!project && (
               <div className="tl-empty-hint">No project — waiting for the engine…</div>
@@ -392,6 +401,7 @@ export default function Timeline() {
               }}
             />
             {project && <NavigatorPill viewW={view.w} />}
+            {project && <XrayPill lens={lens} onChange={setLens} />}
           </div>
         </div>
       </div>

@@ -17,7 +17,7 @@
  * segment's start-point curve.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { recordingBus, transportBus, useStore } from "../../store/store";
 import type { Selection, Tool } from "../../store/store";
 import type { RecordingNotesEvent } from "../../protocol/types";
@@ -44,6 +44,7 @@ import { copySelection, cutSelection, findClipById, hasClipboard, pasteAt } from
 import { useAutomationUi } from "./automationUi";
 import { registerKeyContext, toggleLoop, zoomToFitPane } from "../../lib/keyboard";
 import { openPieMenu, type PieItem } from "../common/PieMenu";
+import { computeLensValues, heatHex, type LensId } from "../../lib/xray";
 import { lineV, roundRect, useCanvas } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
 import { animateViewport } from "../../lib/viewportAnim";
@@ -289,14 +290,24 @@ interface StateSnap {
 
 export interface ClipCanvasProps {
   rows: Row[];
+  /** X-ray lens (lib/xray) — analytical clip recoloring; "off" = track colors. */
+  lens?: LensId;
 }
 
-export default function ClipCanvas({ rows }: ClipCanvasProps) {
+export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
   const project = useStore((s) => s.project);
   const viewport = useStore((s) => s.viewport);
   const selection = useStore((s) => s.selection);
   const tool = useStore((s) => s.tool);
   const setSelection = useStore((s) => s.setSelection);
+
+  // Lens heat values — memoized per project reference (cheap lookups per draw).
+  const lensValues = useMemo(
+    () => (lens === "off" || !project ? null : computeLensValues(project, lens)),
+    [project, lens],
+  );
+  const lensRef = useRef<Map<number, number> | null>(null);
+  lensRef.current = lensValues;
 
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
 
@@ -594,7 +605,13 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
           w: cw,
           h: row.height,
           canvasW: w,
-          color: clip.color ?? track.color,
+          // X-ray lens: heat color from content; no-data clips (audio, empty
+          // MIDI under register/energy) go honest-neutral instead of faking it
+          color: lensRef.current
+            ? lensRef.current.has(clip.id)
+              ? heatHex(lensRef.current.get(clip.id)!)
+              : colors.textFaint
+            : (clip.color ?? track.color),
           selected,
           fadeInSec,
           fadeOutSec,
