@@ -67,6 +67,7 @@ const GROUPS: Array<{ title: string; items: Binding[] }> = [
       { keys: ["G", "H"], what: "Zoom out / in (focused pane)" },
       { keys: ["Shift+G", "Shift+H"], what: "Vertical zoom out / in" },
       { keys: ["F"], what: "Zoom to fit — selection if any, else everything" },
+      { keys: ["Ctrl+K"], what: "Command palette — run any command, jump to bar / marker / track" },
       { keys: ["Ctrl+Shift+I"], what: "Agent panel" },
       { keys: ["?"], what: "This cheat sheet" },
     ],

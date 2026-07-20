@@ -30,6 +30,7 @@ beforeEach(() => {
       settings: false,
       export: false,
       shortcuts: false,
+      palette: false,
       recreatePlugins: false,
       roomView: false,
       pluginEditors: [],

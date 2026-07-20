@@ -23,6 +23,7 @@ import { useIsKeyTarget } from "../common/paneFocus";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
+import { REVEAL_BEAT_EVENT, type RevealBeatDetail } from "../../lib/reveal";
 import { beatToPx, bpmAtBeat } from "../../lib/time";
 import {
   MAX_ZOOM_X,
@@ -258,6 +259,24 @@ export default function Timeline() {
       }),
     [],
   );
+
+  // Reveal requests (command palette "go to bar / marker") — bring a beat into view
+  // even when follow-playhead is off. No-op when the target is already comfortably
+  // visible; otherwise land it 35% in from the left edge.
+  useEffect(() => {
+    const onReveal = (e: Event): void => {
+      const { beat } = (e as CustomEvent<RevealBeatDetail>).detail;
+      const s = useStore.getState();
+      const ex = extentRef.current;
+      const v = s.viewport;
+      const x = beat * v.zoomX;
+      if (x >= v.scrollX + ex.viewW * 0.05 && x <= v.scrollX + ex.viewW * 0.85) return;
+      const maxX = Math.max(0, ex.cBeats * v.zoomX - ex.viewW);
+      s.setViewport({ scrollX: Math.min(maxX, Math.max(0, x - ex.viewW * 0.35)) });
+    };
+    window.addEventListener(REVEAL_BEAT_EVENT, onReveal);
+    return () => window.removeEventListener(REVEAL_BEAT_EVENT, onReveal);
+  }, []);
 
   // wheel navigation — native non-passive listener (ctrl+wheel must preventDefault)
   useEffect(() => {

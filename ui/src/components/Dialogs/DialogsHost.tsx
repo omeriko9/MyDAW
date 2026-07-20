@@ -19,6 +19,7 @@ import RecoveryDialog from "./RecoveryDialog";
 import PastePathDialog from "./PastePathDialog";
 import PluginLoadOverlay from "./PluginLoadOverlay";
 import ShortcutsDialog from "./ShortcutsDialog";
+import CommandPalette from "../CommandPalette/CommandPalette";
 import RoomView from "../Mixer/RoomView";
 import ToastHost from "../common/ToastHost";
 
@@ -31,6 +32,7 @@ export default function DialogsHost() {
       <RecoveryDialog />
       <PastePathDialog />
       <ShortcutsDialog />
+      <CommandPalette />
       <RoomView />
       <PluginLoadOverlay />
       <ToastHost />

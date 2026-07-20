@@ -158,6 +158,8 @@ export interface DialogsState {
   export: boolean;
   /** Keyboard-shortcut cheat sheet ("?" key / Help menu) */
   shortcuts: boolean;
+  /** Command palette (Ctrl+K / Help menu) — run any command, jump to bar/marker/track */
+  palette: boolean;
   /** "Recreate Plugins…" dialog (File menu; auto-opened once after Import Project) */
   recreatePlugins: boolean;
   /** Room View — perspective pan/level panner (mixer toolbar button) */
@@ -411,7 +413,7 @@ export const useStore = create<DawState>((set) => ({
   panels: prefPanels,
   activeMidiClipId: null,
   activeAudioClipId: null,
-  dialogs: { settings: false, export: false, shortcuts: false, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
+  dialogs: { settings: false, export: false, shortcuts: false, palette: false, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
 
   setProject: (project) => set({ project }),
   setEngineStatus: (engineStatus) => set({ engineStatus }),

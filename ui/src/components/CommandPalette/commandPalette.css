@@ -1,0 +1,167 @@
+/* ============================================================================
+ * Command palette (UI_IMPROVE.md §7.1) — Ctrl+K overlay.
+ * Carries .modal-overlay for lib/keyboard's inertness check; restyled here to a
+ * top-anchored panel (palettes sit high, like every command-palette web app).
+ * ==========================================================================*/
+
+.cp-overlay {
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.cp-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 92vw);
+  max-height: 62vh;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation:
+    m-fade-in var(--dur-med) var(--ease-out),
+    m-rise-up-in var(--dur-move) var(--ease-out);
+}
+
+/* ---- input row ---- */
+
+.cp-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.cp-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+}
+.cp-input::placeholder {
+  color: var(--text-faint);
+}
+
+/* ---- list ---- */
+
+.cp-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.cp-header {
+  padding: 8px 8px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.cp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.cp-item.sel {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.cp-item.disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+.cp-item.disabled.sel {
+  background: var(--panel3);
+  color: var(--text-faint);
+}
+
+.cp-icon {
+  display: inline-flex;
+  width: 16px;
+  flex: 0 0 auto;
+  justify-content: center;
+  opacity: 0.85;
+}
+
+.cp-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.cp-hl {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+.cp-item.sel .cp-hl {
+  color: var(--on-accent);
+  text-decoration: underline;
+}
+
+.cp-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cp-item.sel .cp-path {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.cp-kbd {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  font-size: 10px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.cp-item.sel .cp-kbd {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: transparent;
+  color: var(--on-accent);
+}
+
+.cp-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* ---- footer ---- */
+
+.cp-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+}

@@ -415,7 +415,8 @@ function muteSelectedTracks(tracks: Track[]): void {
   }
 }
 
-function toggleLoop(): void {
+/** Exported for the command palette's Transport group. */
+export function toggleLoop(): void {
   const s = useStore.getState();
   const loop = s.project?.loop ?? s.transport.loop;
   fire(setLoop(loop.startBeat, loop.endBeat, !loop.enabled));
@@ -530,6 +531,11 @@ function onKeyDown(e: KeyboardEvent): void {
         consume();
         if (ctx?.selectAll) ctx.selectAll();
         else defaultSelectAll();
+        return;
+      case "k":
+        // Command palette (UI_IMPROVE.md §7.1) — also Help → Command Palette.
+        consume();
+        if (!e.repeat) useStore.getState().setDialogs({ palette: true });
         return;
       case "i":
         // Ctrl+I = Import Project (.cpr / MIDI). Ctrl+Shift+I toggles the agent panel

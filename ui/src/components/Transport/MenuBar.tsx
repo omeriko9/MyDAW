@@ -430,6 +430,13 @@ function buildViewMenu(): MenuEntry[] {
 function buildHelpMenu(): MenuEntry[] {
   return [
     {
+      label: "Command Palette…",
+      icon: "search",
+      shortcut: "Ctrl+K",
+      title: "Run any command, or jump to a bar / marker / track",
+      onClick: () => useStore.getState().setDialogs({ palette: true }),
+    },
+    {
       label: "Keyboard Shortcuts…",
       shortcut: "?",
       onClick: () => useStore.getState().setDialogs({ shortcuts: true }),
@@ -464,7 +471,9 @@ function buildMidiMenu(): MenuEntry[] {
  * Menu bar
  * ========================================================================= */
 
-const MENUS: Array<{ label: string; icon: IconName; build: () => MenuEntry[] }> = [
+/** Exported for the command palette: it flattens these same builders, so palette
+    commands and menu items can never drift apart. */
+export const MENUS: Array<{ label: string; icon: IconName; build: () => MenuEntry[] }> = [
   { label: "File", icon: "folder", build: buildFileMenu },
   { label: "Edit", icon: "pencil", build: buildEditMenu },
   { label: "View", icon: "eye", build: buildViewMenu },
