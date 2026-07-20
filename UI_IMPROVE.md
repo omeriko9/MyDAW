@@ -225,10 +225,12 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 
 **Tier 2 — next (high impact, more work):**
 6. ✅ Split dock (6.1) and layout presets (6.3). *(SHIPPED 2026-07-20: split button + per-half tab strips + draggable divider; Ctrl+Alt+1..4 apply / +Shift save, View → Layouts.)*
-7. ◐ Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2). *(2.1 SHIPPED 2026-07-20 as drag HUDs in timeline + piano roll — position readout with live "copy"/"snap off" hints; the `?` overlay and shortcut table remain open.)*
-8. Mix views / strip filtering (3.3).
+7. ◐ Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2). *(2.1 SHIPPED as drag HUDs in timeline + piano roll; 7.2 SHIPPED — lib/shortcutTable.ts feeds ShortcutsDialog. Only the contextual `?` overlay (7.3) remains open.)*
+8. ✅ Mix views / strip filtering (3.3). *(SHIPPED 2026-07-20 v1: All / Audio / Instruments / Buses view toggles in the mixer toolbar; saved custom filters remain a future step.)*
 9. ✅ Recording performance visuals + post-take action toast (4.1, 4.2). *(SHIPPED 2026-07-20: breathing red arrange frame gated by Settings toggle + motion level; post-take toast with Undo / Open-in-Piano-Roll actions.)*
-10. Velocity display options (2.3 A or B).
+10. ✅ Velocity display options (2.3 B). *(SHIPPED 2026-07-20: optional blue→red heat tinting, lane-menu toggle; in-note bars (A) and curve tools (C) remain Tier 3.)*
+
+**Shipped outside the plan (user requests, 2026-07-20):** Cubase-style right-click icon toolbox in the piano roll (ContextMenu icon-row entries), and multiple stacked controller lanes — up to 4 of velocity / pitch bend / any CCs at once, with per-lane Add/Remove.
 
 **Tier 3 — differentiators & delight (worth doing, not urgent):**
 11. Song-strip / marker minimap (1.3), hover cards (5.1), custom drag ghosts (5.3), waveform previews (5.2).
