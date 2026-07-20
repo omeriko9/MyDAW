@@ -565,6 +565,12 @@ struct CprCtx {
     // fallback for MyDAW's own exports, which have no Devices rack (their connection
     // strings index instrument tracks by ordinal).
     std::vector<uint64_t> synthSlotTracks;
+    // TRUE when MIDI routing was wired via the Synth-Slot ORDINAL fallback — i.e. this
+    // .cpr is a MyDAW export (no Devices rack). Only then do feeder MIDI tracks collapse
+    // into their instrument tracks (restoring the original Instrument-track shape);
+    // native Cubase projects keep the MIDI-track + rack-instrument split as separate
+    // tracks routed via Track::midiTarget (the corpus tests' shape).
+    bool synthSlotOrdinalRouting = false;
     // Instrument tracks created FROM a rack slot (SX + modern). Feederless ones are
     // dropped at collapse time — Cubase's arrangement never showed them either.
     std::set<uint64_t> rackCreatedTracks;
@@ -2883,16 +2889,16 @@ void modernExtractSynthRack(CprCtx& c, size_t devOff, size_t devEnd,
 // output-connection lpstr "<32-hex Plugin GUID>-<slotIndex>" inside the track record
 // (evidenced in a Cubase 7 project, near the channel "Sel Channel" block). Point the
 // MIDI track's Track::midiTarget at that rack slot's Instrument track — the same
-// shared-instance semantics as the SX path (CPR_MIXER_FORMAT.md §7.7). When exactly
-// one MIDI track feeds a slot, the created instrument track adopts its name (the
-// user-facing arrangement name; the bare plugin name stays otherwise).
+// shared-instance semantics as the SX path (CPR_MIXER_FORMAT.md §7.7).
 void wireModernMidiRouting(CprCtx& c) {
     // Slot resolution: the Devices Synth Rack when present (native Cubase projects),
     // else Synth-Slot instrument tracks by ordinal (MyDAW's own exports).
     std::map<int, uint64_t> slotTrack = c.modernRackSlotTrack;
-    if (slotTrack.empty())
+    if (slotTrack.empty()) {
         for (size_t i = 0; i < c.synthSlotTracks.size(); ++i)
             slotTrack[static_cast<int>(i)] = c.synthSlotTracks[i];
+        c.synthSlotOrdinalRouting = !slotTrack.empty(); // MyDAW export — collapse later
+    }
     if (slotTrack.empty())
         return;
     std::set<uint64_t> targetsUsed;
@@ -2946,15 +2952,17 @@ void wireModernMidiRouting(CprCtx& c) {
                   t->name.c_str(), slot);
     }
     c.routedInstruments += static_cast<int>(targetsUsed.size());
-    for (const auto& [targetId, feeders] : feedersByTarget)
-        if (feeders.size() == 1 && !feeders[0]->name.empty())
-            if (Track* inst = c.model.trackById(targetId))
-                inst->name = feeders[0]->name;
+    // No feeder->instrument rename here: native projects keep the rack track's own
+    // (plugin/slot) name next to the arrangement MIDI track; the MyDAW-export collapse
+    // pass renames on merge instead.
 }
 
-// Collapse the MIDI-track / rack-instrument split: a Cubase import NEVER produces
-// MIDI-kind channels (Cubase's arrangement doesn't show the rack either — one track
-// with notes is what the user sees, so that's what they get here):
+// Collapse the MIDI-track / rack-instrument split for MYDAW'S OWN .cpr EXPORTS ONLY
+// (Synth-Slot ordinal routing, c.synthSlotOrdinalRouting): the export lowered each
+// Instrument track to a MIDI track + Synth Slot pair, so re-import must fuse them back
+// into ONE Instrument track. Native Cubase projects are NOT collapsed — they keep the
+// arrangement MIDI tracks (kind Midi, routed via Track::midiTarget) next to the rack's
+// standalone Instrument tracks, the shape the corpus/recreate tests pin down:
 //   - a rack instrument's FIRST feeder MIDI track merges into it (notes + name move
 //     onto the track that hosts the VSTi);
 //   - ADDITIONAL feeders (N:1, e.g. two parts driving one Ivory) each become their
@@ -3052,8 +3060,11 @@ void collapseFeederTracks(CprCtx& c) {
             }
             keep.push_back(std::move(t));
         }
-        if (dropped)
-            tracks = std::move(keep);
+        // ALWAYS reassign: the loop above moved every kept Track into `keep`, so the
+        // old vector holds moved-from husks even when nothing was dropped (skipping the
+        // assignment shipped a bug that emptied every track name/color/clip list).
+        (void)dropped;
+        tracks = std::move(keep);
     }
 }
 
@@ -3507,9 +3518,12 @@ bool CprImportProvider::import(const std::string& absPath, const ImportContext& 
         // AFTER both the arrangement and Devices passes.
         wireModernMidiRouting(c);
     }
-    // Collapse the MIDI/rack split (both eras route via Track::midiTarget by now):
-    // imports produce Instrument tracks only, never MIDI-kind channels.
-    collapseFeederTracks(c);
+    // MyDAW's OWN exports (Synth-Slot ordinal routing, no Devices rack) collapse the
+    // MIDI-track + Synth-Slot pairs back into the original Instrument tracks. Native
+    // Cubase projects keep the MIDI/rack split: arrangement MIDI tracks stay kind Midi
+    // and route into the rack's standalone Instrument tracks via Track::midiTarget.
+    if (c.synthSlotOrdinalRouting)
+        collapseFeederTracks(c);
     if (c.isSxEra)
         Log::info("cpr import: SX-era master-bus volume not imported — no verified "
                   "encoding for the SX output-channel block in the corpus (master left "
