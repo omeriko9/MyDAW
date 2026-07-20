@@ -12,6 +12,7 @@ import {
   useMotionPref,
   type MotionPref,
 } from "../../lib/motion";
+import { ACCENT_SWATCHES, applyAccent, getAccent } from "../../lib/accent";
 import { getSettings, setSettings } from "../../store/actions";
 import { isBool, usePrefState } from "../../lib/prefs";
 import {
@@ -68,6 +69,11 @@ export function GeneralTab() {
 
   const theme = useThemeName();
   const motion = useMotionPref();
+  const [accent, setAccentLocal] = useState<string | null>(getAccent());
+  const pickAccent = (hex: string | null) => {
+    setAccentLocal(hex);
+    applyAccent(hex);
+  };
   const [recVisuals, setRecVisuals] = usePrefState<boolean>("ui.recordVisuals", true, isBool);
   const [magnify, setMagnify] = usePrefState<boolean>("ui.hoverMagnify", false, isBool);
   const applyMagnify = (on: boolean) => {
@@ -92,6 +98,27 @@ export function GeneralTab() {
             width={140}
           />
           <span className="sett-note">also in View → Theme; saved per user</span>
+        </div>
+        <span className="sett-label">Accent color</span>
+        <div className="row gap1">
+          <button
+            type="button"
+            className={"sett-swatch-theme" + (accent === null ? " on" : "")}
+            title="Use the theme's own accent"
+            onClick={() => pickAccent(null)}
+          >
+            Theme
+          </button>
+          {ACCENT_SWATCHES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={"sett-swatch" + (accent === s.value ? " on" : "")}
+              style={{ background: s.value }}
+              title={s.label}
+              onClick={() => pickAccent(s.value)}
+            />
+          ))}
         </div>
         <span className="sett-label">Interface motion</span>
         <div className="row gap1">

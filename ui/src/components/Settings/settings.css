@@ -135,3 +135,45 @@
   text-transform: uppercase;
   margin-top: 2px;
 }
+
+/* accent swatches (lib/accent — UI_IMPROVE.md §9) */
+.sett-swatch {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.sett-swatch:hover {
+  border-color: var(--border-light);
+}
+.sett-swatch.on {
+  border-color: var(--text);
+}
+.sett-swatch-theme {
+  appearance: none;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.sett-swatch-theme:hover {
+  background: var(--panel3);
+  color: var(--text);
+}
+.sett-swatch-theme.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
