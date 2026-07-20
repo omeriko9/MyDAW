@@ -969,6 +969,51 @@ body {
 }
 
 /* ============================================================================
+ * Drag chip (lib/dnd setDragChip, UI_IMPROVE.md §5.3) — custom drag image for
+ * browser plugin/file drags. Parked offscreen; the browser snapshots it.
+ * ==========================================================================*/
+
+.drag-chip {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  max-width: 240px;
+  padding: 5px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.drag-chip-plugin {
+  border-left-color: var(--accent);
+}
+.drag-chip-asset {
+  border-left-color: var(--ok);
+}
+
+/* Drop-target pulse (§5.3): compatible targets breathe while a drag hovers.
+   Keyframes shared here; applied in the owning component stylesheets. Movement-
+   free (outline color only) but still gated to motion "full" — an infinite
+   attention pulse is exactly what reduced-motion users opt out of. */
+@keyframes drop-pulse {
+  0%,
+  100% {
+    outline-color: var(--accent);
+  }
+  50% {
+    outline-color: var(--accent-border);
+  }
+}
+
+/* ============================================================================
  * Drag HUD (UI_IMPROVE.md §2.2) — imperative floating readout near the cursor
  * during canvas gestures (piano-roll notes, timeline clips). The owning pane
  * shows/hides it and writes textContent + left/top directly (render-free).

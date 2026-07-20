@@ -12,7 +12,7 @@
 import React, { useCallback, useState } from "react";
 import { useStore } from "../../store/store";
 import { dialogImportFiles, relinkAsset } from "../../store/actions";
-import { setAssetDrag, uploadFiles } from "../../lib/dnd";
+import { setAssetDrag, setDragChip, uploadFiles } from "../../lib/dnd";
 import {
   extensionOf,
   importPickedPaths,
@@ -62,7 +62,10 @@ function AssetRow({
     <div
       className={"asset-row" + (a.missing ? " missing" : "")}
       draggable
-      onDragStart={(e) => setAssetDrag(e.dataTransfer, { assetId: a.id })}
+      onDragStart={(e) => {
+        setAssetDrag(e.dataTransfer, { assetId: a.id });
+        setDragChip(e.dataTransfer, a.file.split(/[\\/]/).pop() ?? a.file, "asset");
+      }}
       onContextMenu={contextMenuHandler(() => [
         {
           label: "Relink…",

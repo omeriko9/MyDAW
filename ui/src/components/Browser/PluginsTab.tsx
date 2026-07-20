@@ -22,7 +22,7 @@ import {
   scanPlugins,
   unblacklistPlugin,
 } from "../../store/actions";
-import { setPluginDrag } from "../../lib/dnd";
+import { setDragChip, setPluginDrag } from "../../lib/dnd";
 import { pluginKey } from "../../lib/ids";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isBool, loadPref, oneOf, savePref, usePrefState } from "../../lib/prefs";
@@ -223,7 +223,10 @@ const PluginRowView = memo(function PluginRowView({
         "plugin-row" + (p.isInstrument ? " instrument" : "") + (p.blacklisted ? " blacklisted" : "")
       }
       draggable={!p.blacklisted}
-      onDragStart={(e) => setPluginDrag(e.dataTransfer, { uid: p.uid })}
+      onDragStart={(e) => {
+        setPluginDrag(e.dataTransfer, { uid: p.uid });
+        setDragChip(e.dataTransfer, p.name, "plugin");
+      }}
       onDoubleClick={() => onAdd(p)}
       onContextMenu={contextMenuHandler(menuItems)}
       title={

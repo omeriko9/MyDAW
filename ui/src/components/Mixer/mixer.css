@@ -122,6 +122,9 @@
   outline: 1px dashed var(--accent);
   outline-offset: -1px;
 }
+:root[data-motion="full"] .mxstrip.drop-active {
+  animation: drop-pulse 1.1s ease-in-out infinite; /* theme.css keyframes */
+}
 
 .mxstrip-color {
   height: 4px;

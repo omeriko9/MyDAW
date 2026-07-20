@@ -129,6 +129,9 @@
   outline-offset: -2px;
   background: var(--accent-soft);
 }
+:root[data-motion="full"] .tlh-row[data-droppable="true"] {
+  animation: drop-pulse 1.1s ease-in-out infinite; /* theme.css keyframes */
+}
 
 .tlh-row-top {
   display: flex;

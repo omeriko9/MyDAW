@@ -199,6 +199,24 @@ export function setPluginDrag(dt: DataTransfer, data: { uid: string }): void {
   dt.effectAllowed = "copy";
 }
 
+/**
+ * Custom drag image (UI_IMPROVE.md §5.3): a styled chip with the dragged thing's
+ * name, instead of the browser's translucent row snapshot. The element must be
+ * IN THE DOM when setDragImage snapshots it — parked offscreen, removed next tick.
+ */
+export function setDragChip(dt: DataTransfer, label: string, kind: "plugin" | "asset"): void {
+  const el = document.createElement("div");
+  el.className = `drag-chip drag-chip-${kind}`;
+  el.textContent = label;
+  document.body.appendChild(el);
+  try {
+    dt.setDragImage(el, 14, 16);
+  } catch {
+    /* some engines refuse — the default ghost is fine */
+  }
+  window.setTimeout(() => el.remove(), 0);
+}
+
 export function readPluginDrag(dt: DataTransfer): { uid: string } | null {
   const raw = dt.getData(PLUGIN_MIME);
   if (!raw) return null;
