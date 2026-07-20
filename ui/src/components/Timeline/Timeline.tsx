@@ -19,6 +19,7 @@ import TrackHeaders from "./TrackHeaders";
 import ClipCanvas from "./ClipCanvas";
 import Minimap, { MINIMAP_H } from "./Minimap";
 import { useAutomationUi } from "./automationUi";
+import { useIsKeyTarget } from "../common/paneFocus";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
@@ -175,6 +176,7 @@ export default function Timeline() {
   const viewport = useStore((s) => s.viewport);
   const setViewport = useStore((s) => s.setViewport);
   const showMinimap = useStore((s) => s.panels.minimap);
+  const isKeyTarget = useIsKeyTarget("timeline");
 
   const [collapsed, setCollapsed] = useState<ReadonlySet<number>>(EMPTY_SET);
   const [heightOverride, setHeightOverride] = useState<{ trackId: number; height: number } | null>(
@@ -316,6 +318,7 @@ export default function Timeline() {
   return (
     <div
       className="tl-root"
+      data-key-target={isKeyTarget || undefined}
       onPointerDownCapture={() => useStore.getState().setFocusedPane("timeline")}
     >
       <div className="tl-main" ref={mainRef}>

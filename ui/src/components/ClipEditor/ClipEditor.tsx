@@ -28,6 +28,7 @@ import { peaksFailed, peaksFor } from "../Timeline/peaksCache";
 import { FloatingInput } from "../Timeline/bits";
 import { Icon } from "../common/icons";
 import { openContextMenu } from "../common/ContextMenu";
+import { useIsKeyTarget } from "../common/paneFocus";
 import { GainDbDrag, SecondsDrag } from "../Inspector/fields";
 import "./clipEditor.css";
 
@@ -801,10 +802,15 @@ export default function ClipEditor() {
   /* ------------------------------------------------------------------ render */
 
   const focusPane = () => useStore.getState().setFocusedPane("clipEditor");
+  const isKeyTarget = useIsKeyTarget("clipEditor");
 
   if (!project || !clip) {
     return (
-      <div className="ce-root ce-empty col" onPointerDownCapture={focusPane}>
+      <div
+        className="ce-root ce-empty col"
+        data-key-target={isKeyTarget || undefined}
+        onPointerDownCapture={focusPane}
+      >
         <Icon name="audioWave" />
         <div className="ce-empty-title">Double-click an audio clip</div>
         <div className="ce-empty-sub">
@@ -820,7 +826,7 @@ export default function ClipEditor() {
   const canFit = Boolean(asset && !asset.missing);
 
   return (
-    <div className="ce-root" onPointerDownCapture={focusPane}>
+    <div className="ce-root" data-key-target={isKeyTarget || undefined} onPointerDownCapture={focusPane}>
       <div className="ce-toolbar">
         <span className="ce-clip-chip" style={{ background: chipColor }} />
         <span className="ce-clip-name ellipsis" title={clip.name}>

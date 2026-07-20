@@ -43,6 +43,7 @@ import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import { Toggle } from "../common/Toggle";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
+import { useIsKeyTarget } from "../common/paneFocus";
 import { confirmDialog } from "../Dialogs/confirm";
 import * as M from "./prMath";
 import * as D from "./prDraw";
@@ -298,6 +299,7 @@ export default function PianoRoll() {
 function EmptyState({ hasProject }: { hasProject: boolean }) {
   const project = useStore((s) => s.project);
   const selTrackIds = useStore((s) => s.selection.trackIds);
+  const isKeyTarget = useIsKeyTarget("pianoRoll");
   const midiTracks = project
     ? project.tracks.filter((t) => t.kind === "midi" || t.kind === "instrument")
     : [];
@@ -322,6 +324,7 @@ function EmptyState({ hasProject }: { hasProject: boolean }) {
   return (
     <div
       className="pr-root pr-empty"
+      data-key-target={isKeyTarget || undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         openContextMenu(e.clientX, e.clientY, [
@@ -371,6 +374,7 @@ function Editor({ track, clip }: EditorProps) {
   const tool = useStore((s) => s.tool);
   const selectedNoteIds = useStore((s) => s.selection.noteIds);
   const transportState = useStore((s) => s.transport.state);
+  const isKeyTarget = useIsKeyTarget("pianoRoll");
 
   /* ---- latest-value refs for imperative handlers ---- */
   const clipRef = useRef(clip);
@@ -2058,6 +2062,7 @@ function Editor({ track, clip }: EditorProps) {
     <div
       className="pr-root"
       ref={rootRef}
+      data-key-target={isKeyTarget || undefined}
       onPointerDownCapture={() => useStore.getState().setFocusedPane("pianoRoll")}
     >
       <div className="pr-toolbar">

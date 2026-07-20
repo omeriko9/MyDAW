@@ -352,6 +352,28 @@
 }
 
 /* ============================================================================
+ * Focused-pane indicator (UI_IMPROVE.md §6.4) — a thin accent strip along the
+ * top of the pane keyboard input routes to (common/paneFocus.ts stamps the
+ * attribute). Overlay strip, not a border: no layout shift, sits above the
+ * pane's own chrome.
+ * ==========================================================================*/
+
+[data-key-target="true"] {
+  position: relative;
+}
+[data-key-target="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 40;
+  animation: m-fade-in var(--dur-med) var(--ease-out);
+}
+
+/* ============================================================================
  * Base typography & document
  * ==========================================================================*/
 

@@ -58,7 +58,7 @@
  */
 
 import { useStore, transportBus } from "../store/store";
-import type { PanelsState, PoppedOutTab } from "../store/store";
+import type { FocusedPane, PanelsState, PoppedOutTab } from "../store/store";
 import {
   deleteClips,
   duplicateClips,
@@ -148,6 +148,29 @@ export function registerKeyContext(
  */
 export function paneVisible(panels: PanelsState, tab: PoppedOutTab): boolean {
   return panels.bottomTab === tab || !!panels.poppedOut[tab];
+}
+
+/**
+ * The pane keyboard shortcuts currently route to, as pure store state — the
+ * name-level mirror of activeContext() below. activeContext() additionally requires
+ * the handlers to be registered, but registration tracks mount/visibility, so this
+ * store view matches in practice. Drives the focused-pane indicator (the accent
+ * strip on the pane that owns Delete/Ctrl+A — UI_IMPROVE.md §6.4); keep the two
+ * resolutions in the same order or the indicator lies.
+ */
+export function keyRoutingPane(s: {
+  focusedPane: FocusedPane;
+  panels: PanelsState;
+}): KeyContextName {
+  const f = s.focusedPane;
+  if (f === "pianoRoll" || f === "clipEditor" || f === "sheetMusic") {
+    if (paneVisible(s.panels, f)) return f;
+  } else if (f === "timeline") {
+    return "timeline";
+  }
+  if (s.panels.bottomTab === "pianoRoll") return "pianoRoll";
+  if (s.panels.bottomTab === "clipEditor") return "clipEditor";
+  return "timeline";
 }
 
 /**

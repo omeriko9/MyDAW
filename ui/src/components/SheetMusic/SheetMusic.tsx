@@ -29,6 +29,7 @@ import { showToast } from "../common/ToastHost";
 import { IconButton } from "../common/IconButton";
 import { Select } from "../common/Select";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
+import { useIsKeyTarget } from "../common/paneFocus";
 import Score, { HEADER_SPACES, type ScorePoint } from "./Score";
 import { noteheadHalfWidth } from "./glyphs";
 import {
@@ -984,9 +985,14 @@ export default function SheetMusic() {
 
   const hasMusic = allNotes.length > 0;
   const tempo = project ? bpmAtBeat(gathered.originBeat, project.tempoMap) : 120;
+  const isKeyTarget = useIsKeyTarget("sheetMusic");
 
   return (
-    <div className="sm-root" onPointerDownCapture={() => useStore.getState().setFocusedPane("sheetMusic")}>
+    <div
+      className="sm-root"
+      data-key-target={isKeyTarget || undefined}
+      onPointerDownCapture={() => useStore.getState().setFocusedPane("sheetMusic")}
+    >
       <div className="sm-toolbar">
         <span className="sm-title-label" title={track ? `Track: ${track.name}` : "No MIDI track"}>
           {track?.name ?? "No MIDI"}
