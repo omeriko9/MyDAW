@@ -216,12 +216,12 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 
 ## 10 — Prioritization (goodness per user per use case)
 
-**Tier 1 — build first (high frequency × high impact):**
-1. **Command palette + jump palette (7.1, 1.2)** — one feature, solves discoverability, navigation, and the icon-menu learning curve at once.
-2. **Motion system baseline (8.1–8.2)** — transforms perceived quality of *every* interaction; small, systematic, respects reduced-motion.
-3. **Navigator pill + smooth viewport animation (1.1, 1.4)** — fixes the invisible-zoom problem in the three canvas panes.
-4. **Focused-pane indicator (6.4)** — removes the most dangerous invisible state (keyboard routing).
-5. **Value HUD on faders/knobs + note-drag readout (3.1, 2.2)** — precision feedback at the two highest-frequency edit points.
+**Tier 1 — build first (high frequency × high impact):** *(all five SHIPPED 2026-07-20)*
+1. ✅ **Command palette + jump palette (7.1, 1.2)** — one feature, solves discoverability, navigation, and the icon-menu learning curve at once. *(Ctrl+K; flattens the live menu builders + Transport/Tools groups; bar/marker/track jump with reveal.)*
+2. ✅ **Motion system baseline (8.1–8.2)** — transforms perceived quality of *every* interaction; small, systematic, respects reduced-motion. *(--dur-fast/med/move tokens, data-motion full/reduced/off, Settings → General knob.)*
+3. ✅ **Navigator pill + smooth viewport animation (1.1, 1.4)** — fixes the invisible-zoom problem. *(Arrange view shipped — [Fit][−][%][+] pill + 180ms eased jumps; Piano Roll / Clip Editor pills still open.)*
+4. ✅ **Focused-pane indicator (6.4)** — removes the most dangerous invisible state (keyboard routing). *(2px accent strip on the pane Delete/Ctrl+A routes to.)*
+5. ✅ **Value HUD on faders/knobs + note-drag readout (3.1, 2.2)** — precision feedback at the two highest-frequency edit points. *(Fader/Knob HUD with ⇧-fine hint; piano-roll drag chip with pitch/±st/position/length.)*
 
 **Tier 2 — next (high impact, more work):**
 6. Split dock (6.1) and layout presets (6.3).
