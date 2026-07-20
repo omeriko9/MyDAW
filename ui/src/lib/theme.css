@@ -336,6 +336,20 @@
   --dur-move: 0ms;
 }
 
+/* Hover magnification (UI_IMPROVE.md §8.4, opt-in via Settings → General; stamps
+   data-magnify on the root). Icon-only strips where growth aids the small target:
+   the vertical menu strip and the collapsed browser rail. Transform on the SVG
+   only — no layout shift; --dur-move keeps it motion-setting-aware. */
+
+.ms-item svg,
+.app-rail .btn-icon svg {
+  transition: transform var(--dur-move) var(--ease-spring);
+}
+:root[data-magnify="true"] .ms-item:hover svg,
+:root[data-magnify="true"] .app-rail .btn-icon:hover svg {
+  transform: scale(1.25);
+}
+
 /* Shared entrance keyframes: movement and fade are SEPARATE animations so the
    motion setting can zero one without the other (comma-composed at use sites). */
 @keyframes m-fade-in {

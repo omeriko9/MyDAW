@@ -78,11 +78,44 @@ export default function Minimap({ viewW }: MinimapProps) {
     ctx.fillRect(0, 0, w, h);
     if (!proj) return c;
 
+    /* song-strip band (UI_IMPROVE.md §1.3A): marker regions as labeled colored
+       bands along the top, so the minimap reads as Verse / Chorus / Bridge */
+    const markers = [...proj.markers].sort((a, b) => a.beat - b.beat);
+    const bandH = markers.length > 0 ? 11 : 0;
+    if (bandH > 0) {
+      ctx.font = "8px Inter, system-ui, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      markers.forEach((m, i) => {
+        const x0 = miniBeatX(m.beat, total, w);
+        const x1 = i + 1 < markers.length ? miniBeatX(markers[i + 1].beat, total, w) : w;
+        const col = m.color || themeVar("--accent");
+        ctx.fillStyle = withAlpha(col, 0.28);
+        ctx.fillRect(x0, 0, Math.max(1, x1 - x0), bandH);
+        ctx.fillStyle = withAlpha(col, 0.9);
+        ctx.fillRect(x0, 0, 1, bandH);
+        if (x1 - x0 >= 22 && m.name) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x0 + 2, 0, x1 - x0 - 4, bandH);
+          ctx.clip();
+          ctx.fillStyle = themeVar("--text");
+          ctx.fillText(m.name, x0 + 4, bandH / 2 + 0.5);
+          ctx.restore();
+        }
+      });
+      ctx.strokeStyle = themeVar("--border");
+      ctx.beginPath();
+      ctx.moveTo(0, bandH + 0.5);
+      ctx.lineTo(w, bandH + 0.5);
+      ctx.stroke();
+    }
+
     const tracks = proj.tracks;
-    const rowH = miniRowH(tracks.length, h);
+    const rowH = miniRowH(tracks.length, h - bandH);
     const gap = rowH > 3 ? 1 : 0;
     tracks.forEach((t, i) => {
-      const y = 1 + i * rowH;
+      const y = 1 + bandH + i * rowH;
       for (const clip of t.clips) {
         const len = isMidiClip(clip)
           ? clip.lengthBeats

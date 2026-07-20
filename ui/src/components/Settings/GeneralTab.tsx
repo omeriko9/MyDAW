@@ -69,6 +69,11 @@ export function GeneralTab() {
   const theme = useThemeName();
   const motion = useMotionPref();
   const [recVisuals, setRecVisuals] = usePrefState<boolean>("ui.recordVisuals", true, isBool);
+  const [magnify, setMagnify] = usePrefState<boolean>("ui.hoverMagnify", false, isBool);
+  const applyMagnify = (on: boolean) => {
+    setMagnify(on);
+    document.documentElement.dataset.magnify = String(on); // live restamp (main.tsx boots it)
+  };
   const [recovery, setRecovery] = usePrefState<RecoveryMode>(
     RECOVERY_MODE_PREF,
     RECOVERY_MODE_DEFAULT,
@@ -98,6 +103,15 @@ export function GeneralTab() {
           />
           <span className="sett-note">
             hover/press/menu animations; follows the OS reduced-motion setting
+          </span>
+        </div>
+        <span className="sett-label">Hover magnification</span>
+        <div className="row gap1">
+          <Toggle on={magnify} onChange={applyMagnify}>
+            {magnify ? "On" : "Off"}
+          </Toggle>
+          <span className="sett-note">
+            small icon strips (menu bar, collapsed browser rail) grow under the pointer
           </span>
         </div>
         <span className="sett-label">Record visuals</span>

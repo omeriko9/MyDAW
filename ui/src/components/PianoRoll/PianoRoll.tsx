@@ -536,6 +536,8 @@ function Editor({ track, clip }: EditorProps) {
   });
   const gestureRef = useRef<Gesture | null>(null);
   const pressedKeyRef = useRef<number | null>(null);
+  /** pointer-hovered key (§8.4 — brightened + named in the keys column) */
+  const hoverKeyRef = useRef<number | null>(null);
   const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
 
   /* Drag HUD (UI_IMPROVE.md §2.2) — floating readout near the cursor while a note
@@ -765,7 +767,8 @@ function Editor({ track, clip }: EditorProps) {
     }
     const kEl = keysCv.canvasRef.current;
     const kCtx = keysCv.ctxRef.current;
-    if (kEl && kCtx) D.drawKeys(kCtx, kEl.clientWidth, kEl.clientHeight, v, pressedKeyRef.current, pal);
+    if (kEl && kCtx)
+      D.drawKeys(kCtx, kEl.clientWidth, kEl.clientHeight, v, pressedKeyRef.current, pal, hoverKeyRef.current);
     const rEl = rulerCv.canvasRef.current;
     const rCtx = rulerCv.ctxRef.current;
     if (rEl && rCtx) {
@@ -1751,11 +1754,21 @@ function Editor({ track, clip }: EditorProps) {
     requestDraw();
   };
   const onKeysMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (pressedKeyRef.current === null) return;
     const p = M.yToPitch(localPt(e).y, viewRef.current);
+    if (hoverKeyRef.current !== p) {
+      hoverKeyRef.current = p;
+      requestDraw();
+    }
+    if (pressedKeyRef.current === null) return;
     if (p !== pressedKeyRef.current) {
       pressedKeyRef.current = p;
       previewOn(p, 100); // glissando: retrigger on the new key
+      requestDraw();
+    }
+  };
+  const onKeysLeave = () => {
+    if (hoverKeyRef.current !== null) {
+      hoverKeyRef.current = null;
       requestDraw();
     }
   };
@@ -2408,6 +2421,7 @@ function Editor({ track, clip }: EditorProps) {
             onPointerMove={onKeysMove}
             onPointerUp={onKeysUp}
             onPointerCancel={onKeysUp}
+            onPointerLeave={onKeysLeave}
           />
         </div>
         <div className="pr-notes-wrap">

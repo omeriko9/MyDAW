@@ -149,6 +149,8 @@ export function drawKeys(
   v: PrView,
   pressedPitch: number | null,
   pal: Palette,
+  /** Pointer-hovered key (UI_IMPROVE.md §8.4): brightened + named. */
+  hoverPitch: number | null = null,
 ): void {
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = pal.keyWhite;
@@ -181,6 +183,19 @@ export function drawKeys(
   }
   ctx.globalAlpha = 1;
 
+  // hover: soft highlight (under the press highlight, if both)
+  if (
+    hoverPitch !== null &&
+    hoverPitch !== pressedPitch &&
+    hoverPitch >= pBot &&
+    hoverPitch <= pTop
+  ) {
+    ctx.fillStyle = pal.accent;
+    ctx.globalAlpha = 0.16;
+    ctx.fillRect(0, M.pitchTop(hoverPitch, v), w, v.rowH);
+    ctx.globalAlpha = 1;
+  }
+
   if (pressedPitch !== null && pressedPitch >= pBot && pressedPitch <= pTop) {
     ctx.fillStyle = pal.accent;
     ctx.globalAlpha = 0.35;
@@ -198,6 +213,16 @@ export function drawKeys(
         ctx.fillText(M.pitchName(p), w - 4, M.pitchTop(p, v) + v.rowH / 2 + 0.5);
       }
     }
+  }
+
+  // name the hovered/pressed key (skip Cs — already labeled above)
+  const named = pressedPitch ?? hoverPitch;
+  if (named !== null && named % 12 !== 0 && named >= pBot && named <= pTop && v.rowH >= 7) {
+    ctx.font = FONT;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = pal.keyText;
+    ctx.fillText(M.pitchName(named), w - 4, M.pitchTop(named, v) + v.rowH / 2 + 0.5);
   }
 }
 
