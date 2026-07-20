@@ -443,3 +443,48 @@
   gap: 3px;
   flex: 0 0 auto;
 }
+
+/* ============================================================================
+ * Navigator pill (NavigatorPill.tsx, UI_IMPROVE.md §1.1) — floating zoom control
+ * bottom-right of the canvas, clear of the overlay scrollbars.
+ * ==========================================================================*/
+
+.tl-nav-pill {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  opacity: 0.82;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.tl-nav-pill:hover {
+  opacity: 1;
+}
+
+.tl-nav-fit {
+  appearance: none;
+  height: 20px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.tl-nav-fit:hover {
+  background: var(--panel3);
+  color: var(--text);
+}

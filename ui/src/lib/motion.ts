@@ -66,6 +66,15 @@ export function getMotionPref(): MotionPref {
 }
 
 /**
+ * The EFFECTIVE motion level (pref + OS reduced-motion demotion) — what data-motion
+ * is stamped with. JS-driven movement (smooth scrolling, viewport animation) should
+ * run only when this returns "full", mirroring what --dur-move does in CSS.
+ */
+export function getEffectiveMotion(): MotionPref {
+  return effective(current);
+}
+
+/**
  * Track a pop-out document: stamped immediately and on every later change.
  * Returns the unregister function (call from the pop-out's dispose).
  */

@@ -24,6 +24,8 @@ import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { REVEAL_BEAT_EVENT, type RevealBeatDetail } from "../../lib/reveal";
+import { animateViewport, cancelViewportAnimation } from "../../lib/viewportAnim";
+import NavigatorPill from "./NavigatorPill";
 import { beatToPx, bpmAtBeat } from "../../lib/time";
 import {
   MAX_ZOOM_X,
@@ -272,7 +274,7 @@ export default function Timeline() {
       const x = beat * v.zoomX;
       if (x >= v.scrollX + ex.viewW * 0.05 && x <= v.scrollX + ex.viewW * 0.85) return;
       const maxX = Math.max(0, ex.cBeats * v.zoomX - ex.viewW);
-      s.setViewport({ scrollX: Math.min(maxX, Math.max(0, x - ex.viewW * 0.35)) });
+      animateViewport({ scrollX: Math.min(maxX, Math.max(0, x - ex.viewW * 0.35)) });
     };
     window.addEventListener(REVEAL_BEAT_EVENT, onReveal);
     return () => window.removeEventListener(REVEAL_BEAT_EVENT, onReveal);
@@ -283,6 +285,7 @@ export default function Timeline() {
     const el = mainRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent): void => {
+      cancelViewportAnimation(); // manual navigation owns the viewport outright
       const s = useStore.getState();
       const v = s.viewport;
       const ex = extentRef.current;
@@ -373,6 +376,7 @@ export default function Timeline() {
               view={view.w}
               onScroll={(scrollX) => {
                 noteManualScroll();
+                cancelViewportAnimation();
                 setViewport({ scrollX });
               }}
             />
@@ -383,9 +387,11 @@ export default function Timeline() {
               view={view.h}
               onScroll={(scrollY) => {
                 noteManualScroll();
+                cancelViewportAnimation();
                 setViewport({ scrollY });
               }}
             />
+            {project && <NavigatorPill viewW={view.w} />}
           </div>
         </div>
       </div>

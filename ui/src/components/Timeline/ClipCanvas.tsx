@@ -43,6 +43,7 @@ import { useAutomationUi } from "./automationUi";
 import { registerKeyContext } from "../../lib/keyboard";
 import { lineV, roundRect, useCanvas } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
+import { animateViewport } from "../../lib/viewportAnim";
 import {
   beatToPx,
   bpmAtBeat,
@@ -1676,7 +1677,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
           const pad = 24; // px of air on each side
           const span = Math.max(0.25, end - start);
           const zoomX = clamp((el.clientWidth - 2 * pad) / span, MIN_ZOOM_X, MAX_ZOOM_X);
-          s.setViewport({ zoomX, scrollX: Math.max(0, start * zoomX - pad) });
+          animateViewport({ zoomX, scrollX: Math.max(0, start * zoomX - pad) });
           return true;
         },
       }),

@@ -140,6 +140,12 @@ export function registerKeyContext(
   };
 }
 
+/** Invoke a named pane's REGISTERED zoomToFit directly (navigator pill Fit button —
+    bypasses focus routing so the pill always fits ITS pane). */
+export function zoomToFitPane(name: KeyContextName): boolean {
+  return contexts.get(name)?.zoomToFit?.() === true;
+}
+
 /**
  * A bottom pane keeps its key routing while VISIBLE: its dock tab is active, or it is
  * popped out into its own window (popped panes render regardless of the active tab —
