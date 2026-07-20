@@ -233,8 +233,8 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 **Shipped outside the plan (user requests, 2026-07-20):** Cubase-style right-click icon toolbox in the piano roll (ContextMenu icon-row entries), and multiple stacked controller lanes — up to 4 of velocity / pitch bend / any CCs at once, with per-lane Add/Remove.
 
 **Tier 3 — differentiators & delight (worth doing, not urgent):**
-11. ◐ Song-strip / marker minimap (1.3 — ✅ SHIPPED 2026-07-20: labeled marker bands in the minimap), hover cards (5.1), custom drag ghosts (5.3), waveform previews (5.2).
+11. ◐ Song-strip / marker minimap (1.3 ✅), hover cards (5.1 ✅ — vendor/badges/path/used-on card on plugin rows), custom drag ghosts (5.3 ✅ — name chips + drop-target pulse). *(Waveform previews (5.2) still open.)*
 12. ✅ Hover magnification homes (8.4 — menu strip + browser rail, opt-in; PR key hover highlight+name always on) and accent personalization (9 — 8 swatches + Theme reset, derived per theme). *(SHIPPED 2026-07-20; pane-tint strength still open.)*
-13. Mixer A/B ghost snapshots (3.4), Big Clock (4.3), track overview rail (1.5), velocity curve tools (2.3 C).
+13. ◐ Mixer A/B ghost snapshots (3.4 — open), Big Clock (4.3 ✅ — View menu, draggable, rAF-extrapolated), track overview rail (1.5 — open), velocity curve tools (2.3 C ✅ — Crescendo/Diminuendo/Smooth in the PR Functions menu).
 
 **Deliberately out of scope** (corner cases / backend-coupled): shortcut *remapping* (needs persistence design — but 7.2 prepares it), touch/pinch gestures (no evidence of tablet users yet), full free-docking (6.2) unless split dock proves insufficient, undo/redo *availability* state (needs engine support to know `canUndo` — flagged for the backend pass, since the always-enabled undo buttons violate the app's own "no dead items" policy).
