@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { loadBoolPref, savePref } from "../../lib/prefs";
+import { loadBoolPref, loadPref, oneOf, savePref } from "../../lib/prefs";
 import { useStore } from "../../store/store";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
@@ -23,6 +23,17 @@ const SHOW_MIDI_PREF = "mixer.showMidiChannels";
 const VIRTUALIZE_THRESHOLD = 40;
 const STRIP_GAP = 2;
 const OVERSCAN = 4;
+
+/* Mix views (UI_IMPROVE.md §3.3) — kind filters over the strip rail (vertical
+   icon toggles in the toolbar; master stays pinned in every view). */
+type MixView = "all" | "audio" | "instr" | "buses";
+const VIEW_PREF = "mixer.view";
+const MIX_VIEWS: Array<{ id: MixView; icon: "mixer" | "audioWave" | "piano" | "layers"; tooltip: string }> = [
+  { id: "all", icon: "mixer", tooltip: "Mix view: all channels" },
+  { id: "audio", icon: "audioWave", tooltip: "Mix view: audio tracks only" },
+  { id: "instr", icon: "piano", tooltip: "Mix view: instrument (and shown MIDI) tracks only" },
+  { id: "buses", icon: "layers", tooltip: "Mix view: buses only" },
+];
 
 export default function Mixer() {
   const project = useStore((s) => s.project);
@@ -70,6 +81,15 @@ export default function Mixer() {
     });
   };
 
+  /* mix view (kind filter over the rail; §3.3) */
+  const [view, setView] = useState<MixView>(() =>
+    loadPref<MixView>(VIEW_PREF, "all", oneOf<MixView>("all", "audio", "instr", "buses")),
+  );
+  const pickView = (v: MixView) => {
+    setView(v);
+    savePref(VIEW_PREF, v);
+  };
+
   /* strip order: regular tracks (model order, skip folders), then buses; master pinned */
   const strips = useMemo(() => {
     if (!project) return [];
@@ -78,11 +98,15 @@ export default function Mixer() {
         t.kind !== "folder" &&
         t.kind !== "bus" &&
         t.kind !== "master" &&
-        (showMidi || t.kind !== "midi"),
+        (showMidi || t.kind !== "midi") &&
+        (view === "all" ||
+          (view === "audio" && t.kind === "audio") ||
+          (view === "instr" && (t.kind === "instrument" || t.kind === "midi"))),
     );
-    const buses = project.tracks.filter((t) => t.kind === "bus");
-    return [...regular, ...buses];
-  }, [project, showMidi]);
+    const buses =
+      view === "all" || view === "buses" ? project.tracks.filter((t) => t.kind === "bus") : [];
+    return [...(view === "buses" ? [] : regular), ...buses];
+  }, [project, showMidi, view]);
 
   const midiCount = useMemo(
     () => (project ? project.tracks.filter((t) => t.kind === "midi").length : 0),
@@ -160,6 +184,18 @@ export default function Mixer() {
               onClick={toggleShowMidi}
             />
           )}
+          <div className="mixer-views" role="group" aria-label="Mix view">
+            {MIX_VIEWS.map((v) => (
+              <IconButton
+                key={v.id}
+                icon={v.icon}
+                size={20}
+                active={view === v.id}
+                tooltip={v.tooltip}
+                onClick={() => pickView(v.id)}
+              />
+            ))}
+          </div>
           <div className="mixer-count" title={`${strips.length} strips + master`}>
             {strips.length}
           </div>

@@ -55,6 +55,10 @@
  * Installed once from App via initKeyboard() — bubble-phase window listener, so any
  * component may stopPropagation()/preventDefault() on keydown to take precedence.
  * Menus reuse the same context-aware routing via invokeEditAction().
+ *
+ * DOCUMENTATION: lib/shortcutTable.ts is the single display source of truth for
+ * bindings (ShortcutsDialog renders it). When a binding here changes, update the
+ * table — nothing else duplicates it.
  */
 
 import { useStore, transportBus } from "../store/store";

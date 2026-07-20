@@ -614,3 +614,12 @@
 .mxr-swatch:hover {
   border-color: var(--text);
 }
+
+/* mix views (UI_IMPROVE.md §3.3) — vertical view toggles in the toolbar column */
+.mixer-views {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
