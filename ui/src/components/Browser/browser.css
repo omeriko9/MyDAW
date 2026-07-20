@@ -267,3 +267,64 @@
   font-weight: 600;
   pointer-events: none;
 }
+
+/* ============================================================================
+ * Plugin hover card (pluginHoverCard.tsx, UI_IMPROVE.md §5.1)
+ * ==========================================================================*/
+
+.plugin-card {
+  position: fixed;
+  z-index: 1250;
+  width: 280px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  animation:
+    m-fade-in var(--dur-fast) var(--ease-out),
+    m-rise-in var(--dur-move) var(--ease-out);
+}
+
+.plugin-card-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plugin-card-sub {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.plugin-card-badges {
+  display: flex;
+  gap: 4px;
+  margin: 7px 0 5px;
+}
+.plugin-card-row {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text);
+}
+.plugin-card-row.danger {
+  color: var(--danger);
+}
+.plugin-card-path {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* keep the FILENAME visible when the path ellipsizes */
+  text-align: left;
+}
+.plugin-card-foot {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-faint);
+}

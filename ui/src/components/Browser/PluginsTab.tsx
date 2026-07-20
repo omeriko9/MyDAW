@@ -23,6 +23,7 @@ import {
   unblacklistPlugin,
 } from "../../store/actions";
 import { setDragChip, setPluginDrag } from "../../lib/dnd";
+import { pluginCardEnter, pluginCardLeave } from "./pluginHoverCard";
 import { pluginKey } from "../../lib/ids";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isBool, loadPref, oneOf, savePref, usePrefState } from "../../lib/prefs";
@@ -224,16 +225,15 @@ const PluginRowView = memo(function PluginRowView({
       }
       draggable={!p.blacklisted}
       onDragStart={(e) => {
+        pluginCardLeave();
         setPluginDrag(e.dataTransfer, { uid: p.uid });
         setDragChip(e.dataTransfer, p.name, "plugin");
       }}
       onDoubleClick={() => onAdd(p)}
       onContextMenu={contextMenuHandler(menuItems)}
-      title={
-        p.blacklisted
-          ? undefined
-          : `${p.path}\nDouble-click: add to the selected track · drag onto a track or mixer strip`
-      }
+      onMouseEnter={(e) => pluginCardEnter(p, e.currentTarget)}
+      onMouseLeave={pluginCardLeave}
+      onMouseDown={pluginCardLeave}
     >
       <Icon name={p.isInstrument ? "piano" : "plug"} size={13} className="plugin-row-icon" />
       <span className="ellipsis grow">{p.name}</span>
