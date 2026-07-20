@@ -108,6 +108,25 @@ function rgba(c: Rgb, a: number): string {
   return `rgba(${c.r},${c.g},${c.b},${a})`;
 }
 
+/* Velocity heat ramp (UI_IMPROVE.md §2.3B): blue → yellow → red, saturated
+   mid-tones that read on every theme (same family as the track palette). */
+const HEAT_LO: Rgb = { r: 74, g: 163, b: 232 }; // #4aa3e8
+const HEAT_MID: Rgb = { r: 216, g: 201, b: 69 }; // #d8c945
+const HEAT_HI: Rgb = { r: 224, g: 80, b: 76 }; // #e0504c
+
+function lerpRgb(a: Rgb, b: Rgb, t: number): Rgb {
+  return {
+    r: Math.round(a.r + (b.r - a.r) * t),
+    g: Math.round(a.g + (b.g - a.g) * t),
+    b: Math.round(a.b + (b.b - a.b) * t),
+  };
+}
+
+/** velT ∈ [0,1] → heat color. */
+function velHeat(velT: number): Rgb {
+  return velT < 0.5 ? lerpRgb(HEAT_LO, HEAT_MID, velT * 2) : lerpRgb(HEAT_MID, HEAT_HI, (velT - 0.5) * 2);
+}
+
 function lighten(c: Rgb, t: number): Rgb {
   return {
     r: Math.round(c.r + (255 - c.r) * t),
@@ -272,6 +291,8 @@ export function drawNotesArea(
   marquee: MarqueeRect | null,
   /** In-scale pitch classes (0-11), or null = classic white/black-key rows. */
   scale: ReadonlySet<number> | null = null,
+  /** Heat mode (§2.3B): tint notes blue→red by velocity instead of opacity. */
+  velColors = false,
 ): void {
   ctx.clearRect(0, 0, w, h);
 
@@ -349,13 +370,15 @@ export function drawNotesArea(
       if (y + nh < -2 || y > h + 2) continue;
 
       const velT = M.clamp(n.velocity, 1, 127) / 127;
-      const alpha = 0.35 + 0.6 * velT;
+      const alpha = velColors ? 0.9 : 0.35 + 0.6 * velT; // heat mode: hue carries velocity
+      const body = velColors ? velHeat(velT) : base;
+      const selBody = velColors ? lighten(velHeat(velT), 0.25) : selBase;
       if (n.ghost) ctx.globalAlpha = 0.55;
       roundRect(ctx, x, y, nw, nh, Math.min(3, nh / 2));
-      ctx.fillStyle = n.selected ? rgba(selBase, Math.max(alpha, 0.75)) : rgba(base, alpha);
+      ctx.fillStyle = n.selected ? rgba(selBody, Math.max(alpha, 0.75)) : rgba(body, alpha);
       ctx.fill();
       if (n.ghost) ctx.setLineDash([3, 2]);
-      ctx.strokeStyle = n.selected ? accent : rgba(lighten(base, 0.1), 0.9);
+      ctx.strokeStyle = n.selected ? accent : rgba(lighten(body, 0.1), 0.9);
       ctx.lineWidth = n.selected ? 1.5 : 1;
       ctx.stroke();
       ctx.lineWidth = 1;

@@ -265,6 +265,30 @@ const NAMED_LANES: Array<{ controller: number; label: string; short: string }> =
 // loadBoolPref also accepts the legacy raw "1"/"0" this key was written with.
 const AUDITION_PREF = "pianoRoll.audition";
 
+/* ---- stacked controller lanes (multi-CC) ----
+ * Each lane shows velocity (ctl null) or one controller (128 = pitch bend);
+ * `other` keeps the free CC-number NumberDrag visible next to the selector.
+ * Fixed canvas pool of MAX_LANES (hooks can't be created per-lane). */
+
+export interface LaneSpec {
+  ctl: number | null;
+  other: boolean;
+}
+
+const MAX_LANES = 4;
+
+const isLaneSpec = (l: unknown): l is LaneSpec =>
+  l !== null &&
+  typeof l === "object" &&
+  ((l as LaneSpec).ctl === null ||
+    (typeof (l as LaneSpec).ctl === "number" &&
+      ((l as LaneSpec).ctl as number) >= 0 &&
+      ((l as LaneSpec).ctl as number) <= 128)) &&
+  typeof (l as LaneSpec).other === "boolean";
+
+const isLaneSpecArray = (v: unknown): boolean =>
+  Array.isArray(v) && v.length >= 1 && v.length <= MAX_LANES && v.every(isLaneSpec);
+
 /* Zoom persists across clip switches/remounts (scroll is recomputed per clip) AND
    across reloads (lib/prefs — saved debounced from clampView). */
 const persisted = loadPref(
@@ -443,14 +467,32 @@ function Editor({ track, clip }: EditorProps) {
     Math.round((useStore.getState().project?.grid.swing ?? 0) * 100),
   );
   const [laneOn, setLaneOn] = usePrefState("pianoRoll.laneOn", true, isBool);
-  /** bottom-lane content: null = velocity, else controller number (128 = pitch bend) */
-  const [laneCtl, setLaneCtl] = usePrefState<number | null>("pianoRoll.laneCtl", null, (v) =>
-    v === null || numberIn(0, 128)(v),
+  /** Stacked controller lanes (multi-CC). Default migrates the legacy single-lane
+      prefs (pianoRoll.laneCtl / laneOther) so an existing setup carries over. */
+  const [lanes, setLanes] = usePrefState<LaneSpec[]>(
+    "pianoRoll.lanes",
+    [
+      {
+        ctl: loadPref<number | null>(
+          "pianoRoll.laneCtl",
+          null,
+          (v) => v === null || numberIn(0, 128)(v),
+        ),
+        other: loadBoolPref("pianoRoll.laneOther", false),
+      },
+    ],
+    isLaneSpecArray,
   );
-  /** "Other CC#" mode — show the CC-number NumberDrag next to the lane */
-  const [otherMode, setOtherMode] = usePrefState("pianoRoll.laneOther", false, isBool);
-  const laneCtlRef = useRef(laneCtl);
-  laneCtlRef.current = laneCtl;
+  const lanesRef = useRef(lanes);
+  lanesRef.current = lanes;
+  /** §2.3B — tint notes blue→red by velocity instead of the opacity ramp. */
+  const [velColors, setVelColors] = usePrefState("pianoRoll.velColors", false, isBool);
+  const velColorsRef = useRef(velColors);
+  velColorsRef.current = velColors;
+  /** Controller of the lane the CURRENT pointer gesture / context menu targets —
+      set by the per-lane wrappers before dispatching (pointer capture keeps a
+      gesture on its own canvas, so this stays stable for the gesture's lifetime). */
+  const laneCtlRef = useRef<number | null>(lanes[0]?.ctl ?? null);
   /** scale highlight + optional snap (drawn notes / ↑↓ transpose stay in scale) */
   const [scaleRoot, setScaleRoot] = usePrefState("pianoRoll.scaleRoot", 0, numberIn(0, 11));
   const [scaleId, setScaleId] = usePrefState(
@@ -577,7 +619,12 @@ function Editor({ track, clip }: EditorProps) {
     clampViewRef.current();
     requestDraw();
   });
-  const velCv = useCanvas(() => requestDraw());
+  // Lane canvas pool — one per possible lane slot (hooks can't be dynamic).
+  const laneCvA = useCanvas(() => requestDraw());
+  const laneCvB = useCanvas(() => requestDraw());
+  const laneCvC = useCanvas(() => requestDraw());
+  const laneCvD = useCanvas(() => requestDraw());
+  const laneCvs = [laneCvA, laneCvB, laneCvC, laneCvD];
   const overlayCv = useCanvas(() => requestDraw());
 
   /* ---- view clamping ---- */
@@ -713,6 +760,7 @@ function Editor({ track, clip }: EditorProps) {
         pal,
         marquee,
         scaleRef.current.pcs,
+        velColorsRef.current,
       );
     }
     const kEl = keysCv.canvasRef.current;
@@ -723,32 +771,34 @@ function Editor({ track, clip }: EditorProps) {
     if (rEl && rCtx) {
       D.drawRuler(rCtx, rEl.clientWidth, rEl.clientHeight, v, c.startBeat, c.lengthBeats, sigMap, pal);
     }
-    const vEl = velCv.canvasRef.current;
-    const vCtx = velCv.ctxRef.current;
-    if (vEl && vCtx) {
-      const ctl = laneCtlRef.current;
-      if (ctl === null) {
-        D.drawVelLane(vCtx, vEl.clientWidth, vEl.clientHeight, v, c.lengthBeats, rNotes, colorRef.current, pal);
+    lanesRef.current.forEach((lane, i) => {
+      const lEl = laneCvs[i]?.canvasRef.current;
+      const lCtx = laneCvs[i]?.ctxRef.current;
+      if (!lEl || !lCtx) return;
+      if (lane.ctl === null) {
+        D.drawVelLane(lCtx, lEl.clientWidth, lEl.clientHeight, v, c.lengthBeats, rNotes, colorRef.current, pal);
       } else {
+        // gesture previews / marquee overlays belong only to the gesture's own lane
+        const mine = laneCtlRef.current === lane.ctl;
         const rCc = M.buildRenderCc(
-          M.ccLanePoints(c.cc, ctl),
+          M.ccLanePoints(c.cc, lane.ctl),
           new Set(ccSelRef.current),
-          gestureToCcPreview(g),
+          mine ? gestureToCcPreview(g) : null,
         );
         D.drawCcLane(
-          vCtx,
-          vEl.clientWidth,
-          vEl.clientHeight,
+          lCtx,
+          lEl.clientWidth,
+          lEl.clientHeight,
           v,
           c.lengthBeats,
           rCc,
-          ctl === M.CC_PITCH_BEND,
+          lane.ctl === M.CC_PITCH_BEND,
           colorRef.current,
           pal,
-          g && g.kind === "ccMarquee" ? g : null,
+          mine && g && g.kind === "ccMarquee" ? g : null,
         );
       }
-    }
+    });
     drawOverlayNow();
   };
   drawNowRef.current = drawAllNow;
@@ -1096,9 +1146,12 @@ function Editor({ track, clip }: EditorProps) {
 
   useEffect(() => {
     if (!laneOn) return;
-    const el = velCv.canvasRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
+    const els = laneCvs
+      .slice(0, lanes.length)
+      .map((cv) => cv.canvasRef.current)
+      .filter((el): el is HTMLCanvasElement => el !== null);
+    if (els.length === 0) return;
+    const mkWheel = (el: HTMLCanvasElement) => (e: WheelEvent) => {
       e.preventDefault();
       const v = viewRef.current;
       if (e.ctrlKey || e.metaKey) {
@@ -1112,9 +1165,12 @@ function Editor({ track, clip }: EditorProps) {
       clampViewRef.current();
       requestDraw();
     };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [laneOn, requestDraw]); // eslint-disable-line react-hooks/exhaustive-deps
+    const pairs = els.map((el) => [el, mkWheel(el)] as const);
+    for (const [el, fn] of pairs) el.addEventListener("wheel", fn, { passive: false });
+    return () => {
+      for (const [el, fn] of pairs) el.removeEventListener("wheel", fn);
+    };
+  }, [laneOn, lanes.length, requestDraw]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ====================================================================== *
    * Notes canvas interactions
@@ -2044,15 +2100,21 @@ function Editor({ track, clip }: EditorProps) {
     requestDraw();
   };
 
-  /* lane dispatcher: velocity behaves exactly as before; CC lanes get CC gestures */
-  const onLaneDown = (e: React.PointerEvent<HTMLCanvasElement>) =>
-    laneCtlRef.current === null ? onVelDown(e) : onCcDown(e);
+  /* lane dispatcher: the wrapper stamps laneCtlRef with the LANE's controller before
+     dispatching (pointer capture keeps a gesture on its own canvas, so move/up stay
+     on the same lane); velocity lanes get velocity gestures, CC lanes CC gestures */
+  const onLaneDown = (i: number, e: React.PointerEvent<HTMLCanvasElement>) => {
+    laneCtlRef.current = lanesRef.current[i]?.ctl ?? null;
+    if (laneCtlRef.current === null) onVelDown(e);
+    else onCcDown(e);
+  };
   const onLaneMove = (e: React.PointerEvent<HTMLCanvasElement>) =>
     laneCtlRef.current === null ? onVelMove(e) : onCcMove(e);
   const onLaneUp = (e: React.PointerEvent<HTMLCanvasElement>) =>
     laneCtlRef.current === null ? onVelUp(e) : onCcUp(e);
 
-  const onLaneContext = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const onLaneContext = (i: number, e: React.MouseEvent<HTMLCanvasElement>) => {
+    laneCtlRef.current = lanesRef.current[i]?.ctl ?? null;
     const ctl = laneCtlRef.current;
     if (ctl === null) return;
     e.preventDefault();
@@ -2095,46 +2157,85 @@ function Editor({ track, clip }: EditorProps) {
     ]);
   };
 
-  /* ---- lane selector (dropdown left of the lane; "•" marks lanes with data) ---- */
+  /* ---- lane selector (dropdown left of each lane; "•" marks lanes with data) ---- */
   const lastOtherRef = useRef(74);
 
-  const pickLane = (ctl: number | null, other: boolean) => {
-    setLaneCtl(ctl);
-    setOtherMode(other);
+  /** Change what lane i shows. */
+  const pickLane = (i: number, ctl: number | null, other: boolean) => {
+    setLanes((ls) => ls.map((l, j) => (j === i ? { ctl, other } : l)));
     if (other && ctl !== null) lastOtherRef.current = ctl;
     ccSelRef.current = [];
   };
 
-  const openLaneMenu = (e: React.MouseEvent<HTMLButtonElement>) => {
+  /** First lane content not already shown: velocity, then the named CCs in order. */
+  const nextLaneSpec = (): LaneSpec => {
+    const shown = new Set(lanesRef.current.map((l) => l.ctl));
+    if (!shown.has(null)) return { ctl: null, other: false };
+    const named = NAMED_LANES.find((l) => !shown.has(l.controller));
+    if (named) return { ctl: named.controller, other: false };
+    return { ctl: lastOtherRef.current, other: true };
+  };
+
+  const openLaneMenu = (i: number, e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const c = clipRef.current;
+    const lane = lanesRef.current[i];
+    if (!lane) return;
     const has = new Set((c.cc ?? []).map((p) => p.controller));
     const named = new Set(NAMED_LANES.map((l) => l.controller));
     const dot = (d: boolean) => (d ? "  •" : "");
     const items: MenuEntry[] = [
       {
         label: `Velocity${dot(c.notes.length > 0)}`,
-        checked: laneCtl === null,
-        onClick: () => pickLane(null, false),
+        checked: lane.ctl === null,
+        onClick: () => pickLane(i, null, false),
       },
       "separator",
       ...NAMED_LANES.map(
         (l): MenuEntry => ({
           label: `${l.label}${dot(has.has(l.controller))}`,
-          checked: !otherMode && laneCtl === l.controller,
-          onClick: () => pickLane(l.controller, false),
+          checked: !lane.other && lane.ctl === l.controller,
+          onClick: () => pickLane(i, l.controller, false),
         }),
       ),
       "separator",
       {
         label: `Other CC#${dot([...has].some((n) => n < M.CC_PITCH_BEND && !named.has(n)))}`,
-        checked: otherMode,
+        checked: lane.other,
         onClick: () => {
           const firstOther = [...has]
             .filter((n) => n < M.CC_PITCH_BEND && !named.has(n))
             .sort((a, b) => a - b)[0];
-          pickLane(firstOther ?? lastOtherRef.current, true);
+          pickLane(i, firstOther ?? lastOtherRef.current, true);
         },
+      },
+      "separator",
+      {
+        label: "Color Notes by Velocity",
+        checked: velColorsRef.current,
+        title: "Tint notes blue→red by velocity (heat map) instead of the opacity ramp",
+        onClick: () => setVelColors((v) => !v),
+      },
+      "separator",
+      {
+        label: "Add Lane",
+        icon: "plus",
+        disabled: lanesRef.current.length >= MAX_LANES,
+        title:
+          lanesRef.current.length >= MAX_LANES
+            ? `Up to ${MAX_LANES} lanes`
+            : "Stack another controller lane below this one",
+        onClick: () => setLanes((ls) => [...ls, nextLaneSpec()]),
+      },
+      {
+        label: "Remove Lane",
+        icon: "trash",
+        disabled: lanesRef.current.length <= 1,
+        title:
+          lanesRef.current.length <= 1
+            ? "The last lane hides via the toolbar lane toggle instead"
+            : undefined,
+        onClick: () => setLanes((ls) => ls.filter((_, j) => j !== i)),
       },
     ];
     openContextMenu(r.left, r.top, items);
@@ -2285,7 +2386,7 @@ function Editor({ track, clip }: EditorProps) {
         className="pr-body"
         style={{
           gridTemplateRows: laneOn
-            ? `${M.RULER_H}px 1fr ${M.VEL_LANE_H}px`
+            ? `${M.RULER_H}px 1fr ${lanes.map(() => `${M.VEL_LANE_H}px`).join(" ")}`
             : `${M.RULER_H}px 1fr`,
         }}
       >
@@ -2326,49 +2427,50 @@ function Editor({ track, clip }: EditorProps) {
           />
         </div>
 
-        {laneOn && (
-          <>
-            <div className="pr-vel-corner pr-lane-corner">
-              <button
-                type="button"
-                className="pr-lane-btn"
-                title="Lane content — velocity, pitch bend or CC"
-                onClick={openLaneMenu}
-              >
-                <span className="pr-vel-label">
-                  {laneCtl === null
-                    ? "VEL"
-                    : laneCtl === M.CC_PITCH_BEND
-                      ? "PB"
-                      : `CC${laneCtl}`}
-                </span>
-                <Icon name="chevronDown" size={10} />
-              </button>
-              {otherMode && laneCtl !== null && (
-                <NumberDrag
-                  value={laneCtl}
-                  min={0}
-                  max={127}
-                  step={1}
-                  precision={0}
-                  width={40}
-                  title="CC number"
-                  onChange={(n) => pickLane(Math.round(n), true)}
+        {laneOn &&
+          lanes.map((lane, i) => (
+            <React.Fragment key={i}>
+              <div className="pr-vel-corner pr-lane-corner">
+                <button
+                  type="button"
+                  className="pr-lane-btn"
+                  title="Lane content — velocity, pitch bend or CC; add/remove lanes here too"
+                  onClick={(e) => openLaneMenu(i, e)}
+                >
+                  <span className="pr-vel-label">
+                    {lane.ctl === null
+                      ? "VEL"
+                      : lane.ctl === M.CC_PITCH_BEND
+                        ? "PB"
+                        : `CC${lane.ctl}`}
+                  </span>
+                  <Icon name="chevronDown" size={10} />
+                </button>
+                {lane.other && lane.ctl !== null && (
+                  <NumberDrag
+                    value={lane.ctl}
+                    min={0}
+                    max={127}
+                    step={1}
+                    precision={0}
+                    width={40}
+                    title="CC number"
+                    onChange={(n) => pickLane(i, Math.round(n), true)}
+                  />
+                )}
+              </div>
+              <div className={"pr-vel-wrap" + (lane.ctl !== null ? " pr-cc-lane" : "")}>
+                <canvas
+                  ref={laneCvs[i].ref}
+                  onPointerDown={(e) => onLaneDown(i, e)}
+                  onPointerMove={onLaneMove}
+                  onPointerUp={onLaneUp}
+                  onPointerCancel={onLaneUp}
+                  onContextMenu={(e) => onLaneContext(i, e)}
                 />
-              )}
-            </div>
-            <div className={"pr-vel-wrap" + (laneCtl !== null ? " pr-cc-lane" : "")}>
-              <canvas
-                ref={velCv.ref}
-                onPointerDown={onLaneDown}
-                onPointerMove={onLaneMove}
-                onPointerUp={onLaneUp}
-                onPointerCancel={onLaneUp}
-                onContextMenu={onLaneContext}
-              />
-            </div>
-          </>
-        )}
+              </div>
+            </React.Fragment>
+          ))}
       </div>
       <div className="drag-hud" ref={hudElRef} />
     </div>
