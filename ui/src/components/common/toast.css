@@ -55,10 +55,20 @@
   border-color: var(--ok);
   color: var(--ok);
 }
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 6px;
+}
 .toast-msg {
   min-width: 0;
   word-break: break-word;
   white-space: pre-line;
+}
+.toast-actions {
+  display: flex;
+  gap: 6px;
 }
 
 /* Movement only — the fade is composed from theme.css m-fade-in/-out so the

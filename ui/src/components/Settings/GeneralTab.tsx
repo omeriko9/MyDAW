@@ -13,7 +13,7 @@ import {
   type MotionPref,
 } from "../../lib/motion";
 import { getSettings, setSettings } from "../../store/actions";
-import { usePrefState } from "../../lib/prefs";
+import { isBool, usePrefState } from "../../lib/prefs";
 import {
   RECOVERY_MODE_DEFAULT,
   RECOVERY_MODE_PREF,
@@ -22,6 +22,7 @@ import {
 } from "../Transport/projectFlows";
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
+import { Toggle } from "../common/Toggle";
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -67,6 +68,7 @@ export function GeneralTab() {
 
   const theme = useThemeName();
   const motion = useMotionPref();
+  const [recVisuals, setRecVisuals] = usePrefState<boolean>("ui.recordVisuals", true, isBool);
   const [recovery, setRecovery] = usePrefState<RecoveryMode>(
     RECOVERY_MODE_PREF,
     RECOVERY_MODE_DEFAULT,
@@ -96,6 +98,15 @@ export function GeneralTab() {
           />
           <span className="sett-note">
             hover/press/menu animations; follows the OS reduced-motion setting
+          </span>
+        </div>
+        <span className="sett-label">Record visuals</span>
+        <div className="row gap1">
+          <Toggle on={recVisuals} onChange={setRecVisuals} variant="danger">
+            {recVisuals ? "On" : "Off"}
+          </Toggle>
+          <span className="sett-note">
+            red frame around the arrangement while recording; applies from the next take
           </span>
         </div>
         <span className="sett-label">Autosave interval</span>

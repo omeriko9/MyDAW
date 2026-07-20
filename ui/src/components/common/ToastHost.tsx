@@ -18,10 +18,24 @@ import "./toast.css";
 
 export type ToastKind = "info" | "success" | "error";
 
+/** Inline action button (e.g. post-take "Undo take"). Clicking dismisses the toast. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+export interface ToastOptions {
+  actions?: ToastAction[];
+  /** Override the kind-based auto-dismiss (ms). */
+  durationMs?: number;
+}
+
 interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
+  actions?: ToastAction[];
+  durationMs?: number;
   /** Exit animation running — still in the DOM, removed after TOAST_EXIT_MS. */
   leaving?: boolean;
 }
@@ -58,13 +72,14 @@ function pauseAutoDismiss(id: number): void {
   }
 }
 
+function toastDuration(t: { kind: ToastKind; durationMs?: number }): number {
+  return t.durationMs ?? (t.kind === "error" ? ERROR_MS : INFO_MS);
+}
+
 function resumeAutoDismiss(id: number): void {
   const toast = toasts.find((t) => t.id === id);
   if (!toast || timers.has(id)) return;
-  timers.set(
-    id,
-    window.setTimeout(() => dismissToast(id), toast.kind === "error" ? ERROR_MS : INFO_MS),
-  );
+  timers.set(id, window.setTimeout(() => dismissToast(id), toastDuration(toast)));
 }
 
 export function dismissToast(id: number): void {
@@ -81,16 +96,14 @@ export function dismissToast(id: number): void {
   }, TOAST_EXIT_MS);
 }
 
-export function showToast(message: string, kind: ToastKind = "info"): void {
+export function showToast(message: string, kind: ToastKind = "info", opts?: ToastOptions): void {
   const id = nextId++;
   const dropped = toasts.slice(0, Math.max(0, toasts.length - (MAX_TOASTS - 1)));
   for (const d of dropped) pauseAutoDismiss(d.id); // overflowed out — kill their timers
-  toasts = [...toasts.slice(-(MAX_TOASTS - 1)), { id, message, kind }];
+  const toast: Toast = { id, message, kind, actions: opts?.actions, durationMs: opts?.durationMs };
+  toasts = [...toasts.slice(-(MAX_TOASTS - 1)), toast];
   emit();
-  timers.set(
-    id,
-    window.setTimeout(() => dismissToast(id), kind === "error" ? ERROR_MS : INFO_MS),
-  );
+  timers.set(id, window.setTimeout(() => dismissToast(id), toastDuration(toast)));
 }
 
 const KIND_ICON: Record<ToastKind, IconName> = {
@@ -116,7 +129,27 @@ export default function ToastHost() {
           onMouseLeave={() => resumeAutoDismiss(t.id)}
         >
           <Icon name={KIND_ICON[t.kind]} size={14} />
-          <span className="toast-msg">{t.message}</span>
+          <div className="toast-body">
+            <span className="toast-msg">{t.message}</span>
+            {t.actions && t.actions.length > 0 && (
+              <div className="toast-actions">
+                {t.actions.map((a) => (
+                  <button
+                    key={a.label}
+                    type="button"
+                    className="btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      dismissToast(t.id);
+                      a.onClick();
+                    }}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ))}
     </div>,

@@ -25,7 +25,8 @@ import type { PoppedOutTab } from "./store/store";
 import { windowTitle } from "./lib/appTitle";
 import { initKeyboard } from "./lib/keyboard";
 import { LAYOUT_SIZES_EVENT, type LayoutSizes } from "./lib/layouts";
-import { numberIn, usePrefState } from "./lib/prefs";
+import { loadBoolPref, numberIn, usePrefState } from "./lib/prefs";
+import { installRecordingToast } from "./components/Transport/recordingToast";
 import { checkRecoveryOnce } from "./components/Transport/projectFlows";
 
 import TransportBar from "./components/Transport/TransportBar";
@@ -177,6 +178,10 @@ export default function App() {
   const setPanels = useStore((s) => s.setPanels);
   const projectName = useStore((s) => s.project?.name ?? null);
   const dirty = useStore((s) => s.dirty);
+  // Performance-mode record visuals (UI_IMPROVE.md §4.1): pref read fresh on each
+  // recording transition so the Settings toggle applies from the next take on.
+  const recording = useStore((s) => s.transport.state === "recording");
+  const recordVisuals = recording && loadBoolPref("ui.recordVisuals", true);
 
   const [browserW, setBrowserW] = usePrefState(
     "ui.browserW",
@@ -201,6 +206,7 @@ export default function App() {
   }, []);
 
   useEffect(() => initKeyboard(), []);
+  useEffect(() => installRecordingToast(), []);
 
   // Layout presets (lib/layouts): panel sizes arrive via event — App owns the clamps.
   useEffect(() => {
@@ -422,7 +428,7 @@ export default function App() {
   return (
     <div className="app-frame">
       <MenuBar />
-      <div className="app-root">
+      <div className="app-root" data-recording={recordVisuals || undefined}>
         <TransportBar />
 
         <div className="app-main">

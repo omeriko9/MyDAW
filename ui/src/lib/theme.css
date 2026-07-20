@@ -846,6 +846,35 @@ body {
 }
 
 /* ============================================================================
+ * Recording visuals (UI_IMPROVE.md §4.1) — while recording (App stamps
+ * data-recording on .app-root, gated by the ui.recordVisuals pref), the
+ * arrangement gets a red frame readable from across the room. It breathes at
+ * motion "full", stays a steady frame at "reduced"/"off".
+ * ==========================================================================*/
+
+.app-root[data-recording] .tl-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  border: 2px solid var(--danger);
+  pointer-events: none;
+  opacity: 0.55;
+}
+:root[data-motion="full"] .app-root[data-recording] .tl-root::before {
+  animation: rec-breathe 2s ease-in-out infinite;
+}
+@keyframes rec-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* ============================================================================
  * ZoomPill (ZoomPill.tsx, UI_IMPROVE.md §1.1) — floating [Fit][−][%][+] zoom
  * control docked bottom-right of a canvas pane (parent must be positioned).
  * ==========================================================================*/
