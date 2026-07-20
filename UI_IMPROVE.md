@@ -225,7 +225,7 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 
 **Tier 2 — next (high impact, more work):**
 6. ✅ Split dock (6.1) and layout presets (6.3). *(SHIPPED 2026-07-20: split button + per-half tab strips + draggable divider; Ctrl+Alt+1..4 apply / +Shift save, View → Layouts.)*
-7. ◐ Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2). *(2.1 SHIPPED as drag HUDs in timeline + piano roll; 7.2 SHIPPED — lib/shortcutTable.ts feeds ShortcutsDialog. Only the contextual `?` overlay (7.3) remains open.)*
+7. ✅ Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2). *(ALL SHIPPED 2026-07-20 — Tier 2 complete: drag HUDs, hold-? quick-help card per pane (tap still opens the full cheat sheet), lib/shortcutTable.ts single source.)*
 8. ✅ Mix views / strip filtering (3.3). *(SHIPPED 2026-07-20 v1: All / Audio / Instruments / Buses view toggles in the mixer toolbar; saved custom filters remain a future step.)*
 9. ✅ Recording performance visuals + post-take action toast (4.1, 4.2). *(SHIPPED 2026-07-20: breathing red arrange frame gated by Settings toggle + motion level; post-take toast with Undo / Open-in-Piano-Roll actions.)*
 10. ✅ Velocity display options (2.3 B). *(SHIPPED 2026-07-20: optional blue→red heat tinting, lane-menu toggle; in-note bars (A) and curve tools (C) remain Tier 3.)*
@@ -233,8 +233,8 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 **Shipped outside the plan (user requests, 2026-07-20):** Cubase-style right-click icon toolbox in the piano roll (ContextMenu icon-row entries), and multiple stacked controller lanes — up to 4 of velocity / pitch bend / any CCs at once, with per-lane Add/Remove.
 
 **Tier 3 — differentiators & delight (worth doing, not urgent):**
-11. Song-strip / marker minimap (1.3), hover cards (5.1), custom drag ghosts (5.3), waveform previews (5.2).
-12. Hover magnification homes (8.4), accent/tint personalization (9).
+11. ◐ Song-strip / marker minimap (1.3 — ✅ SHIPPED 2026-07-20: labeled marker bands in the minimap), hover cards (5.1), custom drag ghosts (5.3), waveform previews (5.2).
+12. ✅ Hover magnification homes (8.4 — menu strip + browser rail, opt-in; PR key hover highlight+name always on) and accent personalization (9 — 8 swatches + Theme reset, derived per theme). *(SHIPPED 2026-07-20; pane-tint strength still open.)*
 13. Mixer A/B ghost snapshots (3.4), Big Clock (4.3), track overview rail (1.5), velocity curve tools (2.3 C).
 
 **Deliberately out of scope** (corner cases / backend-coupled): shortcut *remapping* (needs persistence design — but 7.2 prepares it), touch/pinch gestures (no evidence of tablet users yet), full free-docking (6.2) unless split dock proves insufficient, undo/redo *availability* state (needs engine support to know `canUndo` — flagged for the backend pass, since the always-enabled undo buttons violate the app's own "no dead items" policy).
