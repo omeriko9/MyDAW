@@ -219,15 +219,15 @@ Also: replace the two remaining native `window.confirm` calls (Agent clear / YOL
 **Tier 1 — build first (high frequency × high impact):** *(all five SHIPPED 2026-07-20)*
 1. ✅ **Command palette + jump palette (7.1, 1.2)** — one feature, solves discoverability, navigation, and the icon-menu learning curve at once. *(Ctrl+K; flattens the live menu builders + Transport/Tools groups; bar/marker/track jump with reveal.)*
 2. ✅ **Motion system baseline (8.1–8.2)** — transforms perceived quality of *every* interaction; small, systematic, respects reduced-motion. *(--dur-fast/med/move tokens, data-motion full/reduced/off, Settings → General knob.)*
-3. ✅ **Navigator pill + smooth viewport animation (1.1, 1.4)** — fixes the invisible-zoom problem. *(Arrange view shipped — [Fit][−][%][+] pill + 180ms eased jumps; Piano Roll / Clip Editor pills still open.)*
+3. ✅ **Navigator pill + smooth viewport animation (1.1, 1.4)** — fixes the invisible-zoom problem. *(All three canvas panes: shared ZoomPill in arrange (+% + eased jumps), Piano Roll (+%), Clip Editor (Fit/−/+).)*
 4. ✅ **Focused-pane indicator (6.4)** — removes the most dangerous invisible state (keyboard routing). *(2px accent strip on the pane Delete/Ctrl+A routes to.)*
 5. ✅ **Value HUD on faders/knobs + note-drag readout (3.1, 2.2)** — precision feedback at the two highest-frequency edit points. *(Fader/Knob HUD with ⇧-fine hint; piano-roll drag chip with pitch/±st/position/length.)*
 
 **Tier 2 — next (high impact, more work):**
-6. Split dock (6.1) and layout presets (6.3).
-7. Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2).
+6. ✅ Split dock (6.1) and layout presets (6.3). *(SHIPPED 2026-07-20: split button + per-half tab strips + draggable divider; Ctrl+Alt+1..4 apply / +Shift save, View → Layouts.)*
+7. ◐ Modifier hint chips (2.1) + contextual `?` overlay (7.3) + shortcut single-source table (7.2). *(2.1 SHIPPED 2026-07-20 as drag HUDs in timeline + piano roll — position readout with live "copy"/"snap off" hints; the `?` overlay and shortcut table remain open.)*
 8. Mix views / strip filtering (3.3).
-9. Recording performance visuals + post-take action toast (4.1, 4.2).
+9. ✅ Recording performance visuals + post-take action toast (4.1, 4.2). *(SHIPPED 2026-07-20: breathing red arrange frame gated by Settings toggle + motion level; post-take toast with Undo / Open-in-Piano-Roll actions.)*
 10. Velocity display options (2.3 A or B).
 
 **Tier 3 — differentiators & delight (worth doing, not urgent):**
