@@ -278,3 +278,33 @@
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* lane management mini-buttons (multi-CC lanes): visible add/remove per corner */
+.pr-lane-mini {
+  display: flex;
+  gap: 2px;
+}
+.pr-lane-mini-btn {
+  appearance: none;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.pr-lane-mini-btn:hover:not(:disabled) {
+  background: var(--panel3);
+  color: var(--text);
+}
+.pr-lane-mini-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

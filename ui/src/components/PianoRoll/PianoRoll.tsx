@@ -275,7 +275,14 @@ export interface LaneSpec {
   other: boolean;
 }
 
-const MAX_LANES = 4;
+const MAX_LANES = 6;
+
+/** Per-lane height, shrinking as lanes stack so the notes area keeps room
+    (full VEL_LANE_H solo, down to a still-editable 46px with six lanes). */
+function laneHeightFor(count: number): number {
+  if (count <= 1) return M.VEL_LANE_H;
+  return Math.max(46, Math.round(M.VEL_LANE_H - (count - 1) * 12));
+}
 
 const isLaneSpec = (l: unknown): l is LaneSpec =>
   l !== null &&
@@ -626,7 +633,9 @@ function Editor({ track, clip }: EditorProps) {
   const laneCvB = useCanvas(() => requestDraw());
   const laneCvC = useCanvas(() => requestDraw());
   const laneCvD = useCanvas(() => requestDraw());
-  const laneCvs = [laneCvA, laneCvB, laneCvC, laneCvD];
+  const laneCvE = useCanvas(() => requestDraw());
+  const laneCvF = useCanvas(() => requestDraw());
+  const laneCvs = [laneCvA, laneCvB, laneCvC, laneCvD, laneCvE, laneCvF];
   const overlayCv = useCanvas(() => requestDraw());
 
   /* ---- view clamping ---- */
@@ -2404,7 +2413,7 @@ function Editor({ track, clip }: EditorProps) {
         />
         <IconButton
           icon="sliders"
-          tooltip="Velocity / CC lane"
+          tooltip={`Velocity / CC lanes — stack up to ${MAX_LANES} (the + in a lane's corner) to see e.g. velocity + CC74 + CC10 at once`}
           active={laneOn}
           onClick={() => setLaneOn((on) => !on)}
         />
@@ -2414,7 +2423,7 @@ function Editor({ track, clip }: EditorProps) {
         className="pr-body"
         style={{
           gridTemplateRows: laneOn
-            ? `${M.RULER_H}px 1fr ${lanes.map(() => `${M.VEL_LANE_H}px`).join(" ")}`
+            ? `${M.RULER_H}px 1fr ${lanes.map(() => `${laneHeightFor(lanes.length)}px`).join(" ")}`
             : `${M.RULER_H}px 1fr`,
         }}
       >
@@ -2475,7 +2484,7 @@ function Editor({ track, clip }: EditorProps) {
                   </span>
                   <Icon name="chevronDown" size={10} />
                 </button>
-                {lane.other && lane.ctl !== null && (
+                {lane.other && lane.ctl !== null ? (
                   <NumberDrag
                     value={lane.ctl}
                     min={0}
@@ -2486,6 +2495,36 @@ function Editor({ track, clip }: EditorProps) {
                     title="CC number"
                     onChange={(n) => pickLane(i, Math.round(n), true)}
                   />
+                ) : (
+                  /* visible lane management (the selector menu has the same items) */
+                  <div className="pr-lane-mini">
+                    <button
+                      type="button"
+                      className="pr-lane-mini-btn"
+                      disabled={lanes.length >= MAX_LANES}
+                      title={
+                        lanes.length >= MAX_LANES
+                          ? `Up to ${MAX_LANES} lanes`
+                          : "Add another controller lane (velocity / pitch bend / CC)"
+                      }
+                      onClick={() => setLanes((ls) => [...ls, nextLaneSpec()])}
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      className="pr-lane-mini-btn"
+                      disabled={lanes.length <= 1}
+                      title={
+                        lanes.length <= 1
+                          ? "The last lane hides via the toolbar lane toggle"
+                          : "Remove this lane"
+                      }
+                      onClick={() => setLanes((ls) => ls.filter((_, j) => j !== i))}
+                    >
+                      −
+                    </button>
+                  </div>
                 )}
               </div>
               <div className={"pr-vel-wrap" + (lane.ctl !== null ? " pr-cc-lane" : "")}>
