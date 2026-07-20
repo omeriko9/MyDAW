@@ -1701,6 +1701,21 @@ function Editor({ track, clip }: EditorProps) {
       "separator",
       { label: "Velocity +10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, 10)) },
       { label: "Velocity −10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, -10)) },
+      {
+        label: "Crescendo",
+        title: "Ramp velocities 45 → 115 across the selection",
+        onClick: () => applyFn((ns) => MF.rampVelocity(ns, 45, 115)),
+      },
+      {
+        label: "Diminuendo",
+        title: "Ramp velocities 115 → 45 across the selection",
+        onClick: () => applyFn((ns) => MF.rampVelocity(ns, 115, 45)),
+      },
+      {
+        label: "Smooth Velocities",
+        title: "Even ramp between the first and last note's existing velocities",
+        onClick: () => applyFn(MF.smoothVelocity),
+      },
       "separator",
       { label: "Transpose +12", shortcut: "Shift+↑", onClick: () => applyFn((ns) => MF.transpose(ns, 12)) },
       { label: "Transpose −12", shortcut: "Shift+↓", onClick: () => applyFn((ns) => MF.transpose(ns, -12)) },

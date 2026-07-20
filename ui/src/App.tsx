@@ -32,6 +32,7 @@ import { checkRecoveryOnce } from "./components/Transport/projectFlows";
 import TransportBar from "./components/Transport/TransportBar";
 import MenuBar from "./components/Transport/MenuBar";
 import StatusBar from "./components/Transport/StatusBar";
+import BigClock from "./components/Transport/BigClock";
 import Timeline from "./components/Timeline/Timeline";
 import Mixer from "./components/Mixer/Mixer";
 import PianoRoll from "./components/PianoRoll/PianoRoll";
@@ -546,6 +547,7 @@ export default function App() {
       <DialogsHost />
       <SettingsDialog />
       <PluginEditorHost />
+      <BigClock />
 
       {/* engine-offline overlay — UI stays mounted underneath */}
       {!connected && (

@@ -88,6 +88,39 @@ export function scaleVelocity(notes: Note[], mul: number, add: number): NotesPat
   return update.length > 0 ? { update } : {};
 }
 
+/**
+ * Velocity ramp across the selection's TIME span (UI_IMPROVE.md §2.3C): each
+ * note's velocity is the linear blend of `from`→`to` at its onset position.
+ * One gesture shapes a crescendo/diminuendo. Single notes / zero span get `from`.
+ */
+export function rampVelocity(notes: Note[], from: number, to: number): NotesPatch {
+  if (notes.length === 0) return {};
+  let s0 = Infinity;
+  let s1 = -Infinity;
+  for (const n of notes) {
+    s0 = Math.min(s0, n.startBeat);
+    s1 = Math.max(s1, n.startBeat);
+  }
+  const span = s1 - s0;
+  const update: NoteUpdate[] = [];
+  for (const n of notes) {
+    const t = span > 1e-9 ? (n.startBeat - s0) / span : 0;
+    const velocity = clampVel(from + (to - from) * t);
+    if (velocity !== n.velocity) update.push({ noteId: n.id, patch: { velocity } });
+  }
+  return update.length > 0 ? { update } : {};
+}
+
+/**
+ * Smooth ramp between the selection's EXISTING first and last velocities —
+ * evens out a lumpy passage without choosing new dynamics.
+ */
+export function smoothVelocity(notes: Note[]): NotesPatch {
+  if (notes.length < 3) return {};
+  const sorted = [...notes].sort((a, b) => a.startBeat - b.startBeat);
+  return rampVelocity(notes, sorted[0].velocity, sorted[sorted.length - 1].velocity);
+}
+
 /** Mirror the notes in time within their own span (pitches unchanged). */
 export function reverse(notes: Note[]): NotesPatch {
   if (notes.length < 2) return {};

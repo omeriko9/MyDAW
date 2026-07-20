@@ -6,8 +6,10 @@ import {
   humanizeTiming,
   humanizeVelocity,
   legato,
+  rampVelocity,
   reverse,
   scaleVelocity,
+  smoothVelocity,
   transpose,
   type NotesPatch,
 } from "./midiFunctions";
@@ -318,5 +320,58 @@ describe("humanizeVelocity", () => {
     rnd.mockReturnValue(0.9999999); // offset ≈ +amount
     const high = [note({ velocity: 125 })];
     expect(patchFor(humanizeVelocity(high, 30), high[0].id)).toEqual({ velocity: 127 });
+  });
+});
+
+describe("rampVelocity", () => {
+  it("blends from→to linearly across the selection's time span", () => {
+    const notes = [
+      note({ startBeat: 0, velocity: 100 }),
+      note({ startBeat: 2, velocity: 100 }),
+      note({ startBeat: 4, velocity: 100 }),
+    ];
+    const out = applyPatch(notes, rampVelocity(notes, 40, 120));
+    expect(out.map((n) => n.velocity)).toEqual([40, 80, 120]);
+  });
+
+  it("is order-independent (position, not array order, decides the blend)", () => {
+    const notes = [
+      note({ startBeat: 4, velocity: 1 }),
+      note({ startBeat: 0, velocity: 1 }),
+    ];
+    const p = rampVelocity(notes, 20, 100);
+    expect(patchFor(p, notes[0].id)).toEqual({ velocity: 100 });
+    expect(patchFor(p, notes[1].id)).toEqual({ velocity: 20 });
+  });
+
+  it("zero span / single note takes `from`; velocities clamp to 1..127", () => {
+    const one = [note({ startBeat: 3, velocity: 64 })];
+    expect(patchFor(rampVelocity(one, 200, 50), one[0].id)).toEqual({ velocity: 127 });
+    const chord = [note({ startBeat: 1, velocity: 9 }), note({ startBeat: 1, velocity: 9 })];
+    const p = rampVelocity(chord, -20, 80);
+    expect(patchFor(p, chord[0].id)).toEqual({ velocity: 1 });
+    expect(patchFor(p, chord[1].id)).toEqual({ velocity: 1 });
+  });
+
+  it("returns an empty patch when nothing changes", () => {
+    const notes = [note({ startBeat: 0, velocity: 40 }), note({ startBeat: 2, velocity: 120 })];
+    expect(rampVelocity(notes, 40, 120)).toEqual({});
+  });
+});
+
+describe("smoothVelocity", () => {
+  it("ramps between the first and last note's existing velocities", () => {
+    const notes = [
+      note({ startBeat: 0, velocity: 60 }),
+      note({ startBeat: 1, velocity: 127 }),
+      note({ startBeat: 2, velocity: 100 }),
+    ];
+    const out = applyPatch(notes, smoothVelocity(notes));
+    expect(out.map((n) => n.velocity)).toEqual([60, 80, 100]);
+  });
+
+  it("needs at least three notes", () => {
+    const notes = [note({ startBeat: 0 }), note({ startBeat: 1, velocity: 20 })];
+    expect(smoothVelocity(notes)).toEqual({});
   });
 });

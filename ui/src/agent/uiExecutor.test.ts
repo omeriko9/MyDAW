@@ -23,6 +23,7 @@ beforeEach(() => {
       inspector: true,
       minimap: true,
       agent: false,
+      bigClock: false,
       bottomTab: "mixer",
       bottomTab2: null,
       poppedOut: {},

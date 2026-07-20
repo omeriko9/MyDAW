@@ -447,6 +447,12 @@ function buildViewMenu(): MenuEntry[] {
       onClick: () => s.setPanels({ minimap: !s.panels.minimap }),
     },
     {
+      label: "Big Clock",
+      checked: s.panels.bigClock,
+      title: "Floating bars.beats display readable from across the room — drag to move",
+      onClick: () => s.setPanels({ bigClock: !s.panels.bigClock }),
+    },
+    {
       label: "Bottom Dock",
       checked: s.panels.bottomTab !== null,
       title: "Mixer / Piano Roll / Clip Editor / Sheet Music / Visualizer dock",
