@@ -231,6 +231,19 @@ type Drag =
       moved: boolean;
     }
   | {
+      /** Draw-tool flowing paint over an automation lane: a dense value stream at
+       *  qStep granularity, committed as ONE cmd/automation.set (replace-range). */
+      kind: "laneDraw";
+      trackId: number;
+      paramRef: string;
+      qStep: number;
+      stream: Map<number, number>;
+      lo: number;
+      hi: number;
+      lastBeat: number;
+      lastValue: number;
+    }
+  | {
       kind: "laneCurve";
       trackId: number;
       paramRef: string;
@@ -513,6 +526,28 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
           hoverPointId:
             lh && lh.trackId === row.track.id && lh.paramRef === row.paramRef ? lh.pointId : null,
         });
+        // flowing-paint preview: the in-progress stream as an accent polyline
+        if (
+          d &&
+          d.kind === "laneDraw" &&
+          d.trackId === row.track.id &&
+          d.paramRef === row.paramRef &&
+          d.stream.size > 1
+        ) {
+          const spec = paramSpecFor(row.paramRef, row.track);
+          const pts = [...d.stream.entries()].sort((a, b) => a[0] - b[0]);
+          ctx.strokeStyle = colors.accent;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          pts.forEach(([k, val], i) => {
+            const x = beatToPx(k * d.qStep, v);
+            const py = laneValueToY(val, spec, ry, row.height);
+            if (i === 0) ctx.moveTo(x, py);
+            else ctx.lineTo(x, py);
+          });
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        }
         continue;
       }
       const track = row.track;
@@ -897,12 +932,26 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         return;
       }
       if (st.tool === "draw") {
+        // Flowing paint: collect a dense stream while dragging; a plain click (no
+        // movement) falls back to adding ONE snapped point on release.
         const spec = paramSpecFor(row.paramRef, row.track);
-        fire(
-          setAutomation(row.track.id, row.paramRef, {
-            add: [{ t: snapB(rawBeat, grid, e.shiftKey), v: laneYToValue(cy, spec, row.top, row.height) }],
-          }),
-        );
+        const gs = grid.snap && grid.division > 0 ? gridStepBeats(grid) : 1;
+        const qStep = Math.max(gs / 8, 1 / 32);
+        const beat = Math.max(0, rawBeat);
+        const value = laneYToValue(cy, spec, row.top, row.height);
+        const k = Math.round(beat / qStep);
+        dragRef.current = {
+          kind: "laneDraw",
+          trackId: row.track.id,
+          paramRef: row.paramRef,
+          qStep,
+          stream: new Map([[k, value]]),
+          lo: k * qStep,
+          hi: k * qStep,
+          lastBeat: beat,
+          lastValue: value,
+        };
+        capture();
       }
       return;
     }
@@ -1190,6 +1239,31 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         draw();
         return;
       }
+      case "laneDraw": {
+        const row = laneRowOf(st.rows, d.trackId, d.paramRef);
+        if (!row) return;
+        const spec = paramSpecFor(d.paramRef, row.track);
+        const beat = Math.max(0, rawBeat);
+        const value = laneYToValue(cy, spec, row.top, row.height);
+        const k0 = Math.round(d.lastBeat / d.qStep);
+        const k1 = Math.round(beat / d.qStep);
+        if (k0 === k1) {
+          d.stream.set(k1, value);
+        } else {
+          const dir = k1 > k0 ? 1 : -1;
+          for (let k = k0; k !== k1 + dir; k += dir) {
+            const f = (k - k0) / (k1 - k0);
+            d.stream.set(k, d.lastValue + (value - d.lastValue) * f);
+          }
+        }
+        d.lo = Math.min(d.lo, k1 * d.qStep);
+        d.hi = Math.max(d.hi, k1 * d.qStep);
+        d.lastBeat = beat;
+        d.lastValue = value;
+        showDragHud(e.clientX, e.clientY, `${spec.label} ${spec.fmt(value)}`);
+        draw();
+        return;
+      }
     }
   };
 
@@ -1291,6 +1365,30 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         }
         break;
       }
+      case "laneDraw": {
+        if (d.stream.size <= 1) {
+          // plain click — one snapped point (the pre-paint draw-tool behavior)
+          fire(
+            setAutomation(d.trackId, d.paramRef, {
+              add: [{ t: snapB(d.lastBeat, proj.grid, e.shiftKey), v: d.lastValue }],
+            }),
+          );
+          break;
+        }
+        // ONE cmd/automation.set = one undo entry: replace the painted range with
+        // the dense stream (same contract as the piano roll's CC pencil).
+        const row = laneRowOf(stateRef.current.rows, d.trackId, d.paramRef);
+        const remove = row
+          ? row.points
+              .filter((p) => p.beat >= d.lo - 1e-9 && p.beat <= d.hi + 1e-9)
+              .map((p) => p.id)
+          : [];
+        const add = [...d.stream.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([k, v]) => ({ t: k * d.qStep, v }));
+        fire(setAutomation(d.trackId, d.paramRef, { remove, add }));
+        break;
+      }
     }
     draw();
   };
@@ -1389,7 +1487,29 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
           });
         },
       };
+      // Toolbox strip: the two input styles live on the tools — select drags points,
+      // DRAW paints flowing automation (click = single dot), erase deletes.
+      const s0 = useStore.getState();
+      const laneTools: MenuEntry = {
+        type: "icons",
+        buttons: (
+          [
+            { tool: "select", label: "Select tool (1) — drag points, Alt-drag bends curves", icon: "pointer" },
+            { tool: "draw", label: "Draw tool (2) — click adds a dot, drag PAINTS flowing automation", icon: "pencil" },
+            { tool: "erase", label: "Erase tool (3) — click deletes points", icon: "eraser" },
+          ] as const
+        ).map((t) => ({
+          icon: t.icon,
+          label: t.label,
+          active: s0.tool === t.tool,
+          onClick: () => useStore.getState().setTool(t.tool),
+        })),
+      };
+      const spec = paramSpecFor(row.paramRef, row.track);
+      const addValue = laneYToValue(cy, spec, row.top, row.height);
       openContextMenu(e.clientX, e.clientY, [
+        laneTools,
+        "separator",
         ...(pt
           ? [
               {
@@ -1403,6 +1523,17 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
               "separator" as const,
             ]
           : []),
+        {
+          label: "Add Point Here",
+          icon: "plus",
+          title: `${spec.label} ${spec.fmt(addValue)} at ${formatBarsBeatsShort(pasteBeat, proj.timeSigMap)} — any tool; drag with the Draw tool (2) to paint`,
+          onClick: () =>
+            fire(
+              setAutomation(row.track.id, row.paramRef, {
+                add: [{ t: pasteBeat, v: addValue }],
+              }),
+            ),
+        },
         clearLane,
       ]);
       return;

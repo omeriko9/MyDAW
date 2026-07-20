@@ -2153,21 +2153,70 @@ function Editor({ track, clip }: EditorProps) {
   const onLaneContext = (i: number, e: React.MouseEvent<HTMLCanvasElement>) => {
     laneCtlRef.current = lanesRef.current[i]?.ctl ?? null;
     const ctl = laneCtlRef.current;
-    if (ctl === null) return;
     e.preventDefault();
     const el = e.currentTarget;
     const { x, y } = localPt(e);
-    const hit = M.hitTestCcPoint(ccPointsNow(), x, y, viewRef.current, el.clientHeight);
-    if (!hit) return; // empty lane background: no menu
+    const h = el.clientHeight;
+    // Toolbox strip: the two CC input styles live on the tools — select clicks add
+    // single dots (drag = move/marquee), DRAW paints flowing streams, erase deletes.
+    const s0 = useStore.getState();
+    const toolRow: MenuEntry = {
+      type: "icons",
+      buttons: (
+        [
+          { tool: "select", label: "Select tool (1) — click adds a dot, drag moves / marquees", icon: "pointer" },
+          { tool: "draw", label: "Draw tool (2) — drag PAINTS a flowing stream", icon: "pencil" },
+          { tool: "erase", label: "Erase tool (3) — click deletes points", icon: "eraser" },
+        ] as const
+      ).map((t) => ({
+        icon: t.icon,
+        label: t.label,
+        active: s0.tool === t.tool,
+        onClick: () => useStore.getState().setTool(t.tool),
+      })),
+    };
+    if (ctl === null) {
+      // velocity lane: bars derive from the notes — nothing to add or delete here
+      openContextMenu(e.clientX, e.clientY, [
+        toolRow,
+        "separator",
+        {
+          label: "Velocity follows the notes — drag to paint values",
+          disabled: true,
+        },
+      ]);
+      return;
+    }
+    const hit = M.hitTestCcPoint(ccPointsNow(), x, y, viewRef.current, h);
     const laneName = ctl === M.CC_PITCH_BEND ? "Pitch Bend" : `CC${ctl}`;
+    const addBeat = M.snapRound(Math.max(0, M.xToBeat(x, viewRef.current)), stepRef.current);
+    const addValue = M.ccYToValue(y, h);
     openContextMenu(e.clientX, e.clientY, [
+      toolRow,
+      "separator",
+      ...(hit
+        ? ([
+            {
+              label: "Delete Point",
+              icon: "trash",
+              danger: true,
+              onClick: () => {
+                void editCc(clipRef.current.id, { remove: [hit.id] });
+                ccSelRef.current = ccSelRef.current.filter((id) => id !== hit.id);
+                requestDraw();
+              },
+            },
+            "separator",
+          ] satisfies MenuEntry[])
+        : []),
       {
-        label: "Delete Point",
-        icon: "trash",
-        danger: true,
+        label: "Add Point Here",
+        icon: "plus",
+        title: `${laneName} at the snapped click position — any tool; drag with the Draw tool (2) to paint`,
         onClick: () => {
-          void editCc(clipRef.current.id, { remove: [hit.id] });
-          ccSelRef.current = ccSelRef.current.filter((id) => id !== hit.id);
+          void editCc(clipRef.current.id, {
+            add: [{ controller: ctl, beat: addBeat, value: addValue }],
+          });
           requestDraw();
         },
       },
