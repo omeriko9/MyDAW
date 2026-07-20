@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { ValueHud } from "./ValueHud";
 
 export interface KnobProps {
   value: number;
@@ -230,6 +231,12 @@ export function Knob({
         {/* indicator */}
         <line x1={ix0} y1={iy0} x2={ix1} y2={iy1} stroke="var(--pointer)" strokeWidth={1.5} strokeLinecap="round" />
       </svg>
+      <ValueHud
+        anchor={svgRef.current}
+        visible={dragging}
+        text={label ? `${label} ${valueText}` : valueText}
+        hint="⇧ fine · Esc cancel"
+      />
       <div className={"knob-caption" + (showValue ? " value" : "")}>
         {showValue ? valueText : label}
       </div>

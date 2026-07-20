@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
+import { ValueHud } from "./ValueHud";
 
 export const FADER_DB_MIN = -60;
 export const FADER_DB_MAX = 12;
@@ -216,6 +217,12 @@ export function Fader({
       aria-orientation="vertical"
       tabIndex={disabled ? undefined : 0}
     >
+      <ValueHud
+        anchor={ref.current}
+        visible={dragging}
+        text={`${gainToDbText(value)} dB`}
+        hint="⇧ fine · Esc cancel"
+      />
       <div className="fader-groove" style={{ top: PAD, bottom: PAD }} />
       {!noTicks &&
         TICK_DBS.map((db) => {

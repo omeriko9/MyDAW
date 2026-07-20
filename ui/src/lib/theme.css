@@ -846,6 +846,41 @@ body {
 }
 
 /* ============================================================================
+ * ValueHud (ValueHud.tsx) — large transient readout above a dragged control
+ * ==========================================================================*/
+
+.value-hud {
+  position: fixed;
+  z-index: 1300;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 12px;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  user-select: none;
+  animation: m-fade-in var(--dur-fast) var(--ease-out);
+}
+.value-hud-text {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--tooltip-text);
+  white-space: nowrap;
+}
+.value-hud-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ============================================================================
  * Resizer (Resizer.tsx) — invisible until hover/drag
  * ==========================================================================*/
 

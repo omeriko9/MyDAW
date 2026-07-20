@@ -36,7 +36,7 @@ import {
 import { useCanvas, useRafLoop } from "../../lib/canvas";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { tempId } from "../../lib/ids";
-import { barToBeat, beatToBar, bpmAtBeat, timeSigAtBeat } from "../../lib/time";
+import { barToBeat, beatToBar, beatToBarsBeats, bpmAtBeat, timeSigAtBeat } from "../../lib/time";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
 import { NumberDrag } from "../common/NumberDrag";
@@ -454,6 +454,34 @@ function Editor({ track, clip }: EditorProps) {
   const gestureRef = useRef<Gesture | null>(null);
   const pressedKeyRef = useRef<number | null>(null);
   const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
+
+  /* Drag HUD (UI_IMPROVE.md §2.2) — floating readout near the cursor while a note
+     gesture runs ("C#3 · +3 st · 5.2"). Imperative DOM writes, no React state:
+     gestures redraw via rAF and must stay render-free. */
+  const hudElRef = useRef<HTMLDivElement | null>(null);
+  const hudOnRef = useRef(false);
+  const hideDragHud = (): void => {
+    if (hudOnRef.current && hudElRef.current) {
+      hudElRef.current.style.display = "none";
+      hudOnRef.current = false;
+    }
+  };
+  const showDragHud = (clientX: number, clientY: number, text: string): void => {
+    const el = hudElRef.current;
+    if (!el) return;
+    el.textContent = text;
+    el.style.display = "block";
+    el.style.left = `${clientX + 14}px`;
+    el.style.top = `${clientY - 18}px`;
+    hudOnRef.current = true;
+  };
+  /** "5.2" (+ ticks only when off-grid) — drag-readout position label. */
+  const barsBeatsShort = (absBeat: number): string => {
+    const p = useStore.getState().project;
+    if (!p) return "";
+    const bb = beatToBarsBeats(absBeat, p.timeSigMap);
+    return `${bb.bar}.${bb.beat}${bb.tick > 0 ? `.${String(bb.tick).padStart(3, "0")}` : ""}`;
+  };
   // Palette cache keyed by the root document's theme (pop-outs have their own document;
   // a theme switch re-resolves on the next draw — useCanvas triggers one via THEME_EVENT).
   const palRef = useRef<{ theme: string; pal: D.Palette } | null>(null);
@@ -828,6 +856,7 @@ function Editor({ track, clip }: EditorProps) {
     if (!g) return false;
     gestureRef.current = null;
     previewOff();
+    hideDragHud();
     if (g.kind === "marquee") setNoteSelection(g.prevSel);
     else if (g.kind === "ccMarquee") ccSelRef.current = g.prevSel;
     requestDraw();
@@ -1248,6 +1277,7 @@ function Editor({ track, clip }: EditorProps) {
     const c = clipRef.current;
 
     if (!g) {
+      hideDragHud();
       const t = toolRef.current;
       let cursor = t === "draw" ? "crosshair" : "default";
       const hit = M.hitTestNote(c.notes, x, y, v);
@@ -1289,6 +1319,16 @@ function Editor({ track, clip }: EditorProps) {
         g.dBeat = dBeat;
         g.dPitch = dPitch;
         if (auditionRef.current) previewOn(g.anchorPitch + dPitch, g.anchorVel);
+        {
+          const pitch = M.clamp(g.anchorPitch + dPitch, 0, M.MAX_PITCH);
+          const pos = barsBeatsShort(c.startBeat + Math.max(0, g.anchorStart + dBeat));
+          const st = dPitch !== 0 ? ` · ${dPitch > 0 ? "+" : ""}${dPitch} st` : "";
+          showDragHud(
+            e.clientX,
+            e.clientY,
+            `${M.pitchName(pitch)}${st}${pos ? ` · ${pos}` : ""}${g.copy ? " · copy" : ""}`,
+          );
+        }
         break;
       }
       case "resize": {
@@ -1298,6 +1338,7 @@ function Editor({ track, clip }: EditorProps) {
         let dLen = M.snapRound(end0 + rawD, step) - end0;
         dLen = Math.max(dLen, M.MIN_NOTE_LEN - g.anchorLen);
         g.dLen = dLen;
+        showDragHud(e.clientX, e.clientY, M.lengthLabel(g.anchorLen + dLen));
         break;
       }
       case "create": {
@@ -1306,6 +1347,11 @@ function Editor({ track, clip }: EditorProps) {
         const end = M.snapCeil(M.xToBeat(x, v), step);
         g.note.lengthBeats = Math.max(step > 0 ? step : M.MIN_NOTE_LEN, end - g.note.startBeat);
         if (auditionRef.current) previewOn(g.note.pitch, g.note.velocity);
+        showDragHud(
+          e.clientX,
+          e.clientY,
+          `${M.pitchName(g.note.pitch)} · ${M.lengthLabel(g.note.lengthBeats)}`,
+        );
         break;
       }
       case "erase": {
@@ -1473,6 +1519,7 @@ function Editor({ track, clip }: EditorProps) {
     if (!g) return;
     gestureRef.current = null;
     previewOff();
+    hideDragHud();
     try {
       el.releasePointerCapture(e.pointerId);
     } catch {
@@ -2268,6 +2315,7 @@ function Editor({ track, clip }: EditorProps) {
           </>
         )}
       </div>
+      <div className="pr-drag-hud" ref={hudElRef} />
     </div>
   );
 }
