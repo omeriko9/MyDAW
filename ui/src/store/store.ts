@@ -149,6 +149,11 @@ export interface PanelsState {
   /** Right-docked agent chat panel (hidden by default; Ctrl+Shift+I / toolbar / View menu). */
   agent: boolean;
   bottomTab: BottomTab;
+  /** Second dock slot (split dock, UI_IMPROVE.md §6.1). null = not split. Only
+   *  VISIBLE while bottomTab is non-null (the dock itself is open) — remembered
+   *  across dock close/reopen. Never equals bottomTab (selecting the other
+   *  half's tab swaps the halves). */
+  bottomTab2: BottomTab;
   /** Dock tabs currently popped out into separate browser windows (portal-rendered). */
   poppedOut: Partial<Record<PoppedOutTab, boolean>>;
 }
@@ -355,7 +360,13 @@ const prefPanels: PanelsState = {
   minimap: loadBoolPref("ui.panels.minimap", true),
   // agent panel is likewise a later, separately-stored field; hidden by default.
   agent: loadBoolPref("ui.panels.agent", false),
-  ...loadPref<Omit<PanelsState, "poppedOut" | "minimap" | "agent">>(
+  // split-dock second slot — later, separately-stored field (split off by default)
+  bottomTab2: loadPref<BottomTab>(
+    "ui.panels.bottomTab2",
+    null,
+    oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
+  ),
+  ...loadPref<Omit<PanelsState, "poppedOut" | "minimap" | "agent" | "bottomTab2">>(
     "ui.panels",
     { browser: true, browserTab: "plugins", inspector: true, bottomTab: "mixer" },
     shapeOf({
@@ -451,10 +462,11 @@ export const useStore = create<DawState>((set) => ({
 useStore.subscribe((s, prev) => {
   if (s.viewport !== prev.viewport) savePrefDebounced("ui.viewport", s.viewport);
   if (s.panels !== prev.panels) {
-    const { browser, browserTab, inspector, bottomTab, minimap, agent } = s.panels;
+    const { browser, browserTab, inspector, bottomTab, bottomTab2, minimap, agent } = s.panels;
     savePrefDebounced("ui.panels", { browser, browserTab, inspector, bottomTab });
     savePrefDebounced("ui.panels.minimap", minimap);
     savePrefDebounced("ui.panels.agent", agent);
+    savePrefDebounced("ui.panels.bottomTab2", bottomTab2);
   }
   if (s.tool !== prev.tool) savePref("ui.tool", s.tool);
   if (s.followPlayhead !== prev.followPlayhead) savePref("ui.followPlayhead", s.followPlayhead);

@@ -15,13 +15,13 @@
  * down the shell.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./lib/theme.css";
 import "./components/Transport/transport.css";
 import { ws } from "./protocol/ws";
 import { useStore } from "./store/store";
-import type { BottomTab, PoppedOutTab } from "./store/store";
+import type { PoppedOutTab } from "./store/store";
 import { windowTitle } from "./lib/appTitle";
 import { initKeyboard } from "./lib/keyboard";
 import { numberIn, usePrefState } from "./lib/prefs";
@@ -109,6 +109,9 @@ const DOCK_DEFAULT = 260;
 const AGENT_MIN = 320;
 const AGENT_MAX = 560;
 const AGENT_DEFAULT = 420;
+/* Split dock (UI_IMPROVE.md §6.1): slot 1's width as a fraction of the dock. */
+const DOCK_SPLIT_MIN = 0.15;
+const DOCK_SPLIT_MAX = 0.85;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -180,6 +183,12 @@ export default function App() {
     numberIn(BROWSER_MIN, BROWSER_MAX),
   );
   const [dockH, setDockH] = usePrefState("ui.dockH", DOCK_DEFAULT, numberIn(DOCK_MIN, DOCK_MAX));
+  const [dockSplit, setDockSplit] = usePrefState(
+    "ui.dockSplit",
+    0.5,
+    numberIn(DOCK_SPLIT_MIN, DOCK_SPLIT_MAX),
+  );
+  const dockRef = useRef<HTMLDivElement | null>(null);
   const [agentW, setAgentW] = usePrefState(
     "ui.agentW",
     AGENT_DEFAULT,
@@ -302,6 +311,100 @@ export default function App() {
       <Visualizer />
     );
 
+  /* ---- split dock (UI_IMPROVE.md §6.1) ---- */
+
+  // Normalize a stale pref state where both slots hold the same tab (invariant:
+  // bottomTab2 never equals bottomTab).
+  useEffect(() => {
+    if (panels.bottomTab2 !== null && panels.bottomTab2 === panels.bottomTab)
+      setPanels({ bottomTab2: null });
+  }, [panels.bottomTab, panels.bottomTab2, setPanels]);
+
+  const splitDock = () => {
+    const cur = useStore.getState().panels;
+    const next = DOCK_TABS.find((t) => t.id !== cur.bottomTab)?.id as PoppedOutTab | undefined;
+    if (next) setPanels({ bottomTab2: next });
+  };
+
+  /** Selecting the OTHER half's tab swaps the halves (each pane is single-instance). */
+  const setHalfTab = (slot: 1 | 2, id: PoppedOutTab) => {
+    const cur = useStore.getState().panels;
+    if (slot === 1) {
+      if (cur.bottomTab2 === id) setPanels({ bottomTab: id, bottomTab2: cur.bottomTab });
+      else setPanels({ bottomTab: id });
+    } else {
+      if (cur.bottomTab === id) setPanels({ bottomTab: cur.bottomTab2, bottomTab2: id });
+      else setPanels({ bottomTab2: id });
+    }
+  };
+
+  const renderDockHalf = (slot: 1 | 2) => {
+    const tab = (slot === 1 ? panels.bottomTab : panels.bottomTab2) as PoppedOutTab;
+    const split = panels.bottomTab2 !== null;
+    return (
+      <div
+        className="app-dock-half"
+        style={
+          split && slot === 1
+            ? { flex: `0 0 ${(dockSplit * 100).toFixed(2)}%` }
+            : { flex: "1 1 0%" }
+        }
+      >
+        <Tabs
+          className="app-dock-tabs"
+          tabs={DOCK_TABS}
+          active={tab}
+          onChange={(id) => setHalfTab(slot, id as PoppedOutTab)}
+          right={
+            <>
+              {panels.poppedOut[tab] ? (
+                <IconButton
+                  icon="export"
+                  size={20}
+                  active
+                  tooltip="Dock back into the app"
+                  onClick={() => popouts[tab].close()}
+                />
+              ) : (
+                <IconButton
+                  icon="export"
+                  size={20}
+                  tooltip="Pop out into a separate window"
+                  onClick={() => popOut(tab)}
+                />
+              )}
+              {slot === 1 && !split && (
+                <IconButton
+                  icon="split"
+                  size={20}
+                  tooltip="Split the dock — two panes side by side"
+                  onClick={splitDock}
+                />
+              )}
+              <IconButton
+                icon="x"
+                size={20}
+                tooltip={slot === 1 ? "Close dock" : "Close this half"}
+                onClick={() =>
+                  setPanels(slot === 1 ? { bottomTab: null } : { bottomTab2: null })
+                }
+              />
+            </>
+          }
+        />
+        <div className="app-dock-body">
+          {panels.poppedOut[tab] ? (
+            <DockPlaceholder label={POPOUT_DEFS[tab].label} pop={popouts[tab]} />
+          ) : (
+            <PanelBoundary key={tab} name={POPOUT_DEFS[tab].label}>
+              {renderPane(tab)}
+            </PanelBoundary>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-frame">
       <MenuBar />
@@ -383,63 +486,22 @@ export default function App() {
             onResize={(delta) => setDockH((h) => clamp(h - delta, DOCK_MIN, DOCK_MAX))}
             onReset={() => setDockH(DOCK_DEFAULT)}
           />
-          <div className="app-dock" style={{ height: dockH }}>
-            <Tabs
-              className="app-dock-tabs"
-              tabs={DOCK_TABS}
-              active={panels.bottomTab}
-              onChange={(id) => setPanels({ bottomTab: id as BottomTab })}
-              right={
+          <div className="app-dock" style={{ height: dockH }} ref={dockRef}>
+            {popoutNote !== null && <div className="app-dock-note">{popoutNote}</div>}
+            <div className="app-dock-halves">
+              {renderDockHalf(1)}
+              {panels.bottomTab2 !== null && (
                 <>
-                  {((tab: PoppedOutTab) =>
-                    panels.poppedOut[tab] ? (
-                      <IconButton
-                        icon="export"
-                        size={20}
-                        active
-                        tooltip="Dock back into the app"
-                        onClick={() => popouts[tab].close()}
-                      />
-                    ) : (
-                      <IconButton
-                        icon="export"
-                        size={20}
-                        tooltip="Pop out into a separate window"
-                        onClick={() => popOut(tab)}
-                      />
-                    ))(panels.bottomTab)}
-                  <IconButton
-                    icon="x"
-                    size={20}
-                    tooltip="Close dock"
-                    onClick={() => setPanels({ bottomTab: null })}
+                  <Resizer
+                    dir="v"
+                    onResize={(delta) => {
+                      const w = dockRef.current?.clientWidth ?? 1;
+                      setDockSplit((f) => clamp(f + delta / w, DOCK_SPLIT_MIN, DOCK_SPLIT_MAX));
+                    }}
+                    onReset={() => setDockSplit(0.5)}
                   />
+                  {renderDockHalf(2)}
                 </>
-              }
-            />
-            <div className="app-dock-body">
-              {popoutNote !== null && (
-                <div
-                  style={{
-                    flex: "0 0 auto",
-                    padding: "4px 10px",
-                    fontSize: 11,
-                    color: "var(--warn)",
-                    background: "var(--warn-soft)",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  {popoutNote}
-                </div>
-              )}
-              {POPOUT_TABS.map((tab) =>
-                panels.bottomTab !== tab ? null : panels.poppedOut[tab] ? (
-                  <DockPlaceholder key={tab} label={POPOUT_DEFS[tab].label} pop={popouts[tab]} />
-                ) : (
-                  <PanelBoundary key={tab} name={POPOUT_DEFS[tab].label}>
-                    {renderPane(tab)}
-                  </PanelBoundary>
-                ),
               )}
             </div>
           </div>

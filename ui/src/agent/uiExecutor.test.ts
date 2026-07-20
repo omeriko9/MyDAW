@@ -24,6 +24,7 @@ beforeEach(() => {
       minimap: true,
       agent: false,
       bottomTab: "mixer",
+      bottomTab2: null,
       poppedOut: {},
     },
     dialogs: {

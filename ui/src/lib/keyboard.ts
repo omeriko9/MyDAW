@@ -159,7 +159,13 @@ export function zoomPane(name: KeyContextName, factor: number): boolean {
  * semantics (pane key contexts, transport quantize) so they cannot drift.
  */
 export function paneVisible(panels: PanelsState, tab: PoppedOutTab): boolean {
-  return panels.bottomTab === tab || !!panels.poppedOut[tab];
+  // Second dock slot (split dock) only shows while the dock itself is open
+  // (bottomTab non-null) — bottomTab2 is remembered across dock close/reopen.
+  return (
+    panels.bottomTab === tab ||
+    (panels.bottomTab !== null && panels.bottomTab2 === tab) ||
+    !!panels.poppedOut[tab]
+  );
 }
 
 /**
@@ -180,8 +186,9 @@ export function keyRoutingPane(s: {
   } else if (f === "timeline") {
     return "timeline";
   }
-  if (s.panels.bottomTab === "pianoRoll") return "pianoRoll";
-  if (s.panels.bottomTab === "clipEditor") return "clipEditor";
+  const tabs = [s.panels.bottomTab, s.panels.bottomTab === null ? null : s.panels.bottomTab2];
+  if (tabs.includes("pianoRoll")) return "pianoRoll";
+  if (tabs.includes("clipEditor")) return "clipEditor";
   return "timeline";
 }
 
@@ -197,7 +204,9 @@ export function keyRoutingPane(s: {
  */
 function activeContext(): KeyContextHandlers | null {
   const s = useStore.getState();
-  const tab = s.panels.bottomTab;
+  // Both dock slots count as "open tab" for the heuristic (slot 2 only while the
+  // dock is open) — keep in step with keyRoutingPane above.
+  const tabs = [s.panels.bottomTab, s.panels.bottomTab === null ? null : s.panels.bottomTab2];
   const focused = s.focusedPane;
   if (focused === "pianoRoll" || focused === "clipEditor" || focused === "sheetMusic") {
     if (paneVisible(s.panels, focused)) {
@@ -208,11 +217,11 @@ function activeContext(): KeyContextHandlers | null {
     const c = contexts.get("timeline");
     if (c) return c;
   }
-  if (tab === "pianoRoll") {
+  if (tabs.includes("pianoRoll")) {
     const c = contexts.get("pianoRoll");
     if (c) return c;
   }
-  if (tab === "clipEditor") {
+  if (tabs.includes("clipEditor")) {
     const c = contexts.get("clipEditor");
     if (c) return c;
   }

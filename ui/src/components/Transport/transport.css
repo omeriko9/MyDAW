@@ -96,6 +96,33 @@
   overflow: hidden;
 }
 
+/* split dock (UI_IMPROVE.md §6.1): two side-by-side halves, each its own tab strip */
+.app-dock-halves {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+.app-dock-half {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.app-dock-half:not(:first-child) {
+  border-left: 1px solid var(--border);
+}
+
+/* popup-blocked notice (App.tsx popoutNote) */
+.app-dock-note {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-bottom: 1px solid var(--border);
+}
+
 /* panel crash fallback (error boundary) */
 .app-panel-error {
   flex: 1 1 auto;
