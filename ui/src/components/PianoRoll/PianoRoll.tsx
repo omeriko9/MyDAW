@@ -36,7 +36,7 @@ import {
 import { useCanvas, useRafLoop } from "../../lib/canvas";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { tempId } from "../../lib/ids";
-import { barToBeat, beatToBar, beatToBarsBeats, bpmAtBeat, timeSigAtBeat } from "../../lib/time";
+import { barToBeat, beatToBar, bpmAtBeat, formatBarsBeatsShort, timeSigAtBeat } from "../../lib/time";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
 import { NumberDrag } from "../common/NumberDrag";
@@ -519,9 +519,7 @@ function Editor({ track, clip }: EditorProps) {
   /** "5.2" (+ ticks only when off-grid) — drag-readout position label. */
   const barsBeatsShort = (absBeat: number): string => {
     const p = useStore.getState().project;
-    if (!p) return "";
-    const bb = beatToBarsBeats(absBeat, p.timeSigMap);
-    return `${bb.bar}.${bb.beat}${bb.tick > 0 ? `.${String(bb.tick).padStart(3, "0")}` : ""}`;
+    return p ? formatBarsBeatsShort(absBeat, p.timeSigMap) : "";
   };
   // Palette cache keyed by the root document's theme (pop-outs have their own document;
   // a theme switch re-resolves on the next draw — useCanvas triggers one via THEME_EVENT).
@@ -2367,7 +2365,7 @@ function Editor({ track, clip }: EditorProps) {
           </>
         )}
       </div>
-      <div className="pr-drag-hud" ref={hudElRef} />
+      <div className="drag-hud" ref={hudElRef} />
     </div>
   );
 }

@@ -47,6 +47,7 @@ import { animateViewport } from "../../lib/viewportAnim";
 import {
   beatToPx,
   bpmAtBeat,
+  formatBarsBeatsShort,
   gridStepBeats,
   pxToBeat,
   timeSigAtBeat,
@@ -296,6 +297,29 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
 
   const dragRef = useRef<Drag | null>(null);
   const hoverRef = useRef<{ clipId: number; zone: Zone } | null>(null);
+
+  /* Drag HUD (UI_IMPROVE.md §2.1/2.2) — floating readout near the cursor during clip
+     gestures: position + "copy"/"snap off" modifier hints. Imperative DOM writes only
+     (drags are rAF-drawn, never React state); shared .drag-hud style (theme.css). */
+  const hudElRef = useRef<HTMLDivElement | null>(null);
+  const hudOnRef = useRef(false);
+  const hideDragHud = (): void => {
+    if (hudOnRef.current && hudElRef.current) {
+      hudElRef.current.style.display = "none";
+      hudOnRef.current = false;
+    }
+  };
+  const showDragHud = (clientX: number, clientY: number, text: string): void => {
+    const el = hudElRef.current;
+    if (!el) return;
+    el.textContent = text;
+    el.style.display = "block";
+    el.style.left = `${clientX + 14}px`;
+    el.style.top = `${clientY - 18}px`;
+    hudOnRef.current = true;
+  };
+  /** Trim trailing zeros: 1.50 → "1.5", 2.00 → "2". */
+  const trimNum = (n: number): string => n.toFixed(2).replace(/\.?0+$/, "") || "0";
   const laneHoverRef = useRef<{ trackId: number; paramRef: string; pointId: number } | null>(null);
   const marqueeIdsRef = useRef<number[]>([]);
   // Right-button drag pans the grid; a bare right-click still opens the context menu.
@@ -1011,6 +1035,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
     const d = dragRef.current;
     const { vx, cy } = localPoint(e.clientX, e.clientY);
     if (!d) {
+      hideDragHud();
       updateHover(vx, cy);
       return;
     }
@@ -1042,6 +1067,17 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         ) {
           d.moved = true;
         }
+        if (d.moved && o) {
+          const pos = formatBarsBeatsShort(o.startBeat + d.deltaBeats, proj.timeSigMap);
+          showDragHud(
+            e.clientX,
+            e.clientY,
+            pos +
+              (d.dup ? " · copy" : "") +
+              (e.shiftKey ? " · snap off" : "") +
+              (d.targetTrackId !== null && !d.valid ? " · incompatible track" : ""),
+          );
+        }
         draw();
         return;
       }
@@ -1060,6 +1096,15 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
           d.start = d.origStart;
           d.len = ne - d.origStart;
         }
+        showDragHud(
+          e.clientX,
+          e.clientY,
+          (d.edge === "l"
+            ? `from ${formatBarsBeatsShort(d.start, proj.timeSigMap)}`
+            : `to ${formatBarsBeatsShort(d.start + d.len, proj.timeSigMap)}`) +
+            ` · ${trimNum(d.len)}b` +
+            (e.shiftKey ? " · snap off" : ""),
+        );
         draw();
         return;
       }
@@ -1072,6 +1117,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         const x0 = beatToPx(clip.startBeat, st.vp);
         const px = d.which === "in" ? vx - x0 : x0 + wPx - vx;
         d.sec = fadePxToSec(clip, proj.tempoMap, st.vp.zoomX, wPx, px, d.which);
+        showDragHud(e.clientX, e.clientY, `fade ${d.which} ${d.sec.toFixed(2)} s`);
         draw();
         return;
       }
@@ -1079,6 +1125,11 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         const b = snapB(rawBeat, grid, e.shiftKey);
         d.start = Math.min(d.anchor, b);
         d.end = Math.max(d.anchor, b);
+        showDragHud(
+          e.clientX,
+          e.clientY,
+          `${formatBarsBeatsShort(d.start, proj.timeSigMap)} → ${formatBarsBeatsShort(d.end, proj.timeSigMap)} · ${trimNum(d.end - d.start)}b`,
+        );
         draw();
         return;
       }
@@ -1147,6 +1198,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>): void => {
     const d = dragRef.current;
     dragRef.current = null;
+    hideDragHud();
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
@@ -1623,6 +1675,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         escape: () => {
           if (dragRef.current) {
             dragRef.current = null;
+            hideDragHud(); // touches only stable refs — safe from the once-registered context
             drawRef.current();
             return true;
           }
@@ -1696,6 +1749,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         onPointerUp={onPointerUp}
         onPointerCancel={() => {
           dragRef.current = null;
+          hideDragHud();
           draw();
         }}
         onDoubleClick={onDoubleClick}
@@ -1704,6 +1758,7 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       />
+      <div className="drag-hud" ref={hudElRef} />
       {overlay && overlay.kind === "rename" && (
         <FloatingInput
           x={overlay.x}

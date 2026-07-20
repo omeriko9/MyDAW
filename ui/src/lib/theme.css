@@ -920,6 +920,31 @@ body {
 }
 
 /* ============================================================================
+ * Drag HUD (UI_IMPROVE.md §2.2) — imperative floating readout near the cursor
+ * during canvas gestures (piano-roll notes, timeline clips). The owning pane
+ * shows/hides it and writes textContent + left/top directly (render-free).
+ * ==========================================================================*/
+
+.drag-hud {
+  display: none;
+  position: fixed;
+  z-index: 1300;
+  padding: 3px 8px;
+  background: var(--tooltip-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  color: var(--tooltip-text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* ============================================================================
  * ValueHud (ValueHud.tsx) — large transient readout above a dragged control
  * ==========================================================================*/
 

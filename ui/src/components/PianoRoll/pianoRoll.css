@@ -278,27 +278,3 @@
   font-size: 12px;
   color: var(--text-faint);
 }
-
-/* ============================================================================
- * Drag HUD (UI_IMPROVE.md §2.2) — floating readout near the cursor during note
- * gestures: "C#3 · +3 st · 5.2" (move), "1/8" (resize), pitch·length (create).
- * ==========================================================================*/
-
-.pr-drag-hud {
-  display: none;
-  position: fixed;
-  z-index: 1300;
-  padding: 3px 8px;
-  background: var(--tooltip-bg);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
-  color: var(--tooltip-text);
-  font-size: 12px;
-  font-weight: 600;
-  font-family: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  user-select: none;
-  white-space: nowrap;
-}

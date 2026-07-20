@@ -239,6 +239,12 @@ export function formatBarsBeats(beat: number, timeSigMap: TimeSigEntry[]): strin
   return `${b.bar}.${b.beat}.${String(b.tick).padStart(3, "0")}`;
 }
 
+/** "5.2" (ticks appended only when off-grid) — compact drag-HUD position label. */
+export function formatBarsBeatsShort(beat: number, timeSigMap: TimeSigEntry[]): string {
+  const b = beatToBarsBeats(beat, timeSigMap);
+  return `${b.bar}.${b.beat}${b.tick > 0 ? `.${String(b.tick).padStart(3, "0")}` : ""}`;
+}
+
 /** Parse "bar", "bar.beat", or "bar.beat.tick" (separators . : or whitespace) → beats. */
 export function parseBarsBeats(text: string, timeSigMap: TimeSigEntry[]): number | null {
   const parts = text.trim().split(/[.:\s]+/).filter((p) => p.length > 0);
