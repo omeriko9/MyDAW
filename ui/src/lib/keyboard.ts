@@ -140,10 +140,16 @@ export function registerKeyContext(
   };
 }
 
-/** Invoke a named pane's REGISTERED zoomToFit directly (navigator pill Fit button —
+/** Invoke a named pane's REGISTERED zoomToFit directly (zoom-pill Fit button —
     bypasses focus routing so the pill always fits ITS pane). */
 export function zoomToFitPane(name: KeyContextName): boolean {
   return contexts.get(name)?.zoomToFit?.() === true;
+}
+
+/** Invoke a named pane's REGISTERED zoomH directly (zoom-pill −/+ buttons).
+    Factor matches the G/H convention: <1 zooms out, >1 zooms in. */
+export function zoomPane(name: KeyContextName, factor: number): boolean {
+  return contexts.get(name)?.zoomH?.(factor) === true;
 }
 
 /**

@@ -19,7 +19,7 @@ import type { AudioClip, Asset, Project, Track } from "../../protocol/types";
 import { isAudioClip } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import { commitParam, resizeClip, setClip, splitClips, transientParam } from "../../store/actions";
-import { paneVisible, registerKeyContext } from "../../lib/keyboard";
+import { paneVisible, registerKeyContext, zoomPane, zoomToFitPane } from "../../lib/keyboard";
 import { fetchPeaks, pickLod, type PeakLod } from "../../lib/peaks";
 import { beatsToSeconds, bpmAtBeat, secondsToBeats } from "../../lib/time";
 import { lineV, roundRect, useCanvas } from "../../lib/canvas";
@@ -29,6 +29,7 @@ import { FloatingInput } from "../Timeline/bits";
 import { Icon } from "../common/icons";
 import { openContextMenu } from "../common/ContextMenu";
 import { useIsKeyTarget } from "../common/paneFocus";
+import { ZoomPill } from "../common/ZoomPill";
 import { GainDbDrag, SecondsDrag } from "../Inspector/fields";
 import "./clipEditor.css";
 
@@ -950,6 +951,15 @@ export default function ClipEditor() {
           onPointerCancel={onPointerUp}
           onContextMenu={onContextMenu}
         />
+        {canFit && (
+          <ZoomPill
+            title="Zoom — Ctrl+wheel over the waveform, or G / H"
+            fitTooltip="Fit the whole waveform into view (F)"
+            onFit={() => zoomToFitPane("clipEditor")}
+            onZoomOut={() => zoomPane("clipEditor", 0.8)}
+            onZoomIn={() => zoomPane("clipEditor", 1.25)}
+          />
+        )}
       </div>
       {renameAt && (
         <FloatingInput

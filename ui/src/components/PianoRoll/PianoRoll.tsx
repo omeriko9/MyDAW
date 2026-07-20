@@ -17,11 +17,11 @@
  * shift = h-scroll, ctrl = h-zoom, alt = v-zoom. Middle-drag pans.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CcUpdate, MidiCc, MidiClip, Note, NoteInput, NoteUpdate, Project, Track, TransportEvent } from "../../protocol/types";
 import { transportBus, useStore } from "../../store/store";
 import { addMidiClip, editCc, editNotes, locate, previewNote, quantizeNotes } from "../../store/actions";
-import { paneVisible, registerKeyContext } from "../../lib/keyboard";
+import { paneVisible, registerKeyContext, zoomToFitPane } from "../../lib/keyboard";
 import {
   isBool,
   loadBoolPref,
@@ -44,6 +44,7 @@ import { Select } from "../common/Select";
 import { Toggle } from "../common/Toggle";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { useIsKeyTarget } from "../common/paneFocus";
+import { ZoomPill } from "../common/ZoomPill";
 import { confirmDialog } from "../Dialogs/confirm";
 import * as M from "./prMath";
 import * as D from "./prDraw";
@@ -278,6 +279,46 @@ function localPt(e: { clientX: number; clientY: number; currentTarget: Element }
 } {
   const r = e.currentTarget.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+/* ============================================================================
+ * Zoom pill (UI_IMPROVE.md §1.1) — subscribes to the Editor's render-free view
+ * ref via an external-store bridge (notified from clampView). 100% = the
+ * persisted default 28 px/beat.
+ * ========================================================================= */
+
+const PR_DEFAULT_ZOOM_X = 28;
+const PR_ZOOM_STEP = 1.3;
+
+function PrZoomPill({
+  listeners,
+  getZoomX,
+  zoomHBy,
+}: {
+  listeners: Set<() => void>;
+  getZoomX: () => number;
+  zoomHBy: (factor: number) => void;
+}) {
+  const zoomX = useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    getZoomX,
+  );
+  return (
+    <ZoomPill
+      title="Zoom — Ctrl+wheel (notes), Alt+wheel = row height, or G / H"
+      fitTooltip="Fit the whole clip into view (F)"
+      pct={(zoomX / PR_DEFAULT_ZOOM_X) * 100}
+      minPct={(M.MIN_ZOOM_X / PR_DEFAULT_ZOOM_X) * 100}
+      maxPct={(M.MAX_ZOOM_X / PR_DEFAULT_ZOOM_X) * 100}
+      onPct={(p) => zoomHBy(((p / 100) * PR_DEFAULT_ZOOM_X) / getZoomX())}
+      onFit={() => zoomToFitPane("pianoRoll")}
+      onZoomOut={() => zoomHBy(1 / PR_ZOOM_STEP)}
+      onZoomIn={() => zoomHBy(PR_ZOOM_STEP)}
+    />
+  );
 }
 
 /* ============================================================================
@@ -542,6 +583,11 @@ function Editor({ track, clip }: EditorProps) {
   const overlayCv = useCanvas(() => requestDraw());
 
   /* ---- view clamping ---- */
+  // Zoom-pill subscribers: the view lives in a ref (gestures are render-free), so the
+  // pill re-renders via useSyncExternalStore — notified from clampView, the single
+  // choke point every zoom/scroll write passes through. Snapshot = zoomX only, so
+  // scroll-only notifications are free (unchanged snapshot → no re-render).
+  const zoomListeners = useRef(new Set<() => void>()).current;
   const clampView = () => {
     const el = notesCv.canvasRef.current;
     const v = viewRef.current;
@@ -555,6 +601,7 @@ function Editor({ track, clip }: EditorProps) {
     persisted.zoomX = v.zoomX;
     persisted.rowH = v.rowH;
     savePrefDebounced("pianoRoll.view", persisted);
+    for (const l of [...zoomListeners]) l();
   };
   clampViewRef.current = clampView;
 
@@ -2269,6 +2316,11 @@ function Editor({ track, clip }: EditorProps) {
             onContextMenu={onNotesContext}
           />
           <canvas ref={overlayCv.ref} className="pr-overlay-canvas" />
+          <PrZoomPill
+            listeners={zoomListeners}
+            getZoomX={() => viewRef.current.zoomX}
+            zoomHBy={zoomHBy}
+          />
         </div>
 
         {laneOn && (

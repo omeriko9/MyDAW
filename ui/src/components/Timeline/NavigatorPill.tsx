@@ -1,15 +1,13 @@
 /**
- * Navigator pill (UI_IMPROVE.md §1.1) — floating [Fit][−][100%][+] control in the
- * arrange view's bottom-right corner: the VISIBLE affordance for zoom, which was
- * previously modifier-wheel/keyboard-only. 100% = the default 32 px/beat. The %
- * readout is a NumberDrag (scrub, wheel, double-click to type). Zoom keeps the
- * view's center anchored; button zooms animate (lib/viewportAnim, motion-gated).
+ * NavigatorPill (UI_IMPROVE.md §1.1) — the arrange view's ZoomPill wiring.
+ * 100% = the default 32 px/beat (store.ts prefViewport). Zoom keeps the view's
+ * center anchored; button zooms animate (lib/viewportAnim, motion-gated), scrub
+ * zooms are instant (continuous gesture).
  */
 
 import React from "react";
 import { useStore } from "../../store/store";
-import { IconButton } from "../common/IconButton";
-import { NumberDrag } from "../common/NumberDrag";
+import { ZoomPill } from "../common/ZoomPill";
 import { animateViewport } from "../../lib/viewportAnim";
 import { zoomToFitPane } from "../../lib/keyboard";
 import { MAX_ZOOM_X, MIN_ZOOM_X } from "./layout";
@@ -22,7 +20,6 @@ const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.m
 
 export default function NavigatorPill({ viewW }: { viewW: number }) {
   const zoomX = useStore((s) => s.viewport.zoomX);
-  const pct = (zoomX / DEFAULT_ZOOM_X) * 100;
 
   const zoomTo = (nextZoom: number, animate: boolean): void => {
     const s = useStore.getState();
@@ -36,38 +33,16 @@ export default function NavigatorPill({ viewW }: { viewW: number }) {
   };
 
   return (
-    <div className="tl-nav-pill" title={"Zoom — Ctrl+wheel over the arrangement, or G / H"}>
-      <button
-        type="button"
-        className="tl-nav-fit"
-        title="Fit the selection (or everything) into view (F)"
-        onClick={() => zoomToFitPane("timeline")}
-      >
-        Fit
-      </button>
-      <IconButton
-        icon="zoomOut"
-        size={20}
-        tooltip="Zoom out (G)"
-        onClick={() => zoomTo(zoomX / ZOOM_STEP, true)}
-      />
-      <NumberDrag
-        value={pct}
-        min={(MIN_ZOOM_X / DEFAULT_ZOOM_X) * 100}
-        max={(MAX_ZOOM_X / DEFAULT_ZOOM_X) * 100}
-        precision={0}
-        units="%"
-        width={52}
-        title="Zoom level — drag, wheel, or double-click to type (100% = default)"
-        onChange={(p) => zoomTo((p / 100) * DEFAULT_ZOOM_X, false)}
-        onCommit={(p) => zoomTo((p / 100) * DEFAULT_ZOOM_X, false)}
-      />
-      <IconButton
-        icon="zoomIn"
-        size={20}
-        tooltip="Zoom in (H)"
-        onClick={() => zoomTo(zoomX * ZOOM_STEP, true)}
-      />
-    </div>
+    <ZoomPill
+      title="Zoom — Ctrl+wheel over the arrangement, or G / H"
+      fitTooltip="Fit the selection (or everything) into view (F)"
+      pct={(zoomX / DEFAULT_ZOOM_X) * 100}
+      minPct={(MIN_ZOOM_X / DEFAULT_ZOOM_X) * 100}
+      maxPct={(MAX_ZOOM_X / DEFAULT_ZOOM_X) * 100}
+      onPct={(p) => zoomTo((p / 100) * DEFAULT_ZOOM_X, false)}
+      onFit={() => zoomToFitPane("timeline")}
+      onZoomOut={() => zoomTo(zoomX / ZOOM_STEP, true)}
+      onZoomIn={() => zoomTo(zoomX * ZOOM_STEP, true)}
+    />
   );
 }
