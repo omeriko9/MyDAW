@@ -75,6 +75,8 @@ import {
   undo,
 } from "../store/actions";
 import { copySelection, cutSelection, findClipById, pasteAt } from "./clipboard";
+import { applyLayoutSlot, saveLayoutSlot, type LayoutSlotIndex } from "./layouts";
+import { showToast } from "../components/common/ToastHost";
 import { toggleMetronome } from "../store/metronome";
 import {
   importProjectFlow,
@@ -508,6 +510,23 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
     e.stopPropagation();
   };
+
+  // Layout presets (lib/layouts, UI_IMPROVE.md §6.3): Ctrl+Alt+1..4 apply,
+  // Ctrl+Alt+Shift+1..4 save the current workspace into the slot.
+  if (ctrl && e.altKey && key >= "1" && key <= "4") {
+    consume();
+    if (e.repeat) return;
+    const slot = Number(key) as LayoutSlotIndex;
+    if (e.shiftKey) {
+      const snap = saveLayoutSlot(slot);
+      showToast(`Layout ${slot} saved — ${snap.name}`, "success");
+    } else {
+      const snap = applyLayoutSlot(slot);
+      if (snap) showToast(`Layout ${slot} — ${snap.name}`);
+      else showToast(`Layout ${slot} is empty — save one with Ctrl+Alt+Shift+${slot}`);
+    }
+    return;
+  }
 
   if (ctrl && !e.altKey) {
     switch (key) {

@@ -24,6 +24,7 @@ import { useStore } from "./store/store";
 import type { PoppedOutTab } from "./store/store";
 import { windowTitle } from "./lib/appTitle";
 import { initKeyboard } from "./lib/keyboard";
+import { LAYOUT_SIZES_EVENT, type LayoutSizes } from "./lib/layouts";
 import { numberIn, usePrefState } from "./lib/prefs";
 import { checkRecoveryOnce } from "./components/Transport/projectFlows";
 
@@ -200,6 +201,19 @@ export default function App() {
   }, []);
 
   useEffect(() => initKeyboard(), []);
+
+  // Layout presets (lib/layouts): panel sizes arrive via event — App owns the clamps.
+  useEffect(() => {
+    const on = (e: Event): void => {
+      const d = (e as CustomEvent<LayoutSizes>).detail;
+      setBrowserW(clamp(d.browserW, BROWSER_MIN, BROWSER_MAX));
+      setDockH(clamp(d.dockH, DOCK_MIN, DOCK_MAX));
+      setAgentW(clamp(d.agentW, AGENT_MIN, AGENT_MAX));
+      setDockSplit(clamp(d.dockSplit, DOCK_SPLIT_MIN, DOCK_SPLIT_MAX));
+    };
+    window.addEventListener(LAYOUT_SIZES_EVENT, on);
+    return () => window.removeEventListener(LAYOUT_SIZES_EVENT, on);
+  }, [setBrowserW, setDockH, setAgentW, setDockSplit]);
 
   // Tab / taskbar title mirrors the open project and its unsaved-changes state.
   useEffect(() => {

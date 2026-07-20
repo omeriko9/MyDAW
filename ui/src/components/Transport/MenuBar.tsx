@@ -25,6 +25,12 @@ import {
 import { showToast } from "../common/ToastHost";
 import { hasClipboard } from "../../lib/clipboard";
 import * as keyboardLib from "../../lib/keyboard";
+import {
+  applyLayoutSlot,
+  getLayoutSlots,
+  saveLayoutSlot,
+  type LayoutSlotIndex,
+} from "../../lib/layouts";
 import { applyTheme, getTheme, THEMES } from "../../lib/theme";
 import { toggleMetronome } from "../../store/metronome";
 import { closeContextMenu, openContextMenu } from "../common/ContextMenu";
@@ -377,6 +383,8 @@ function buildAudioMenu(): MenuEntry[] {
 function buildViewMenu(): MenuEntry[] {
   const s = useStore.getState();
   const theme = getTheme();
+  const slots = getLayoutSlots();
+  const slotIdx: LayoutSlotIndex[] = [1, 2, 3, 4];
   return [
     {
       label: "Theme",
@@ -385,6 +393,38 @@ function buildViewMenu(): MenuEntry[] {
         checked: theme === t.value,
         onClick: () => applyTheme(t.value),
       })),
+    },
+    {
+      label: "Layouts",
+      icon: "layers",
+      title: "Workspace snapshots — panels, dock tabs and sizes",
+      submenu: [
+        ...slotIdx.map(
+          (i): MenuEntry => ({
+            label: slots[i - 1] ? `${i}: ${slots[i - 1]!.name}` : `${i}: (empty)`,
+            shortcut: `Ctrl+Alt+${i}`,
+            disabled: !slots[i - 1],
+            title: slots[i - 1] ? undefined : `Save one via "Save Current As" below`,
+            onClick: () => {
+              applyLayoutSlot(i);
+            },
+          }),
+        ),
+        "separator",
+        {
+          label: "Save Current As",
+          submenu: slotIdx.map(
+            (i): MenuEntry => ({
+              label: slots[i - 1] ? `Layout ${i} (replaces ${slots[i - 1]!.name})` : `Layout ${i}`,
+              shortcut: `Ctrl+Alt+Shift+${i}`,
+              onClick: () => {
+                const snap = saveLayoutSlot(i);
+                showToast(`Layout ${i} saved — ${snap.name}`, "success");
+              },
+            }),
+          ),
+        },
+      ],
     },
     "separator",
     {
