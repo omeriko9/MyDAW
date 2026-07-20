@@ -22,11 +22,15 @@ interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
+  /** Exit animation running — still in the DOM, removed after TOAST_EXIT_MS. */
+  leaving?: boolean;
 }
 
 const MAX_TOASTS = 4;
 const INFO_MS = 5_000;
 const ERROR_MS = 10_000;
+/** Matches the toast-out animation duration (toast.css). */
+const TOAST_EXIT_MS = 150;
 
 let toasts: Toast[] = [];
 let nextId = 1;
@@ -65,9 +69,16 @@ function resumeAutoDismiss(id: number): void {
 
 export function dismissToast(id: number): void {
   pauseAutoDismiss(id);
-  if (!toasts.some((t) => t.id === id)) return;
-  toasts = toasts.filter((t) => t.id !== id);
+  const toast = toasts.find((t) => t.id === id);
+  if (!toast || toast.leaving) return;
+  // Two-phase removal so the exit animation can play (motion "off" zeroes the
+  // animation; the extra 150ms in the DOM is invisible then).
+  toasts = toasts.map((t) => (t.id === id ? { ...t, leaving: true } : t));
   emit();
+  window.setTimeout(() => {
+    toasts = toasts.filter((t) => t.id !== id);
+    emit();
+  }, TOAST_EXIT_MS);
 }
 
 export function showToast(message: string, kind: ToastKind = "info"): void {
@@ -97,6 +108,7 @@ export default function ToastHost() {
         <div
           key={t.id}
           className={`toast ${t.kind}`}
+          data-leaving={t.leaving || undefined}
           role={t.kind === "error" ? "alert" : "status"}
           title="Click to dismiss"
           onClick={() => dismissToast(t.id)}

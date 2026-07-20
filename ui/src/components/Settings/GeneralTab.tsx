@@ -6,6 +6,12 @@
 import React, { useEffect, useState } from "react";
 import type { AppSettings } from "../../protocol/types";
 import { applyTheme, THEMES, useThemeName, type ThemeName } from "../../lib/theme";
+import {
+  applyMotionPref,
+  MOTION_OPTIONS,
+  useMotionPref,
+  type MotionPref,
+} from "../../lib/motion";
 import { getSettings, setSettings } from "../../store/actions";
 import { usePrefState } from "../../lib/prefs";
 import {
@@ -60,6 +66,7 @@ export function GeneralTab() {
   };
 
   const theme = useThemeName();
+  const motion = useMotionPref();
   const [recovery, setRecovery] = usePrefState<RecoveryMode>(
     RECOVERY_MODE_PREF,
     RECOVERY_MODE_DEFAULT,
@@ -78,6 +85,18 @@ export function GeneralTab() {
             width={140}
           />
           <span className="sett-note">also in View → Theme; saved per user</span>
+        </div>
+        <span className="sett-label">Interface motion</span>
+        <div className="row gap1">
+          <Select
+            value={motion}
+            options={MOTION_OPTIONS.map((m) => ({ value: m.value, label: m.label }))}
+            onChange={(v) => applyMotionPref(v as MotionPref)}
+            width={140}
+          />
+          <span className="sett-note">
+            hover/press/menu animations; follows the OS reduced-motion setting
+          </span>
         </div>
         <span className="sett-label">Autosave interval</span>
         <div className="row gap1">

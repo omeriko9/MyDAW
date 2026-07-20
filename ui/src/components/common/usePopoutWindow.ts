@@ -29,6 +29,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerThemeDocument } from "../../lib/theme";
+import { registerMotionDocument } from "../../lib/motion";
 
 export interface PopoutOptions {
   /** window.open name (e.g. "MyDAW-mixer") — reopening reuses the same OS window. */
@@ -145,8 +146,9 @@ export function usePopoutWindow(opts: PopoutOptions): PopoutWindow {
     // today, but this keeps the popup correct if that ever changes).
     doc.documentElement.className = document.documentElement.className;
     doc.body.className = document.body.className;
-    // Theme: stamp data-theme now and on every later switch (lib/theme registry).
+    // Theme + motion: stamp data-theme / data-motion now and on every later switch.
     const unregisterTheme = registerThemeDocument(doc);
+    const unregisterMotion = registerMotionDocument(doc);
 
     /* ---- stylesheet mirroring (initial copy + live sync for vite dev injection) ---- */
     const cloneMap = new Map<Element, HTMLElement>();
@@ -256,6 +258,7 @@ export function usePopoutWindow(opts: PopoutOptions): PopoutWindow {
       dispose: () => {
         mo.disconnect();
         unregisterTheme();
+        unregisterMotion();
         window.clearInterval(poll);
         window.removeEventListener("pagehide", onMainHide);
         try {

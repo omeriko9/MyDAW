@@ -311,6 +311,47 @@
    imported after this file, so an equal-specificity rule there wins. */
 
 /* ============================================================================
+ * Motion tokens (UI_IMPROVE.md §8) — every transition/animation duration in the
+ * app resolves through these, so lib/motion.ts can gate the whole system by
+ * stamping data-motion on the root:
+ *   --dur-fast  color/opacity fades (hover, highlight)
+ *   --dur-med   state-change emphasis (toggles lighting up, modal fade)
+ *   --dur-move  anything that MOVES (entrance rise, press nudge) — this is the
+ *               token "reduced" zeroes while keeping the fades
+ * ==========================================================================*/
+
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-med: 180ms;
+  --dur-move: 140ms;
+}
+:root[data-motion="reduced"] {
+  --dur-move: 0ms;
+}
+:root[data-motion="off"] {
+  --dur-fast: 0ms;
+  --dur-med: 0ms;
+  --dur-move: 0ms;
+}
+
+/* Shared entrance keyframes: movement and fade are SEPARATE animations so the
+   motion setting can zero one without the other (comma-composed at use sites). */
+@keyframes m-fade-in {
+  from { opacity: 0; }
+}
+@keyframes m-fade-out {
+  to { opacity: 0; }
+}
+@keyframes m-rise-in {
+  from { transform: translateY(-3px); }
+}
+@keyframes m-rise-up-in {
+  from { transform: translateY(8px); }
+}
+
+/* ============================================================================
  * Base typography & document
  * ==========================================================================*/
 
@@ -428,10 +469,22 @@ body {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .btn:hover { background: var(--panel3); border-color: var(--border-light); }
 .btn:active { background: var(--panel-pressed); }
 .btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
+
+/* Press physics: a 1px settle on :active (motion "full" only — it's pure movement). */
+:root[data-motion="full"] .btn:active:not(:disabled),
+:root[data-motion="full"] .btn-icon:active:not(:disabled),
+:root[data-motion="full"] .btn-toggle:active:not(:disabled),
+:root[data-motion="full"] .tab:active {
+  transform: translateY(1px);
+}
 
 .btn.primary {
   background: var(--accent);
@@ -460,6 +513,10 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   user-select: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .btn-icon:hover { background: var(--panel2); color: var(--text); }
 .btn-icon:active { background: var(--panel-pressed); }
@@ -486,15 +543,22 @@ body {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .btn-toggle:hover { background: var(--panel3); color: var(--text); border-color: var(--border-light); }
 .btn-toggle:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 
+/* Engaging a toggle eases in slower than hover (state CHANGES get more emphasis
+   than state BEING); disengaging falls back to the base --dur-fast. */
 .btn-toggle[data-on="true"],
 .btn-icon[data-on="true"] {
   background: var(--accent-soft);
   border-color: var(--accent-border);
   color: var(--accent);
+  transition-duration: var(--dur-med);
 }
 .btn-toggle[data-on="true"][data-variant="danger"] {
   background: var(--danger-soft);
@@ -526,6 +590,7 @@ body {
   border-radius: var(--radius);
   color: var(--text);
   font-size: 12px;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 .input::placeholder { color: var(--text-faint); }
 .input:hover { border-color: var(--border-light); }
@@ -546,6 +611,9 @@ body {
   color: var(--text);
   font-size: 12px;
   cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 .select:hover { border-color: var(--border-light); background-color: var(--panel3); }
 .select:focus { border-color: var(--accent); outline: none; }
@@ -606,6 +674,10 @@ body {
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .tab:hover { color: var(--text); background: var(--panel2); }
 .tab[data-on="true"] {
@@ -634,6 +706,11 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 4px;
+  /* Entrance: fade + tiny rise, composed so the motion setting can zero either.
+     Translate only (no scale) — MenuList clamps via measured width/height. */
+  animation:
+    m-fade-in var(--dur-fast) var(--ease-out),
+    m-rise-in var(--dur-move) var(--ease-out);
 }
 .ctx-item {
   display: flex;
@@ -677,6 +754,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  animation: m-fade-in var(--dur-med) var(--ease-out);
 }
 .modal {
   display: flex;
@@ -688,6 +766,9 @@ body {
   border: 1px solid var(--border-light);
   border-radius: 8px;
   box-shadow: var(--shadow);
+  animation:
+    m-fade-in var(--dur-med) var(--ease-out),
+    m-rise-up-in var(--dur-move) var(--ease-out);
 }
 .modal-title {
   display: flex;
@@ -739,6 +820,7 @@ body {
   line-height: 1.45;
   pointer-events: none;
   white-space: pre-line;
+  animation: m-fade-in var(--dur-fast) var(--ease-out);
 }
 
 /* ============================================================================
@@ -749,7 +831,7 @@ body {
   flex: 0 0 auto;
   z-index: 5;
   background: transparent;
-  transition: background 0.12s 0.08s;
+  transition: background var(--dur-fast) 0.08s;
 }
 .resizer-v {
   width: 5px;
@@ -865,6 +947,9 @@ body {
   user-select: none;
   touch-action: none;
   white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 .numdrag:hover { background: var(--panel2); border-color: var(--border); }
 .numdrag[data-dragging="true"] { background: var(--panel2); border-color: var(--accent); }

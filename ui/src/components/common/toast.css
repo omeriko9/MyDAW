@@ -31,7 +31,16 @@
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
-  animation: toast-in 0.16s ease-out;
+  animation:
+    m-fade-in var(--dur-fast) var(--ease-out),
+    toast-in var(--dur-move) var(--ease-out);
+}
+/* Exit ≤150ms total (ToastHost.TOAST_EXIT_MS removes the node after that). */
+.toast[data-leaving] {
+  animation:
+    m-fade-out var(--dur-fast) var(--ease-out) both,
+    toast-out var(--dur-move) var(--ease-out) both;
+  pointer-events: none;
 }
 .toast svg {
   flex: 0 0 auto;
@@ -52,13 +61,15 @@
   white-space: pre-line;
 }
 
+/* Movement only — the fade is composed from theme.css m-fade-in/-out so the
+   motion setting can zero movement while keeping the fade. */
 @keyframes toast-in {
   from {
-    opacity: 0;
     transform: translateY(6px);
   }
+}
+@keyframes toast-out {
   to {
-    opacity: 1;
-    transform: translateY(0);
+    transform: translateX(8px);
   }
 }
