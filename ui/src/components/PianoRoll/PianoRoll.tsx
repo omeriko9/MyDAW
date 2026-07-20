@@ -20,7 +20,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CcUpdate, MidiCc, MidiClip, Note, NoteInput, NoteUpdate, Project, Track, TransportEvent } from "../../protocol/types";
 import { transportBus, useStore } from "../../store/store";
-import { addMidiClip, editCc, editNotes, locate, previewNote, quantizeNotes } from "../../store/actions";
+import type { Tool } from "../../store/store";
+import { addMidiClip, editCc, editNotes, locate, previewNote, quantizeNotes, redo, undo } from "../../store/actions";
 import { paneVisible, registerKeyContext, zoomToFitPane } from "../../lib/keyboard";
 import {
   isBool,
@@ -43,6 +44,7 @@ import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import { Toggle } from "../common/Toggle";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
+import { openPieMenu, type PieItem } from "../common/PieMenu";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { ZoomPill } from "../common/ZoomPill";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -1640,10 +1642,30 @@ function Editor({ track, clip }: EditorProps) {
     }
     if (g.kind === "pan") {
       el.style.cursor = "default";
+      // stationary middle-click → pie menu (middle-DRAG panned and lands here too)
+      if (Math.abs(e.clientX - g.startX) + Math.abs(e.clientY - g.startY) <= 4) {
+        openPieMenu(e.clientX, e.clientY, prPieItems());
+      }
     } else {
       commitGesture(g);
     }
     requestDraw();
+  };
+
+  /* Pie menu (stationary middle-click): tools + the highest-frequency note ops. */
+  const prPieItems = (): PieItem[] => {
+    const s = useStore.getState();
+    const setTool = (t: Tool) => () => useStore.getState().setTool(t);
+    return [
+      { icon: "pointer", label: "Select tool (1)", active: s.tool === "select", onClick: setTool("select") },
+      { icon: "pencil", label: "Draw tool (2)", active: s.tool === "draw", onClick: setTool("draw") },
+      { icon: "eraser", label: "Erase tool (3)", active: s.tool === "erase", onClick: setTool("erase") },
+      { icon: "magnet", label: "Quantize (Q)", onClick: doQuantize },
+      { icon: "zoomIn", label: "Fit clip (F)", onClick: () => zoomToFitPane("pianoRoll") },
+      { icon: "redo", label: "Redo (Ctrl+Y)", onClick: () => void redo().catch(() => {}) },
+      { icon: "undo", label: "Undo (Ctrl+Z)", onClick: () => void undo().catch(() => {}) },
+      { icon: "plus", label: "Duplicate selection (Ctrl+D)", onClick: duplicateSelected },
+    ];
   };
 
   const onNotesCancel = () => {

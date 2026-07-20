@@ -37,10 +37,13 @@ import {
   processAudioClip,
   stretchClip,
   transientParam,
+  undo,
+  redo,
 } from "../../store/actions";
 import { copySelection, cutSelection, findClipById, hasClipboard, pasteAt } from "../../lib/clipboard";
 import { useAutomationUi } from "./automationUi";
-import { registerKeyContext } from "../../lib/keyboard";
+import { registerKeyContext, toggleLoop, zoomToFitPane } from "../../lib/keyboard";
+import { openPieMenu, type PieItem } from "../common/PieMenu";
 import { lineV, roundRect, useCanvas } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
 import { animateViewport } from "../../lib/viewportAnim";
@@ -849,6 +852,23 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
       .catch((err) => console.warn("[timeline] create midi clip failed:", err));
   };
 
+  /* Pie menu (stationary middle-click): tools on the top arc, whole-view actions
+     on the bottom — the gestural fast path for the hands-on-mouse workflow. */
+  const timelinePieItems = (): PieItem[] => {
+    const s = useStore.getState();
+    const setTool = (t: Tool) => () => useStore.getState().setTool(t);
+    return [
+      { icon: "pointer", label: "Select tool (1)", active: s.tool === "select", onClick: setTool("select") },
+      { icon: "pencil", label: "Draw tool (2)", active: s.tool === "draw", onClick: setTool("draw") },
+      { icon: "eraser", label: "Erase tool (3)", active: s.tool === "erase", onClick: setTool("erase") },
+      { icon: "split", label: "Split tool (4)", active: s.tool === "split", onClick: setTool("split") },
+      { icon: "zoomIn", label: "Fit view (F)", onClick: () => zoomToFitPane("timeline") },
+      { icon: "redo", label: "Redo (Ctrl+Y)", onClick: () => void redo().catch(() => {}) },
+      { icon: "undo", label: "Undo (Ctrl+Z)", onClick: () => void undo().catch(() => {}) },
+      { icon: "loop", label: "Loop on/off (L)", onClick: () => toggleLoop() },
+    ];
+  };
+
   /* ---------------------------------------------------------- pointer down */
 
   const startPan = (e: React.PointerEvent<HTMLCanvasElement>): void => {
@@ -1336,7 +1356,12 @@ export default function ClipCanvas({ rows }: ClipCanvasProps) {
       }
       case "pan": {
         e.currentTarget.style.cursor = "default"; // updateHover restores the cursor on move
+        const wasRight = panRightRef.current;
         panRightRef.current = false;
+        // stationary MIDDLE-click (right-click keeps its context menu) → pie menu
+        const movedPx =
+          Math.abs(e.clientX - d.startClientX) + Math.abs(e.clientY - d.startClientY);
+        if (!wasRight && movedPx <= 4) openPieMenu(e.clientX, e.clientY, timelinePieItems());
         break;
       }
       case "lanePoint": {

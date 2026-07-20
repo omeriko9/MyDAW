@@ -814,6 +814,75 @@ body {
 }
 
 /* ============================================================================
+ * PieMenu (PieMenu.tsx) — radial gesture menu on stationary middle-click
+ * ==========================================================================*/
+
+.pie-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  outline: none;
+}
+
+.pie-item {
+  position: fixed;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  /* single keyframe (fade+scale share it): reduced motion just pops them in */
+  animation: pie-in var(--dur-move) var(--ease-spring) backwards;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.pie-item:hover,
+.pie-item.hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.pie-item.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@keyframes pie-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+}
+
+.pie-center {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  max-width: 150px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* ============================================================================
  * Modal (Modal.tsx)
  * ==========================================================================*/
 
