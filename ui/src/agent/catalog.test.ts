@@ -79,6 +79,7 @@ const REQUEST_TYPES = [
   "midi/getInputs",
   "midi/setInputEnabled",
   "midi/preview",
+  "midi/setThruTracks",
   "media/import",
   "media/relink",
   "export/render",
@@ -141,6 +142,7 @@ const EXCLUDED_REQUESTS = [
   "session/newWindow",
   "export/trackArchive",
   "export/cpr",
+  "midi/setThruTracks",
 ] as const;
 const ENGINE_REQUEST_TYPES = REQUEST_TYPES.filter(
   (name) => !EXCLUDED_REQUESTS.includes(name as (typeof EXCLUDED_REQUESTS)[number]),

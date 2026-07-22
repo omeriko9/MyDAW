@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/Eq.h"        // EqBandSet (transient EQ coefficient fast path)
 #include "core/GraphNode.h" // ParamMsg, ParamRing, RenderPlan
@@ -61,6 +62,12 @@ public:
     // Main thread: rebuild the RenderPlan from the model and atomically swap it in
     // (SPEC §7: structural changes rebuild; cycles route to master + log).
     void rebuild(const Model& model);
+
+    // Live-MIDI thru targets — the UI's track SELECTION (spec 2026-07-22): only
+    // MIDI/Instrument tracks in this set, plus tracks with the explicit monitor
+    // toggle, receive live MIDI input. Arming does NOT imply thru (arming is for
+    // recording). Main thread; takes effect at the next rebuild().
+    void setMidiThruTracks(std::vector<uint64_t> trackIds);
 
     // RT driver callback. `in` = capture channels (may be null/0), `out` = device output.
     void processBlock(const float* const* in, int numIn, float* const* out, int numOut,

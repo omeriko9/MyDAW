@@ -463,6 +463,31 @@ export const useStore = create<DawState>((set) => ({
     })),
 }));
 
+/* ============================================================================
+ * Live-MIDI thru follows track SELECTION (spec 2026-07-22): mirror the selected
+ * track ids to the engine (midi/setThruTracks) on every selection change —
+ * debounced (click bursts) — and after every hello (engine restarts forget it).
+ * Older engines without the endpoint reply with an error: swallowed (selection
+ * thru is simply unavailable there; arming/monitor still works engine-side).
+ * ========================================================================= */
+
+let midiThruTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function syncMidiThru(): void {
+  const s = useStore.getState();
+  if (!s.connected) return;
+  ws.request("midi/setThruTracks", { trackIds: s.selection.trackIds }).catch(() => {
+    /* pre-thru engine — harmless */
+  });
+}
+
+useStore.subscribe((s, prev) => {
+  if (s.selection.trackIds !== prev.selection.trackIds) {
+    if (midiThruTimer !== undefined) clearTimeout(midiThruTimer);
+    midiThruTimer = setTimeout(syncMidiThru, 80);
+  }
+});
+
 /* Persist the restored slices back on every change (drag-driven ones debounced).
    Field-compare against prev so unrelated store updates cost one pointer check. */
 useStore.subscribe((s, prev) => {
@@ -539,6 +564,7 @@ async function sendHello(): Promise<void> {
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)
     reconcileAutomationWrite(r.automationWrite);
     reconcileMidiMaps(r.midiMaps);
+    syncMidiThru(); // engine restarts forget the thru set — reseed from selection
   } catch (e) {
     console.error("[store] session/hello failed:", e);
     if (ws.state === "open") {

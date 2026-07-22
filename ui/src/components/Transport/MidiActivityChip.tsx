@@ -7,9 +7,9 @@
  *   ok      green LED + device name — MIDI arriving and a track that can sound
  *           is listening
  *   warn    amber, one of two causes (both real support cases):
- *           1. "no track armed!"        — nothing is record-armed/monitoring;
- *              CLICK arms the best candidate (selected armable track, else the
- *              first armable track WITH a live instrument).
+ *           1. "no track selected!"     — no instrument/MIDI track is selected;
+ *              CLICK selects the first track that can sound (thru follows
+ *              SELECTION — spec 2026-07-22; Ctrl+click headers to layer).
  *           2. "instrument not loaded!" — a track IS listening, but nothing in
  *              its chain can make sound: its instrument is dormant (typical
  *              after Import Project — needs Recreate Plugins) or absent.
@@ -31,6 +31,10 @@ const UNRESOLVED_TTL_MS = 5000;
 
 /** Kinds whose live input is MIDI (audio tracks listen to audio inputs instead). */
 const armable = (t: Track): boolean => t.kind === "instrument" || t.kind === "midi";
+
+/** Live-MIDI thru follows track SELECTION (spec 2026-07-22) + explicit monitor. */
+const listening = (t: Track): boolean =>
+  armable(t) && (useStore.getState().selection.trackIds.includes(t.id) || !!t.monitor);
 
 /* ---- dormant-insert cache (instanceIds with NO live host instance) ---- */
 
@@ -88,7 +92,7 @@ type Diag =
 function diagnose(): Diag {
   const p = useStore.getState().project;
   if (!p) return { kind: "ok" };
-  const listeners = p.tracks.filter((t) => armable(t) && (t.recordArm || t.monitor));
+  const listeners = p.tracks.filter(listening);
   if (listeners.length === 0) return { kind: "noListener" };
   const sounders = listeners.filter(canSound);
   if (sounders.length === 0) {
@@ -129,23 +133,20 @@ export default function MidiActivityChip() {
     };
   }, []);
 
-  const fixArm = (): void => {
+  const fixSelect = (): void => {
     const s = useStore.getState();
     const p = s.project;
     if (!p) return;
-    const selected = p.tracks.find((t) => s.selection.trackIds.includes(t.id) && armable(t));
-    const target =
-      (selected && canSound(selected) ? selected : undefined) ??
-      p.tracks.find((t) => armable(t) && canSound(t)) ??
-      selected ??
-      p.tracks.find(armable);
+    const target = p.tracks.find((t) => armable(t) && canSound(t)) ?? p.tracks.find(armable);
     if (!target) {
-      showToast("No instrument or MIDI track to arm — add one first.", "info");
+      showToast("No instrument or MIDI track to select — add one first.", "info");
       return;
     }
-    void setTrack(target.id, { recordArm: true })
-      .then(() => showToast(`Armed "${target.name}" — your keyboard plays through it now.`, "success"))
-      .catch((e) => showToast(`Arming failed: ${e instanceof Error ? e.message : e}`, "error"));
+    s.setSelection({ trackIds: [target.id], clipIds: [], noteIds: [] });
+    showToast(
+      `Selected "${target.name}" — your keyboard plays through it now (Ctrl+click headers to layer more).`,
+      "success",
+    );
   };
 
   const fixFader = (track: Track): void => {
@@ -157,7 +158,7 @@ export default function MidiActivityChip() {
   };
 
   const onClick = (): void => {
-    if (diag.kind === "noListener") fixArm();
+    if (diag.kind === "noListener") fixSelect();
     else if (diag.kind === "fadedOut") fixFader(diag.track);
     else if (diag.kind === "cantSound" && diag.dormant)
       useStore.getState().setDialogs({ recreatePlugins: true });
@@ -170,7 +171,7 @@ export default function MidiActivityChip() {
   const warn = lit && diag.kind !== "ok";
   const hint =
     diag.kind === "noListener"
-      ? "no track armed!"
+      ? "no track selected!"
       : diag.kind === "cantSound"
         ? "instrument not loaded!"
         : diag.kind === "fadedOut"
@@ -178,13 +179,13 @@ export default function MidiActivityChip() {
           : null;
   const title =
     diag.kind === "noListener"
-      ? `MIDI is arriving from "${device ?? "a device"}" but NO track is record-armed or monitoring — the notes go nowhere.\nClick to arm a track that can play them.`
+      ? `MIDI is arriving from "${device ?? "a device"}" but no instrument/MIDI track is SELECTED (the keyboard plays through the selection; Ctrl+click headers to layer several).\nClick to select one that can play.`
       : diag.kind === "cantSound"
         ? diag.dormant
-          ? `"${diag.track.name}" is armed, but its instrument is DORMANT (not loaded — typical after Import Project).\nClick to open Recreate Plugins.`
-          : `"${diag.track.name}" is armed, but it has no loaded instrument to make sound.\nClick to open the plugin Browser.`
+          ? `"${diag.track.name}" is selected, but its instrument is DORMANT (not loaded — typical after Import Project).\nClick to open Recreate Plugins.`
+          : `"${diag.track.name}" is selected, but it has no loaded instrument to make sound.\nClick to open the plugin Browser.`
         : diag.kind === "fadedOut"
-          ? `"${diag.track.name}" is armed and its instrument plays — but the track is muted or faded to ~silence (fader < -40 dB).\nClick to raise it to 0 dB.`
+          ? `"${diag.track.name}" is selected and its instrument plays — but the track is muted or faded to ~silence (fader < -40 dB).\nClick to raise it to 0 dB.`
           : lit
             ? `MIDI activity: ${device}`
             : "MIDI input — lights up when the engine receives notes.\nClick for MIDI device settings.";

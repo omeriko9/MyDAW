@@ -391,6 +391,19 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         }
         return json::object();
     }
+    if (type == "midi/setThruTracks") {
+        // Live-MIDI thru follows the UI's track SELECTION (spec 2026-07-22): these
+        // tracks (plus explicit monitor toggles) play the hardware keyboard; arming
+        // is for recording and does NOT imply thru. Multi-selection layers.
+        // Unknown ids are harmless (no matching node) — no validation round-trip.
+        std::vector<uint64_t> ids;
+        if (p.contains("trackIds") && p["trackIds"].is_array())
+            for (const auto& v : p["trackIds"])
+                if (v.is_number_integer() || v.is_number_unsigned())
+                    ids.push_back(v.get<uint64_t>());
+        app_.setMidiThruTracks(std::move(ids));
+        return json::object();
+    }
     if (type == "midi/preview") {
         // Live note injection into the track's MIDI path (audible while stopped,
         // regardless of arm). NOT undoable; no projectChanged.

@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "bded4c53b8e9e4d0a91571646ce14f1bbf6b4747fb2ede1b308df681af76ad60";
+const char kAgentCatalogSha256[] = "70935b2a9f842a08f3be25c5e11ad45d7f0244f6c5fc5c2dc0bfab346ec5d09a";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -8242,6 +8242,11 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "request": "export/cpr",
       "reason": "Interactive Cubase .cpr project file export (may open a native save dialog); a file-interchange utility, not a project edit.",
       "use": "Ask the user to run File > Export > Export Cubase Project (.cpr) in the UI."
+    },
+    {
+      "request": "midi/setThruTracks",
+      "reason": "UI plumbing: the browser mirrors its track selection to the engine so live MIDI thru follows the selection; not a user-level action.",
+      "use": "Select tracks via ui/entity.reveal (select: true) — the UI mirrors the selection to the engine automatically."
     }
   ]
 }

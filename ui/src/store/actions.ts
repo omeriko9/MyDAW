@@ -276,6 +276,10 @@ export const setMidiInputEnabled = (id: string, enabled: boolean) =>
   ws.request("midi/setInputEnabled", { id, enabled });
 
 /** Live note audition — NOT undoable, no projectChanged; audible while stopped. */
+/** Live-MIDI thru targets = the current track selection (spec 2026-07-22). */
+export const setMidiThruTracks = (trackIds: number[]) =>
+  ws.request("midi/setThruTracks", { trackIds });
+
 export const previewNote = (trackId: number, pitch: number, velocity: number, on: boolean) =>
   ws.request("midi/preview", { trackId, pitch, velocity, on });
 

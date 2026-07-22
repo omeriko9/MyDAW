@@ -1058,6 +1058,15 @@ export interface MidiPreviewRequest {
   on: boolean;
 }
 
+/**
+ * Live-MIDI thru follows the UI's track SELECTION (spec 2026-07-22): these tracks
+ * (plus explicit per-track monitor toggles) play the hardware keyboard; arming is
+ * for recording and does NOT imply thru. Multi-selection layers instruments.
+ */
+export interface MidiSetThruTracksRequest {
+  trackIds: number[];
+}
+
 export interface MediaImportRequest {
   paths: string[];
   trackId?: number;
@@ -1557,6 +1566,7 @@ export interface RequestMap {
   "midi/getInputs": { req: EmptyObject; reply: MidiGetInputsReply };
   "midi/setInputEnabled": { req: MidiSetInputEnabledRequest; reply: EmptyObject };
   "midi/preview": { req: MidiPreviewRequest; reply: EmptyObject };
+  "midi/setThruTracks": { req: MidiSetThruTracksRequest; reply: EmptyObject };
   "media/import": { req: MediaImportRequest; reply: MediaImportReply };
   "media/relink": { req: MediaRelinkRequest; reply: EmptyObject };
   "export/render": { req: ExportRenderRequest; reply: ExportRenderReply };

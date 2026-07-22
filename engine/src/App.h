@@ -23,6 +23,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <set>
 #include <vector>
 
 #include "EngineContext.h"
@@ -132,6 +133,10 @@ public:
     // midi/preview: inject a live note on/off (channel 0) into `trackId`'s MIDI path via
     // AudioGraph::injectLiveMidi — audible while stopped and regardless of arm. Main thread.
     void previewNote(uint64_t trackId, int pitch, int velocity, bool on);
+    // midi/setThruTracks: live-MIDI thru follows the UI's track SELECTION (spec
+    // 2026-07-22) — these tracks (plus explicit monitor toggles) play the hardware
+    // keyboard; arming is for recording only. Main thread; triggers a graph rebuild.
+    void setMidiThruTracks(std::vector<uint64_t> trackIds);
     void requestGraphRebuild(); // thread-safe, coalesced on the main loop
     int currentSampleRate() const { return currentSampleRate_; }
     AudioConfig currentAudioConfig() const { return currentConfig_; }
@@ -193,6 +198,9 @@ public:
     MidiInput midiInput;
     MidiRecorder midiRecorder;
     AudioRecorder audioRecorder;
+    // Live-MIDI thru targets (UI selection; setMidiThruTracks). Main loop only —
+    // read by the midiActivity annotation, forwarded to AudioGraph on change.
+    std::set<uint64_t> midiThruTracks;
     ProjectIO projectIO; // ctor snapshots the previous run's session.lock (§6 recovery)
     Autosave autosave{model, projectIO};
 

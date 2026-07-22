@@ -101,7 +101,9 @@ bool App::init(std::string& err) {
             for (const Track& t : model.project.tracks) {
                 const bool midiKind =
                     t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument;
-                if (midiKind && (t.recordArm || t.monitor) &&
+                // Thru follows SELECTION (midiThruTracks) + explicit monitor —
+                // same predicate as AudioGraph cfg.liveMidi (spec 2026-07-22).
+                if (midiKind && (midiThruTracks.count(t.id) > 0 || t.monitor) &&
                     (t.inputDevice.empty() || t.inputDevice == deviceId)) {
                     ev["trackId"] = t.id;
                     break;
@@ -577,6 +579,13 @@ void App::panic() {
 void App::previewNote(uint64_t trackId, int pitch, int velocity, bool on) {
     graph->injectLiveMidi(trackId, on ? MidiEvent::noteOn(0, pitch, velocity)
                                       : MidiEvent::noteOff(0, pitch));
+}
+
+void App::setMidiThruTracks(std::vector<uint64_t> trackIds) {
+    midiThruTracks = std::set<uint64_t>(trackIds.begin(), trackIds.end());
+    if (graph)
+        graph->setMidiThruTracks(std::move(trackIds));
+    requestGraphRebuild();
 }
 
 bool App::renderRange(int64_t startSample, int64_t endSample, int blockSize,

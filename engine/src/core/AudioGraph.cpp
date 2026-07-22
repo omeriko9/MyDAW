@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <set>
 #include <vector>
 
 #if defined(_MSC_VER) || defined(__SSE2__)
@@ -112,6 +113,10 @@ struct AudioGraph::Impl {
     BuiltinEffectManager* builtin = nullptr;
     MidiInput* midiIn = nullptr;
     Metronome* metronome = nullptr;
+
+    // Live-MIDI thru targets (the UI's track selection; setMidiThruTracks). Main
+    // thread only: written by the setter, read by buildPlan.
+    std::set<uint64_t> midiThru;
 
     // midi/preview injection: main thread (single producer) -> RT consumer.
     struct LiveInject {
@@ -679,8 +684,11 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                 cfg.liveAudioWhenRecording = false;
                 cfg.inputChannelOffset = std::max(0, t.inputChannel);
             }
+            // Live-MIDI thru follows the UI's track SELECTION (midiThru, spec
+            // 2026-07-22) plus the explicit monitor toggle. Arming does NOT imply
+            // thru — arming is for recording (multi-selection layers instruments).
             if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
-                cfg.liveMidi = t.recordArm || t.monitor;
+                cfg.liveMidi = midiThru.count(t.id) > 0 || t.monitor;
         }
     }
 
@@ -953,6 +961,10 @@ void AudioGraph::configure(int sampleRate, int maxBlock, Meters* meters,
         im.graveyard.push_back(
             Impl::Retired{old->gen, std::chrono::steady_clock::now(), std::move(old)});
     im.collectGraveyard();
+}
+
+void AudioGraph::setMidiThruTracks(std::vector<uint64_t> trackIds) {
+    impl_->midiThru = std::set<uint64_t>(trackIds.begin(), trackIds.end());
 }
 
 void AudioGraph::rebuild(const Model& model) {

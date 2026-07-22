@@ -8234,6 +8234,11 @@
       "request": "export/cpr",
       "reason": "Interactive Cubase .cpr project file export (may open a native save dialog); a file-interchange utility, not a project edit.",
       "use": "Ask the user to run File > Export > Export Cubase Project (.cpr) in the UI."
+    },
+    {
+      "request": "midi/setThruTracks",
+      "reason": "UI plumbing: the browser mirrors its track selection to the engine so live MIDI thru follows the selection; not a user-level action.",
+      "use": "Select tracks via ui/entity.reveal (select: true) — the UI mirrors the selection to the engine automatically."
     }
   ]
 }
