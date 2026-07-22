@@ -255,6 +255,10 @@ function uiBlocked(): boolean {
   const ctx = document.getElementById("mydaw-ctx-root");
   if (ctx && ctx.childElementCount > 0) return true;
   if (document.querySelector(".modal-overlay")) return true;
+  // Anchored popups (mixer plugin picker, color palettes) own the keyboard too.
+  // Their search box may not have received focus yet (or the popup has no input at
+  // all), and a stray 'c' aimed at a query must never toggle the metronome.
+  if (document.querySelector(".mxr-popup, .tl-color-pop")) return true;
   return false;
 }
 

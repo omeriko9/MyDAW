@@ -45,6 +45,17 @@ export function AnchoredPopup({ x, y, onClose, width, children }: AnchoredPopupP
     setPos({ x: nx, y: ny });
   }, [x, y]);
 
+  // Focus the first input once VISIBLE. React's autoFocus fires while the popup is
+  // still `visibility: hidden` (pre-clamp) where .focus() is a no-op — the classic
+  // symptom was typing into the plugin picker with focus still on <body>, every
+  // keystroke landing on the global shortcut map instead of the search box.
+  useEffect(() => {
+    if (!pos) return;
+    const el = ref.current;
+    if (!el || el.contains(document.activeElement)) return;
+    el.querySelector<HTMLElement>("input, textarea, select")?.focus();
+  }, [pos]);
+
   useEffect(() => {
     const down = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onCloseRef.current();
