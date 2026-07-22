@@ -561,6 +561,11 @@ struct CprCtx {
     // Modern Devices Synth Rack: slot index -> created Instrument track id, for the
     // modern MIDI->rack routing pass (wireModernMidiRouting).
     std::map<int, uint64_t> modernRackSlotTrack;
+    // Rack plugin INSTANCE id ("<GUID>-<n>" IDString) -> Instrument track id. The
+    // authoritative routing key: MIDI-track Track Device connections carry exactly
+    // this string. The slot map above stays as the fallback (C7 evidence files where
+    // instance# happened to equal the slot index, and files without IDStrings).
+    std::map<std::string, uint64_t> modernRackInstanceTrack;
     // Synth-Slot instrument tracks in channel-scan (= track) order — routing-slot
     // fallback for MyDAW's own exports, which have no Devices rack (their connection
     // strings index instrument tracks by ordinal).
@@ -2200,6 +2205,11 @@ struct PathEl {
 struct ModPlugin {
     std::vector<PathEl> path; // containers above the "Plugin" object
     std::string guid, name, version;
+    // Plugin INSTANCE id ("<32-hex GUID>-<instance#>", the record's IDString member).
+    // MIDI-track output connections reference rack instruments by THIS string — the
+    // trailing number is an instance counter, NOT a rack-slot index (motiv-01.cpr:
+    // three rack synths, all instance "-0" of different GUIDs).
+    std::string idString;
     size_t acOff = 0;
     uint32_t acLen = 0;
     bool hasAc = false;
@@ -2577,6 +2587,8 @@ private:
             capture_->name = val;
         else if (key == "Version" && capture_->version.empty())
             capture_->version = val;
+        else if (key == "IDString" && capture_->idString.empty())
+            capture_->idString = val;
     }
 
     // Get/create the EQ band record at array index `idx` (grown on demand).
@@ -2923,6 +2935,8 @@ void modernExtractSynthRack(CprCtx& c, size_t devOff, size_t devEnd,
                     break; // import-track ceiling reached
                 trackBySlot[slot] = t->id;
                 c.modernRackSlotTrack[slot] = t->id; // for MIDI-routing wiring
+                if (!mp.idString.empty())
+                    c.modernRackInstanceTrack[mp.idString] = t->id;
                 c.rackCreatedTracks.insert(t->id);
                 addDormantInsert(c, *t, std::move(xp), true);
             } else if (underOutput && underInsertFolder) {
@@ -2954,7 +2968,7 @@ void wireModernMidiRouting(CprCtx& c) {
             slotTrack[static_cast<int>(i)] = c.synthSlotTracks[i];
         c.synthSlotOrdinalRouting = !slotTrack.empty(); // MyDAW export — collapse later
     }
-    if (slotTrack.empty())
+    if (slotTrack.empty() && c.modernRackInstanceTrack.empty())
         return;
     std::set<uint64_t> targetsUsed;
     std::map<uint64_t, std::vector<Track*>> feedersByTarget;
@@ -2964,8 +2978,15 @@ void wireModernMidiRouting(CprCtx& c) {
         Track* t = c.model.trackById(sp.trackId);
         if (!t || t->kind != TrackKind::Midi || t->midiTarget != 0)
             continue;
-        int slot = -1;
-        for (size_t p = sp.lo; p + 8 < sp.hi && slot < 0; ++p) {
+        // Scan the track record for "<32 hex>-<n>" connection strings. The FULL string
+        // is the routing key (a rack plugin's INSTANCE IDString — see
+        // modernRackInstanceTrack): three different synths can all be instance "-0" of
+        // their GUIDs (motiv-01.cpr), so reading the trailing number as a rack-slot
+        // index collapsed every feeder onto slot 0's instrument. The trailing-number
+        // slot lookup survives only as a fallback for files without IDStrings.
+        uint64_t target = 0;
+        int fallbackSlot = -1;
+        for (size_t p = sp.lo; p + 8 < sp.hi && target == 0; ++p) {
             uint32_t len = 0;
             if (!rdU32(c.b, p, sp.hi, len))
                 break;
@@ -2982,6 +3003,11 @@ void wireModernMidiRouting(CprCtx& c) {
             }
             if (!ok)
                 continue;
+            const auto ti = c.modernRackInstanceTrack.find(s.text);
+            if (ti != c.modernRackInstanceTrack.end()) {
+                target = ti->second; // authoritative: this track's output connection
+                break;
+            }
             int v = 0;
             ok = s.text.size() > 33;
             for (size_t i = 33; i < s.text.size() && ok; ++i) {
@@ -2990,21 +3016,24 @@ void wireModernMidiRouting(CprCtx& c) {
                 if (ok)
                     v = v * 10 + (ch - '0');
             }
-            if (ok && v >= 0 && v < 1024)
-                slot = v;
+            if (ok && v >= 0 && v < 1024 && fallbackSlot < 0)
+                fallbackSlot = v;
         }
-        if (slot < 0)
+        if (target == 0 && fallbackSlot >= 0) {
+            const auto it = slotTrack.find(fallbackSlot);
+            if (it != slotTrack.end())
+                target = it->second;
+        }
+        if (target == 0)
             continue;
-        const auto it = slotTrack.find(slot);
-        if (it == slotTrack.end())
-            continue;
-        t->midiTarget = it->second;
+        t->midiTarget = target;
         ++c.routedMidiTracks;
-        targetsUsed.insert(it->second);
-        feedersByTarget[it->second].push_back(t);
-        Log::info("cpr import: MIDI track '%s' -> rack slot %d (midiTarget routing, "
-                  "shared instance)",
-                  t->name.c_str(), slot);
+        targetsUsed.insert(target);
+        feedersByTarget[target].push_back(t);
+        const Track* tgt = c.model.trackById(target);
+        Log::info("cpr import: MIDI track '%s' -> rack instrument '%s' (midiTarget "
+                  "routing, shared instance)",
+                  t->name.c_str(), tgt ? tgt->name.c_str() : "?");
     }
     c.routedInstruments += static_cast<int>(targetsUsed.size());
     // No feeder->instrument rename here: native projects keep the rack track's own
