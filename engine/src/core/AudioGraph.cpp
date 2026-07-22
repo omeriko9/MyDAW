@@ -739,8 +739,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
         node->prepare(sampleRate, blockSize);
         if (prevPlan) {
             if (TrackNode* prev =
-                    lookupById(prevPlan->trackLookup, plan->base.entries[idx].trackId))
+                    lookupById(prevPlan->trackLookup, plan->base.entries[idx].trackId)) {
                 node->adoptEqState(*prev);
+                // Note-ledger continuity: notes sounding across a rebuild (every edit,
+                // undo, even a selection change rebuilds) must keep their note-offs —
+                // a fresh node with an empty ledger silently drops them, which was THE
+                // dominant stuck-note cause.
+                node->adoptMidiState(*prev);
+            }
         }
         plan->base.entries[idx].node = node;
         plan->typed.push_back(node.get());
@@ -1224,6 +1230,23 @@ bool AudioGraph::renderOffline(
         if (progress)
             progress->store(static_cast<float>(static_cast<double>(pos - startSample) / total),
                             std::memory_order_release);
+    }
+
+    // Release pass: the offline plan's nodes share LIVE plugin instances with the
+    // realtime plan — a render range that cuts a note mid-sound would leave that
+    // voice sustaining in the session. One !playing pass flushes every node's clip
+    // ledger as plain note-offs (tails-safe) into the shared instances.
+    {
+        ProcessContext ctx;
+        ctx.frames = std::min(blockSize, im.maxBlock > 0 ? im.maxBlock : blockSize);
+        ctx.playheadSamples = endSample;
+        ctx.ppqPos = map.samplesToBeats(endSample);
+        ctx.tempo = map.bpmAtBeat(ctx.ppqPos);
+        ctx.playing = false;
+        ctx.recording = false;
+        ctx.looping = false;
+        ctx.sampleRate = im.sampleRate;
+        im.runPass(*plan, ctx, nullptr, 0, 0, nullptr, nullptr, 0);
     }
 
     for (IInsertNode* p : plan->plugins)

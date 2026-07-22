@@ -34,6 +34,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "core/Eq.h" // EqProcessor, EqBandSet
@@ -169,6 +170,17 @@ public:
     // copied (they came from this node's config via snap). See EqProcessor::adoptState.
     void adoptEqState(const TrackNode& prev) noexcept { eq_.adoptState(prev.eq_); }
 
+    /// Rebuild continuity (AudioGraph::buildPlan): carry the note ledgers + chase
+    /// state from the same-track node of the previous plan, so notes sounding across
+    /// a graph rebuild still receive their note-offs. Same benign-race contract as
+    /// adoptEqState — the RT thread may still mutate `prev` while we copy; a stray or
+    /// duplicate note-off is harmless, a permanently stuck note is not. Totals are
+    /// recomputed from the copied cells (never copied — they could tear against the
+    /// RT thread). Also queues releases for rebuild-orphaned notes (tracked notes
+    /// whose note-off no longer exists in this node's baked events — deleted/moved
+    /// clips) and arms the handoff-gap tolerance for the first block after the swap.
+    void adoptMidiState(const TrackNode& prev) noexcept;
+
     // Any thread: request all-notes-off + active-note clear on the next RT pass.
     void panicRt() noexcept { panic_.store(true, std::memory_order_release); }
 
@@ -208,7 +220,16 @@ private:
     void renderClipsRt(const ProcessContext& ctx, float* wl, float* wr) noexcept;
     void scheduleMidiRt(const ProcessContext& ctx) noexcept;
     void scheduleCcChaseRt(int64_t s0) noexcept;
-    void flushActiveNotesRt(int sampleOffset) noexcept;
+    /// Release every tracked CLIP note as a plain note-off (tails-safe). Buffer-full
+    /// keeps the remainder tracked so the next block retries; totals recomputed.
+    void flushClipNotesRt(int sampleOffset) noexcept;
+    /// Release every tracked LIVE note (pending-offs overflow fallback only — live
+    /// notes normally end with the player's own note-off).
+    void flushLiveNotesRt(int sampleOffset) noexcept;
+    /// Re-emit queued releases (failed scratch adds + rebuild-orphan releases).
+    void drainPendingOffsRt() noexcept;
+    /// Ledger-track a live/injected/feeder event (note on/off + CC123/CC120 clears).
+    void trackLiveNoteRt(const MidiEvent& e) noexcept;
 
     Config cfg_;
 
@@ -236,9 +257,77 @@ private:
 
     bool hasPitchBend_ = false; // any controller-128 entry in cfg_.ccEvents (chase)
 
-    uint16_t activeMask_[128] = {}; // bit per MIDI channel, per pitch
-    int activeCount_ = 0;
+    // Active-note ledger: COUNT per pitch×channel (counts, not bits, so overlapping
+    // same-pitch notes emit matched note-offs). Two ledgers by note ORIGIN:
+    //   clipNotes_  clip-scheduled notes — released by the stop / locate / loop-wrap
+    //               flushes (the transport owns their lifetime)
+    //   liveNotes_  live-input / injected-preview / feeder-delivered notes — NEVER cut
+    //               by the transport (a chord held on the keyboard survives stop);
+    //               their note-offs are accepted even after cfg_.liveMidi turns off
+    //               (track deselected mid-note), so releases can't be orphaned
+    struct NoteLedger {
+        uint8_t count[128][16] = {};
+        int total = 0;
+        void noteOn(int pitch, int ch) noexcept {
+            uint8_t& c = count[pitch & 0x7F][ch & 0x0F];
+            if (c < 255) {
+                ++c;
+                ++total;
+            }
+        }
+        /// true when a matching on was tracked (the off belongs to us).
+        bool noteOff(int pitch, int ch) noexcept {
+            uint8_t& c = count[pitch & 0x7F][ch & 0x0F];
+            if (c == 0)
+                return false;
+            --c;
+            --total;
+            return true;
+        }
+        bool has(int pitch, int ch) const noexcept {
+            return count[pitch & 0x7F][ch & 0x0F] > 0;
+        }
+        void clear() noexcept {
+            std::memset(count, 0, sizeof(count));
+            total = 0;
+        }
+    };
+    NoteLedger clipNotes_;
+    NoteLedger liveNotes_;
     int64_t lastEndSample_ = -1; // discontinuity detection (locate/wrap chasing)
+
+    // Note-offs that could not enter a full scratch buffer, plus rebuild-orphaned
+    // releases queued by adoptMidiState — re-emitted at the next block(s). Fixed
+    // capacity; overflow falls back to a full ledger flush (an over-release is
+    // audible once, a stuck note is audible forever).
+    struct PendingOffs {
+        struct Cell {
+            uint8_t pitch, ch, fromClip;
+        };
+        Cell cells[32];
+        int count = 0;
+        bool overflow = false;
+        void push(int pitch, int ch, bool fromClip) noexcept {
+            if (count < 32)
+                cells[count++] = {static_cast<uint8_t>(pitch & 0x7F),
+                                  static_cast<uint8_t>(ch & 0x0F),
+                                  static_cast<uint8_t>(fromClip ? 1 : 0)};
+            else
+                overflow = true;
+        }
+        void clear() noexcept {
+            count = 0;
+            overflow = false;
+        }
+    };
+    PendingOffs pendingOffs_;
+
+    // First playing block after a rebuild handoff: a small FORWARD position gap vs the
+    // adopted lastEndSample_ is rebuild latency (the RT thread advanced the OLD node
+    // between the adoption copy and the plan swap), NOT a user locate — flushing on it
+    // would cut every note the adoption just preserved.
+    bool adoptedHandoff_ = false;
+    int64_t handoffToleranceSamples_ = 9600; // re-derived in prepare(): sampleRate/5
 
     std::atomic<bool> panic_{false};
     std::atomic<float> vcaGain_{1.0f}; // VCA multiplier (live via applyVcaGainRt / baked at prepare)

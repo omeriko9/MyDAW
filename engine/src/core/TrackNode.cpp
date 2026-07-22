@@ -51,9 +51,12 @@ void TrackNode::prepare(int sampleRate, int maxBlock) {
     delay_.prepare(cfg_.pdcDelaySamples, 2);
     delay_.setDelay(cfg_.pdcDelaySamples);
 
-    std::memset(activeMask_, 0, sizeof(activeMask_));
-    activeCount_ = 0;
+    clipNotes_.clear();
+    liveNotes_.clear();
+    pendingOffs_.clear();
     lastEndSample_ = -1;
+    adoptedHandoff_ = false;
+    handoffToleranceSamples_ = sampleRate_ / 5; // rebuild latency tolerance, ~200 ms
 }
 
 void TrackNode::process(ProcessContext& ctx, const float* const* inputs, int numInputs,
@@ -63,8 +66,10 @@ void TrackNode::process(ProcessContext& ctx, const float* const* inputs, int num
 }
 
 void TrackNode::reset() {
-    std::memset(activeMask_, 0, sizeof(activeMask_));
-    activeCount_ = 0;
+    clipNotes_.clear();
+    liveNotes_.clear();
+    pendingOffs_.clear();
+    adoptedHandoff_ = false;
     lastEndSample_ = -1;
     midiScratch_.clear();
     injectedMidi_.clear();
@@ -91,25 +96,141 @@ void TrackNode::applySendLevelRt(int modelIndex, float v) noexcept {
     }
 }
 
-void TrackNode::flushActiveNotesRt(int sampleOffset) noexcept {
-    if (activeCount_ <= 0)
+void TrackNode::flushClipNotesRt(int sampleOffset) noexcept {
+    if (clipNotes_.total <= 0)
         return;
-    for (int pitch = 0; pitch < 128 && activeCount_ > 0; ++pitch) {
-        uint16_t mask = activeMask_[pitch];
-        if (!mask)
-            continue;
-        for (int ch = 0; ch < 16 && mask; ++ch) {
-            const uint16_t bit = static_cast<uint16_t>(1u << ch);
-            if (mask & bit) {
-                midiScratch_.add(MidiEvent::noteOff(ch, pitch, sampleOffset));
-                mask = static_cast<uint16_t>(mask & ~bit);
-                --activeCount_;
+    bool full = false;
+    for (int pitch = 0; pitch < 128 && !full; ++pitch) {
+        for (int ch = 0; ch < 16 && !full; ++ch) {
+            uint8_t& c = clipNotes_.count[pitch][ch];
+            while (c > 0) {
+                if (!midiScratch_.add(MidiEvent::noteOff(ch, pitch, sampleOffset))) {
+                    full = true; // scratch full — keep the rest tracked; next block retries
+                    break;
+                }
+                --c;
             }
         }
-        activeMask_[pitch] = mask;
     }
-    if (activeCount_ < 0)
-        activeCount_ = 0;
+    // Recompute the total from the cells: adoption may have raced count vs total
+    // (benign-race contract), and a full scratch keeps a remainder tracked.
+    int t = 0;
+    for (int pitch = 0; pitch < 128; ++pitch)
+        for (int ch = 0; ch < 16; ++ch)
+            t += clipNotes_.count[pitch][ch];
+    clipNotes_.total = t;
+}
+
+void TrackNode::flushLiveNotesRt(int sampleOffset) noexcept {
+    if (liveNotes_.total <= 0)
+        return;
+    bool full = false;
+    for (int pitch = 0; pitch < 128 && !full; ++pitch) {
+        for (int ch = 0; ch < 16 && !full; ++ch) {
+            uint8_t& c = liveNotes_.count[pitch][ch];
+            while (c > 0) {
+                if (!midiScratch_.add(MidiEvent::noteOff(ch, pitch, sampleOffset))) {
+                    full = true;
+                    break;
+                }
+                --c;
+            }
+        }
+    }
+    int t = 0;
+    for (int pitch = 0; pitch < 128; ++pitch)
+        for (int ch = 0; ch < 16; ++ch)
+            t += liveNotes_.count[pitch][ch];
+    liveNotes_.total = t;
+}
+
+void TrackNode::drainPendingOffsRt() noexcept {
+    if (pendingOffs_.overflow) {
+        // Pathological (>32 failed releases in flight): release everything tracked.
+        // An over-release is audible once; a stuck note is audible until panic.
+        flushClipNotesRt(0);
+        flushLiveNotesRt(0);
+        pendingOffs_.clear();
+        return;
+    }
+    int keep = 0;
+    for (int i = 0; i < pendingOffs_.count; ++i) {
+        const PendingOffs::Cell c = pendingOffs_.cells[i];
+        if (midiScratch_.add(MidiEvent::noteOff(c.ch, c.pitch, 0))) {
+            // Keep the ledger consistent with the emitted off (noteOff no-ops at 0 —
+            // a stop-flush may already have released and zeroed the cell meanwhile).
+            if (c.fromClip)
+                clipNotes_.noteOff(c.pitch, c.ch);
+            else
+                liveNotes_.noteOff(c.pitch, c.ch);
+        } else {
+            pendingOffs_.cells[keep++] = c; // still full — retry next block
+        }
+    }
+    pendingOffs_.count = keep;
+}
+
+void TrackNode::adoptMidiState(const TrackNode& prev) noexcept {
+    std::memcpy(clipNotes_.count, prev.clipNotes_.count, sizeof(clipNotes_.count));
+    std::memcpy(liveNotes_.count, prev.liveNotes_.count, sizeof(liveNotes_.count));
+    // Totals are recomputed from the copied cells, never copied: prev's total mutates
+    // on the RT thread and a torn total could pin a flush unreachable.
+    int ct = 0;
+    int lt = 0;
+    for (int pitch = 0; pitch < 128; ++pitch) {
+        for (int ch = 0; ch < 16; ++ch) {
+            ct += clipNotes_.count[pitch][ch];
+            lt += liveNotes_.count[pitch][ch];
+        }
+    }
+    clipNotes_.total = ct;
+    liveNotes_.total = lt;
+    lastEndSample_ = prev.lastEndSample_;
+    feederWasMuted_ = prev.feederWasMuted_;
+    adoptedHandoff_ = true;
+
+    // Rebuild-orphan scan (control thread, non-RT — we are pre-publish): a tracked
+    // clip note with NO matching note-off at/after the playhead in the NEW baked
+    // events belongs to a clip that was deleted or moved away — queue its release
+    // now, otherwise it drones until the stop flush.
+    if (lastEndSample_ >= 0 && clipNotes_.total > 0) {
+        const auto& ev = cfg_.noteEvents;
+        size_t lo = 0;
+        size_t hi = ev.size();
+        while (lo < hi) { // first event at/after the adopted playhead (sorted)
+            const size_t mid = (lo + hi) / 2;
+            if (ev[mid].sample < lastEndSample_)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        for (int pitch = 0; pitch < 128; ++pitch) {
+            for (int ch = 0; ch < 16; ++ch) {
+                const uint8_t c = clipNotes_.count[pitch][ch];
+                if (c == 0)
+                    continue;
+                bool hasOff = false;
+                for (size_t i = lo; i < ev.size(); ++i) {
+                    if (!ev[i].on && ev[i].pitch == pitch && (ev[i].channel & 0x0F) == ch) {
+                        hasOff = true;
+                        break;
+                    }
+                }
+                if (!hasOff)
+                    for (int k = 0; k < c; ++k)
+                        pendingOffs_.push(pitch, ch, /*fromClip=*/true);
+            }
+        }
+    }
+}
+
+void TrackNode::trackLiveNoteRt(const MidiEvent& e) noexcept {
+    if (e.isNoteOn())
+        liveNotes_.noteOn(e.data[1], e.data[0] & 0x0F);
+    else if (e.isNoteOff())
+        liveNotes_.noteOff(e.data[1], e.data[0] & 0x0F);
+    else if (e.isAllNotesOff() || e.isAllSoundOff())
+        liveNotes_.clear(); // the chain releases everything; the ledger must agree
 }
 
 // CC chase (play start / locate / loop-wrap): send the latest baked point strictly
@@ -138,12 +259,14 @@ void TrackNode::scheduleCcChaseRt(int64_t s0) noexcept {
 }
 
 void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
-    if (cfg_.noteEvents.empty() && cfg_.ccEvents.empty() && activeCount_ == 0)
+    if (cfg_.noteEvents.empty() && cfg_.ccEvents.empty() && clipNotes_.total == 0)
         return;
 
     if (!ctx.playing) {
-        // Stop chasing: release everything still sounding, once.
-        flushActiveNotesRt(0);
+        // Stop chasing: release every sounding CLIP note (live-held notes are the
+        // player's — a chord held on the keyboard survives stop). Re-runs while the
+        // ledger is non-empty, so a full scratch buffer retries next block.
+        flushClipNotesRt(0);
         lastEndSample_ = -1;
         return;
     }
@@ -153,9 +276,18 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
 
     // Locate / loop-wrap chasing: a position discontinuity releases held notes first;
     // play start (lastEndSample_ < 0) and discontinuities re-chase CC state.
-    const bool chase = lastEndSample_ < 0 || lastEndSample_ != s0;
+    bool chase = lastEndSample_ < 0 || lastEndSample_ != s0;
+    if (chase && adoptedHandoff_ && lastEndSample_ >= 0 && s0 > lastEndSample_ &&
+        s0 - lastEndSample_ <= handoffToleranceSamples_) {
+        // NOT a locate: the RT thread advanced the OLD node between the adoption copy
+        // and the plan swap (rebuild latency). The old node played the gap's events —
+        // treat the position as continuous; flushing here would cut every note the
+        // adoption just preserved.
+        chase = false;
+    }
+    adoptedHandoff_ = false;
     if (chase && lastEndSample_ >= 0)
-        flushActiveNotesRt(0);
+        flushClipNotesRt(0);
     if (chase)
         scheduleCcChaseRt(s0);
 
@@ -197,18 +329,19 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
         const NoteEvent& e = ev[i];
         const int off = static_cast<int>(e.sample - s0);
         const int ch = e.channel & 0x0F;
-        const uint16_t bit = static_cast<uint16_t>(1u << ch);
         if (e.on) {
-            if (midiScratch_.add(MidiEvent::noteOn(ch, e.pitch, e.velocity, off))) {
-                if (!(activeMask_[e.pitch] & bit)) {
-                    activeMask_[e.pitch] |= bit;
-                    ++activeCount_;
-                }
-            }
-        } else if (activeMask_[e.pitch] & bit) {
-            midiScratch_.add(MidiEvent::noteOff(ch, e.pitch, off));
-            activeMask_[e.pitch] = static_cast<uint16_t>(activeMask_[e.pitch] & ~bit);
-            --activeCount_;
+            if (midiScratch_.add(MidiEvent::noteOn(ch, e.pitch, e.velocity, off)))
+                clipNotes_.noteOn(e.pitch, ch); // counted per on — overlaps release cleanly
+        } else {
+            // Note-offs are emitted UNCONDITIONALLY: after a rebuild the adopted
+            // ledger can miss a note that started between the adoption copy and the
+            // plan swap (the old node tracked it), and an off for a non-sounding
+            // pitch is harmless. The ledger only gates flushes; noteOff() no-ops at
+            // zero. A full scratch queues the release for the next block's drain.
+            if (midiScratch_.add(MidiEvent::noteOff(ch, e.pitch, off)))
+                clipNotes_.noteOff(e.pitch, ch);
+            else
+                pendingOffs_.push(e.pitch, ch, /*fromClip=*/true);
         }
     }
     lastEndSample_ = s1;
@@ -265,8 +398,9 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
     // engine/panic: clear the active-note table and tell the chain to silence. A
     // feeder forwards the panic CCs to its target's chain (its own inserts are empty).
     if (panic_.exchange(false, std::memory_order_acq_rel)) {
-        std::memset(activeMask_, 0, sizeof(activeMask_));
-        activeCount_ = 0;
+        clipNotes_.clear();
+        liveNotes_.clear();
+        pendingOffs_.clear();
         if (!cfg_.inserts.empty() || midiSink_) {
             for (int ch = 0; ch < 16; ++ch) {
                 midiScratch_.add(MidiEvent::controlChange(ch, 64, 0, 0)); // sustain off
@@ -297,15 +431,34 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
         scheduleMidiRt(ctx);
     }
 
-    // Live MIDI merge (armed/monitoring midi + instrument tracks).
-    if (liveMidi && cfg_.liveMidi)
-        for (const MidiEvent& e : *liveMidi)
-            midiScratch_.add(e);
+    // Queued releases first (failed scratch adds from earlier blocks + rebuild-orphan
+    // releases queued by adoptMidiState) — nothing may starve a note-off.
+    if (pendingOffs_.count > 0 || pendingOffs_.overflow)
+        drainPendingOffsRt();
+
+    // Live MIDI merge (selected / monitoring midi + instrument tracks). RELEASES
+    // (note-off / all-notes-off / all-sound-off) pass EVEN when cfg_.liveMidi is off,
+    // and unconditionally — deselecting the track mid-note must never orphan the
+    // release, and after a rebuild the adopted ledger may not know a note the old
+    // plan's node was tracking (a spurious off is harmless). Ons stay gated.
+    if (liveMidi) {
+        for (const MidiEvent& e : *liveMidi) {
+            if (cfg_.liveMidi || e.isNoteOff() || e.isAllNotesOff() || e.isAllSoundOff()) {
+                if (midiScratch_.add(e))
+                    trackLiveNoteRt(e);
+                else if (e.isNoteOff())
+                    pendingOffs_.push(e.data[1], e.data[0] & 0x0F, /*fromClip=*/false);
+            }
+        }
+    }
     // Injected live MIDI (midi/preview): plays regardless of arm/monitor/transport.
     if (!injectedMidi_.empty()) {
         for (MidiEvent e : injectedMidi_) {
             e.sampleOffset = 0;
-            midiScratch_.add(e);
+            if (midiScratch_.add(e))
+                trackLiveNoteRt(e);
+            else if (e.isNoteOff())
+                pendingOffs_.push(e.data[1], e.data[0] & 0x0F, /*fromClip=*/false);
         }
         injectedMidi_.clear();
     }
@@ -318,7 +471,7 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
     if (midiSink_) {
         const bool gateMuted = mute_.target() < 0.5f;
         if (gateMuted && !feederWasMuted_)
-            flushActiveNotesRt(0); // release held notes; the offs pass the gate below
+            flushClipNotesRt(0); // release held notes; the offs pass the gate below
         feederWasMuted_ = gateMuted;
         for (const MidiEvent& e : midiScratch_) {
             if (gateMuted && !(e.isNoteOff() || e.isAllNotesOff() || e.isAllSoundOff()))
@@ -332,10 +485,15 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
     }
 
     // Feeder-delivered MIDI (midiTarget routing): merged before the sort; the feeders
-    // already ran for this span (the graph orders feeders before their target).
+    // already ran for this span (the graph orders feeders before their target). Tracked
+    // in the live ledger so offline renders and diagnostics see the target's true state.
     if (!feederMidi_.empty()) {
-        for (const MidiEvent& e : feederMidi_)
-            midiScratch_.add(e);
+        for (const MidiEvent& e : feederMidi_) {
+            if (midiScratch_.add(e))
+                trackLiveNoteRt(e);
+            else if (e.isNoteOff())
+                pendingOffs_.push(e.data[1], e.data[0] & 0x0F, /*fromClip=*/false);
+        }
         feederMidi_.clear();
     }
     midiScratch_.sortByOffset();
