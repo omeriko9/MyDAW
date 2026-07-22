@@ -614,3 +614,27 @@
 .sb-midi-hint {
   font-weight: 700;
 }
+
+/* ============================================================================
+ * PluginLoadingChip (status bar) — long plug-in loads, non-blocking
+ * ==========================================================================*/
+
+.sb-plugload {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  color: var(--text-dim);
+}
+.sb-plugload.done {
+  color: var(--ok-text);
+}
+
+.sb-plug-spin {
+  display: inline-flex;
+  color: var(--accent);
+  animation: app-spin 1.1s linear infinite;
+}
+:root[data-motion="off"] .sb-plug-spin {
+  animation: none; /* status still shows; only the rotation stops */
+}

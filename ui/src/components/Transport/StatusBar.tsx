@@ -11,6 +11,7 @@ import { useStore } from "../../store/store";
 import { getEngineStatus } from "../../store/actions";
 import PositionDisplay from "./PositionDisplay";
 import MidiActivityChip from "./MidiActivityChip";
+import PluginLoadingChip from "./PluginLoadingChip";
 import { SnapCluster, TempoSigCluster } from "./TransportBar";
 import "./transport.css";
 
@@ -75,6 +76,7 @@ export default function StatusBar() {
 
       <span className="grow" />
 
+      <PluginLoadingChip />
       <MidiActivityChip />
       <span className="sb-item" title="Audio driver / device">
         <span className="sb-value">{driver}</span>
