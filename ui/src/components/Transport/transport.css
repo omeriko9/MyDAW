@@ -556,3 +556,61 @@
 .big-clock:hover .big-clock-close {
   opacity: 1;
 }
+
+/* ============================================================================
+ * MidiActivityChip (status bar) — "the DAW hears your keyboard"
+ * ==========================================================================*/
+
+.sb-midi {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.sb-midi:hover {
+  color: var(--text-dim);
+  background: var(--panel2);
+}
+
+.sb-midi-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--groove);
+  border: 1px solid var(--border-light);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.sb-midi.ok {
+  color: var(--text);
+}
+.sb-midi.ok .sb-midi-led {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.sb-midi.warn {
+  color: var(--warn-text);
+  background: var(--warn-soft);
+}
+.sb-midi.warn .sb-midi-led {
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.sb-midi-dev {
+  max-width: 140px;
+  color: var(--text-dim);
+}
+.sb-midi-hint {
+  font-weight: 700;
+}

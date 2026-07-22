@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import { useStore } from "../../store/store";
 import { getEngineStatus } from "../../store/actions";
 import PositionDisplay from "./PositionDisplay";
+import MidiActivityChip from "./MidiActivityChip";
 import { SnapCluster, TempoSigCluster } from "./TransportBar";
 import "./transport.css";
 
@@ -74,6 +75,7 @@ export default function StatusBar() {
 
       <span className="grow" />
 
+      <MidiActivityChip />
       <span className="sb-item" title="Audio driver / device">
         <span className="sb-value">{driver}</span>
         {device ? <span className="ellipsis" style={{ maxWidth: 180 }}>{device}</span> : null}
