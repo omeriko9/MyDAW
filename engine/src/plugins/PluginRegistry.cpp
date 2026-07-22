@@ -121,8 +121,12 @@ void PluginRegistry::refreshFlagsLocked() const {
         return;
     for (PluginInfo& p : entries_) {
         BlacklistEntry e;
-        if (blacklist_->find(p.path, e) ||
-            (!p.uid.empty() && blacklist_->find(p.uid, e))) {
+        // PATH-granular on purpose: matching by uid too flagged every variant of a
+        // plugin at once (same uid scanned from several folders/dlls) — disabling one
+        // Addictive Drums row disabled all four. The blacklist is path-keyed (SPEC
+        // §8.3, the scanner skips PATHS), and path-surrogate uids still match via the
+        // entry's path.
+        if (blacklist_->find(p.path, e)) {
             p.blacklisted = true;
             p.blacklistReason = e.reason;
         } else {

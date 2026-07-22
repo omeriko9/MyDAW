@@ -267,7 +267,35 @@
   cursor: help;
 }
 
-.pm-td-actions { width: 84px; text-align: right; }
+.pm-td-actions { width: 56px; text-align: right; }
+
+/* round icon action button: neutral at rest, red = will disable, green = will enable */
+.pm-ibtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.pm-ibtn:disabled { opacity: 0.5; cursor: default; }
+.pm-ibtn.disable:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger-text, var(--danger));
+  background: var(--danger-soft);
+}
+.pm-ibtn.enable {
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+  color: var(--ok);
+}
+.pm-ibtn.enable:hover:not(:disabled) {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+}
 
 .pm-btn {
   display: inline-flex;
@@ -285,16 +313,6 @@
 }
 .pm-btn:hover:not(:disabled) { border-color: var(--accent); }
 .pm-btn:disabled { opacity: 0.5; cursor: default; }
-.pm-btn-disable:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger-text, var(--danger));
-  background: var(--danger-soft);
-}
-.pm-btn-enable {
-  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
-  color: var(--ok);
-}
-.pm-btn-enable:hover:not(:disabled) { border-color: var(--ok); }
 
 .pm-empty {
   padding: 48px 0;

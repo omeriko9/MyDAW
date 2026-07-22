@@ -133,8 +133,9 @@ export default function PluginManagerPage() {
     (p: PluginInfo) => {
       const key = rowKey(p);
       setBusyKey(key);
-      // unblacklist matches uid exactly OR path (covers path-surrogate uids)
-      unblacklistPlugin(p.uid !== "" ? p.uid : p.path)
+      // PATH first for single-variant granularity (removeByUid also matches entry
+      // paths); uid only as a fallback for rows without one.
+      unblacklistPlugin(p.path !== "" ? p.path : p.uid)
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
         .finally(() => setBusyKey((k) => (k === key ? null : k)));
     },
@@ -348,22 +349,22 @@ export default function PluginManagerPage() {
                     {p.format === "builtin" ? null : p.blacklisted ? (
                       <button
                         type="button"
-                        className="pm-btn pm-btn-enable"
+                        className="pm-ibtn enable"
                         disabled={busy || connState !== "open"}
                         onClick={() => enable(p)}
-                        title={`Remove from the blacklist${p.blacklistReason ? ` (was: ${p.blacklistReason})` : ""}`}
+                        title={`Enable this plugin — remove it from the blacklist${p.blacklistReason ? ` (was: ${p.blacklistReason})` : ""}`}
                       >
-                        Enable
+                        <Icon name="power" size={14} />
                       </button>
                     ) : (
                       <button
                         type="button"
-                        className="pm-btn pm-btn-disable"
+                        className="pm-ibtn disable"
                         disabled={busy || connState !== "open"}
                         onClick={() => disable(p)}
-                        title="Disable this plugin (adds it to the blacklist — reversible)"
+                        title="Disable this plugin — adds only THIS file to the blacklist (reversible; other variants stay enabled)"
                       >
-                        Disable
+                        <Icon name="power" size={14} />
                       </button>
                     )}
                   </td>
@@ -390,8 +391,9 @@ export default function PluginManagerPage() {
         </span>
         <span className="pm-spacer" />
         <span className="pm-faint">
-          Disable adds a plugin to MyDAW's persistent blacklist (never touches files on disk);
-          Enable removes it again. Changes apply to all open windows immediately.
+          ⏻ disables/enables a single file via MyDAW's persistent blacklist (nothing on disk
+          is touched); other variants of the same plugin stay as they are. Changes apply to
+          all open windows immediately.
         </span>
       </footer>
     </div>
