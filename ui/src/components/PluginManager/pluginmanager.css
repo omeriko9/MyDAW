@@ -1,0 +1,330 @@
+/* Plugin Manager page (?page=plugins) — full-page registry table.
+   Uses the shared theme palette (lib/theme.css); light/dark follow the DAW's theme
+   pref, which the page shares via localStorage + main.tsx's initTheme(). */
+
+.pm-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  user-select: text; /* a reference page — text should be copyable */
+  overflow: hidden;
+}
+
+/* ---- header -------------------------------------------------------------- */
+
+.pm-header {
+  flex: 0 0 auto;
+  padding: 14px 22px 0 22px;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.pm-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pm-title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.pm-conn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.pm-conn.open { color: var(--ok); }
+.pm-conn.closed { color: var(--danger); }
+
+.pm-spacer { flex: 1 1 auto; }
+
+.pm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+}
+
+.pm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.pm-chip:hover { color: var(--text); border-color: var(--accent); }
+.pm-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.pm-chip-count { font-weight: 650; }
+.pm-chip.inst.active { border-color: var(--pm-inst); }
+.pm-chip.fx.active { border-color: var(--pm-fx); }
+.pm-chip.bl.active { border-color: var(--danger); background: var(--danger-soft); }
+.pm-chip.b32.active { border-color: var(--warn); background: var(--warn-soft); }
+
+.pm-search {
+  flex: 1 1 220px;
+  min-width: 160px;
+  max-width: 380px;
+  margin-left: auto;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--text);
+  outline: none;
+}
+.pm-search:focus { border-color: var(--accent); }
+
+.pm-scanline {
+  position: relative;
+  height: 22px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  overflow: hidden;
+}
+.pm-scanbar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft);
+  transition: width 160ms linear;
+}
+.pm-scantext {
+  position: relative;
+  display: block;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-error {
+  margin-bottom: 8px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  border: 1px solid var(--danger-border, var(--danger));
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger-text, var(--danger));
+  cursor: pointer;
+}
+
+/* ---- table --------------------------------------------------------------- */
+
+.pm-main {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 0 22px;
+}
+
+.pm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pm-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 10px 6px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.pm-th:hover { color: var(--text); }
+.pm-th-fav, .pm-th-actions { cursor: default; }
+.pm-sort { margin-left: 4px; font-size: 8px; color: var(--accent); }
+
+.pm-row { border-bottom: 1px solid var(--border); }
+.pm-row:hover { background: var(--panel); }
+
+/* colored identity strip on the name cell, per row kind */
+.pm-row { --pm-row-color: var(--text-dim); }
+.pm-row.instrument { --pm-row-color: var(--pm-inst); }
+.pm-row.effect { --pm-row-color: var(--pm-fx); }
+.pm-row.blacklisted { --pm-row-color: var(--danger); }
+.pm-row.blacklisted .pm-name,
+.pm-row.blacklisted .pm-td { color: var(--text-dim); }
+.pm-row.blacklisted { background: color-mix(in srgb, var(--danger-soft) 32%, transparent); }
+.pm-row.blacklisted:hover { background: var(--danger-soft); }
+
+.pm-td {
+  padding: 7px 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.pm-td-fav { width: 30px; padding-right: 0; }
+.pm-fav {
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.pm-fav:hover { opacity: 1; }
+.pm-fav.on { color: var(--warn); opacity: 1; }
+
+.pm-td-name {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pm-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--pm-row-color);
+  vertical-align: 1px;
+}
+.pm-name { font-weight: 600; color: var(--text); }
+.pm-file {
+  margin-left: 8px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.pm-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.pm-badge.inst { color: var(--pm-inst); border-color: color-mix(in srgb, var(--pm-inst) 45%, var(--border)); }
+.pm-badge.fx { color: var(--pm-fx); border-color: color-mix(in srgb, var(--pm-fx) 45%, var(--border)); }
+.pm-badge.fmt-vst2 { color: var(--text-dim); }
+.pm-badge.fmt-vst3 { color: var(--text); }
+.pm-badge.fmt-builtin { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.pm-badge.b32 { color: var(--warn-text, var(--warn)); border-color: var(--warn-border, var(--warn)); background: var(--warn-soft); }
+.pm-badge.b64 { color: var(--text-dim); }
+
+.pm-td-vendor { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.pm-td-io { font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px; color: var(--text-dim); }
+
+.pm-td-folder {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* ellipsis at the START — the leaf folder is the interesting part */
+  text-align: left;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.pm-status.ok { color: var(--ok); font-weight: 600; }
+.pm-status.bad {
+  color: var(--danger-text, var(--danger));
+  font-weight: 650;
+  border-bottom: 1px dotted currentColor; /* hints at the reason tooltip */
+  cursor: help;
+}
+
+.pm-td-actions { width: 84px; text-align: right; }
+
+.pm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--text);
+  cursor: pointer;
+}
+.pm-btn:hover:not(:disabled) { border-color: var(--accent); }
+.pm-btn:disabled { opacity: 0.5; cursor: default; }
+.pm-btn-disable:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger-text, var(--danger));
+  background: var(--danger-soft);
+}
+.pm-btn-enable {
+  border-color: color-mix(in srgb, var(--ok) 50%, var(--border));
+  color: var(--ok);
+}
+.pm-btn-enable:hover:not(:disabled) { border-color: var(--ok); }
+
+.pm-empty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.pm-faint { color: var(--text-dim); }
+
+/* ---- footer -------------------------------------------------------------- */
+
+.pm-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 22px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+/* kind accents: readable on every theme (slate/sepia/light/dark) */
+:root {
+  --pm-inst: #a06ee8; /* instruments — matches the piano/instrument purple family */
+  --pm-fx: #4dc3cd;   /* effects — teal */
+}
+:root[data-theme="light"] .pm-page,
+:root[data-theme="sepia"] .pm-page {
+  --pm-inst: #7b46c8;
+  --pm-fx: #1f8e98;
+}

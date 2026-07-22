@@ -542,6 +542,17 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
           disabled={groupBy === "flat" || groupKeys.length === 0}
           onClick={() => setAllCollapsed(!allCollapsed)}
         />
+        <IconButton
+          icon="link"
+          size={22}
+          tooltip="Open the Plugin Manager in a new browser tab"
+          onClick={() => {
+            const url = new URL(window.location.href);
+            url.search = "?page=plugins";
+            url.hash = "";
+            window.open(url.toString(), "_blank", "noopener");
+          }}
+        />
       </div>
 
       <div className="browser-listwrap col">

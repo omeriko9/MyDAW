@@ -1145,7 +1145,25 @@ json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
     }
     if (type == "plugins/unblacklist") {
         const std::string uid = getOr(p, "uid", "");
-        return json{{"removed", app_.blacklist.removeByUid(uid)}};
+        const bool removed = app_.blacklist.removeByUid(uid);
+        if (removed) // every window's registry view refreshes (incl. the manager page)
+            app_.broadcastEvent("event/scanDone", json{{"registry", app_.registry.listJson()}});
+        return json{{"removed", removed}};
+    }
+    if (type == "plugins/blacklist") {
+        // Manual disable (plugin manager page): the same persistent blacklist the
+        // scanner uses for crashers, so the plugin vanishes from every picker until
+        // the user unblacklists it. Path is the blacklist's primary key.
+        const std::string uid = getOr(p, "uid", "");
+        const std::string path = getOr(p, "path", "");
+        if (uid.empty() && path.empty()) {
+            ec = "bad_request";
+            em = "uid or path required";
+            return json();
+        }
+        app_.blacklist.add(uid, path, getOr(p, "reason", std::string("disabled by user")));
+        app_.broadcastEvent("event/scanDone", json{{"registry", app_.registry.listJson()}});
+        return json{{"added", true}};
     }
     if (type == "plugins/recreate") // §5.6: resource resolution; UNDOABLE (pushes an entry)
         return app_.cmd->recreatePlugins(p, ec, em);

@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "927c0d3cbcde7f6b858750e2ac34dceac616873a79bd1e457d742e0558d8b9f1";
+export const AGENT_CATALOG_SHA256 = "80f8d49a909442b83b0e012724d95b9b9b8a1cb74adcb7126ff0cfb44c6d7aaf";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2476,6 +2476,22 @@ export const AGENT_CATALOG: AgentCatalog = {
         "instanceId",
         "patch"
       ],
+      "type": "object"
+    },
+    "PluginsBlacklistRequest": {
+      "additionalProperties": false,
+      "description": "Manual disable. Path is the blacklist's primary key; uid alone also works for registry rows with real uids. At least one must be present.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "PluginsFolders": {
@@ -6952,6 +6968,45 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "plugins/blacklist",
+      "category": "plugins",
+      "description": "Manually disable a plugin: add it to the persistent scanner blacklist (reversible via plugins/unblacklist).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsBlacklistRequest"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "added": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "added"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/VST/OldSynth.dll",
+            "uid": "vst2:1234567890",
+            "reason": "disabled by user"
+          }
+        }
+      ]
+    },
+    {
       "name": "plugins/getDefaultFolders",
       "category": "plugins",
       "description": "Read platform-default VST2 and VST3 search folders.",
@@ -8643,6 +8698,7 @@ export const ENGINE_OPERATION_NAMES = [
   "plugin/loadPreset",
   "plugin/openEditor",
   "plugin/savePreset",
+  "plugins/blacklist",
   "plugins/getDefaultFolders",
   "plugins/getFolders",
   "plugins/getRegistry",
@@ -9077,6 +9133,10 @@ export const REQUEST_COVERAGE = {
   "plugins/unblacklist": {
     "kind": "operation",
     "operation": "plugins/unblacklist"
+  },
+  "plugins/blacklist": {
+    "kind": "operation",
+    "operation": "plugins/blacklist"
   },
   "plugins/recreate": {
     "kind": "operation",
@@ -9801,6 +9861,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "instanceId": 31,
       "name": "Bright Lead"
+    }
+  ],
+  "plugins/blacklist": [
+    {
+      "path": "C:/VST/OldSynth.dll",
+      "uid": "vst2:1234567890",
+      "reason": "disabled by user"
     }
   ],
   "plugins/getDefaultFolders": [

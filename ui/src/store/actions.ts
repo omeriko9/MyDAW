@@ -333,6 +333,14 @@ export const getDefaultPluginFolders = () => ws.request("plugins/getDefaultFolde
 
 export const unblacklistPlugin = (uid: string) => ws.request("plugins/unblacklist", { uid });
 
+/** Manual disable (plugin manager): persists in the scanner blacklist until unblacklisted. */
+export const blacklistPlugin = (path: string, uid?: string, reason?: string) =>
+  ws.request("plugins/blacklist", {
+    path,
+    ...(uid ? { uid } : {}),
+    ...(reason ? { reason } : {}),
+  });
+
 /**
  * Recreate unresolved inserts from the current registry — omitted instanceIds = ALL
  * unresolved. Undoable; the engine broadcasts event/projectChanged on success.

@@ -2450,6 +2450,22 @@
       ],
       "type": "object"
     },
+    "PluginsBlacklistRequest": {
+      "additionalProperties": false,
+      "description": "Manual disable. Path is the blacklist's primary key; uid alone also works for registry rows with real uids. At least one must be present.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "PluginsFolders": {
       "additionalProperties": false,
       "properties": {
@@ -6919,6 +6935,45 @@
           "input": {
             "instanceId": 31,
             "name": "Bright Lead"
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/blacklist",
+      "category": "plugins",
+      "description": "Manually disable a plugin: add it to the persistent scanner blacklist (reversible via plugins/unblacklist).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsBlacklistRequest"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "added": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "added"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/VST/OldSynth.dll",
+            "uid": "vst2:1234567890",
+            "reason": "disabled by user"
           }
         }
       ]

@@ -1200,6 +1200,16 @@ export interface PluginsUnblacklistRequest {
 }
 
 /**
+ * Manual disable (plugin manager page). Path is the blacklist's primary key; uid alone
+ * also works for registry rows with real uids. At least one must be present.
+ */
+export interface PluginsBlacklistRequest {
+  uid?: string;
+  path?: string;
+  reason?: string;
+}
+
+/**
  * Recreate-plugins flow (pinned wire contract). An insert is "unresolved" when it exists
  * in the project model with NO live host instance (typical after Import Project).
  */
@@ -1606,6 +1616,7 @@ export interface RequestMap {
   "plugins/getFolders": { req: EmptyObject; reply: PluginsFolders };
   "plugins/getDefaultFolders": { req: EmptyObject; reply: PluginsFolders };
   "plugins/unblacklist": { req: PluginsUnblacklistRequest; reply: EmptyObject };
+  "plugins/blacklist": { req: PluginsBlacklistRequest; reply: { added: boolean } };
   "plugins/recreate": { req: PluginsRecreateRequest; reply: PluginsRecreateReply };
   "cmd/plugin.add": { req: PluginAddRequest; reply: PluginAddReply };
   "cmd/plugin.remove": { req: PluginRemoveRequest; reply: EmptyObject };
@@ -1810,6 +1821,7 @@ export const PluginsMsg = {
   getFolders: "plugins/getFolders",
   getDefaultFolders: "plugins/getDefaultFolders",
   unblacklist: "plugins/unblacklist",
+  blacklist: "plugins/blacklist",
   recreate: "plugins/recreate",
 } as const satisfies Record<string, RequestType>;
 
