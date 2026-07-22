@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "70935b2a9f842a08f3be25c5e11ad45d7f0244f6c5fc5c2dc0bfab346ec5d09a";
+export const AGENT_CATALOG_SHA256 = "927c0d3cbcde7f6b858750e2ac34dceac616873a79bd1e457d742e0558d8b9f1";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2681,9 +2681,34 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "ProjectImportForeignReply": {
+      "additionalProperties": false,
+      "description": "Load/import reply. warnings = importer skip notes (foreign paths); missingAssets = asset ids a native load could not resolve.",
+      "properties": {
+        "missingAssets": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "project": {
+          "$ref": "#/schemas/Project"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
     "ProjectImportForeignRequest": {
       "additionalProperties": false,
-      "description": "Errors: \"no_provider\" | \"import_failed\". Reply carries {project}; adoption ≙ project/load.",
+      "description": "Errors: \"no_provider\" | \"import_failed\". Reply carries {project, warnings?}; adoption ≙ project/load.",
       "properties": {
         "path": {
           "type": "string"
@@ -3101,6 +3126,10 @@ export const AGENT_CATALOG: AgentCatalog = {
     "Track": {
       "additionalProperties": false,
       "properties": {
+        "activeVersionId": {
+          "description": "id of the active track version; present iff versions is non-empty.",
+          "type": "number"
+        },
         "automation": {
           "items": {
             "$ref": "#/schemas/AutomationLane"
@@ -3200,6 +3229,13 @@ export const AGENT_CATALOG: AgentCatalog = {
         "vcaId": {
           "description": "VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader.",
           "type": "number"
+        },
+        "versions": {
+          "description": "track versions (alternative playlists; optional, absent = feature not engaged).",
+          "items": {
+            "$ref": "#/schemas/TrackVersion"
+          },
+          "type": "array"
         },
         "volume": {
           "description": "linear, 1 = 0 dB",
@@ -3538,6 +3574,37 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "required": [
         "trackId"
+      ],
+      "type": "object"
+    },
+    "TrackVersion": {
+      "additionalProperties": false,
+      "description": "Cubase-style track version (alternative playlist). The entry whose id equals Track.activeVersionId is a name-only placeholder — the active material lives in Track.clips/Track.takeFolders; only inactive entries carry parked clips/takeFolders.",
+      "properties": {
+        "clips": {
+          "items": {
+            "$ref": "#/schemas/Clip"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "takeFolders": {
+          "items": {
+            "$ref": "#/schemas/TakeFolder"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "clips",
+        "takeFolders"
       ],
       "type": "object"
     },
@@ -5855,6 +5922,230 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/version.add",
+      "category": "versions",
+      "description": "Create a new track version and switch to it; copy=true clones the current material.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "versionId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "copy": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "track": {
+            "$ref": "#/schemas/Track"
+          },
+          "versionId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "versionId",
+          "track"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "name": "Vocal take B"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/version.delete",
+      "category": "versions",
+      "description": "Delete an inactive track version and its parked clips.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "version"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "versionId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "versionId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "versionId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/version.rename",
+      "category": "versions",
+      "description": "Rename a track version.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "version"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "trackId": {
+            "type": "number"
+          },
+          "versionId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "versionId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "versionId": 31,
+            "name": "Chorus alt"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/version.switch",
+      "category": "versions",
+      "description": "Make another track version active; the current material parks into its version entry.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "version"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "versionId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "versionId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "track": {
+            "$ref": "#/schemas/Track"
+          }
+        },
+        "required": [
+          "track"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7,
+            "versionId": 31
+          }
+        }
+      ]
+    },
+    {
       "name": "dialog/importFiles",
       "category": "dialogs",
       "description": "Ask the user for one or more media files using the native picker.",
@@ -6918,7 +7209,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         "$ref": "#/schemas/ProjectImportForeignRequest"
       },
       "output": {
-        "$ref": "#/schemas/ProjectReply"
+        "$ref": "#/schemas/ProjectImportForeignReply"
       },
       "examples": [
         {
@@ -6946,7 +7237,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         "$ref": "#/schemas/ProjectLoadRequest"
       },
       "output": {
-        "$ref": "#/schemas/ProjectReply"
+        "$ref": "#/schemas/ProjectImportForeignReply"
       },
       "examples": [
         {
@@ -6974,7 +7265,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         "$ref": "#/schemas/ProjectLoadRecentRequest"
       },
       "output": {
-        "$ref": "#/schemas/ProjectReply"
+        "$ref": "#/schemas/ProjectImportForeignReply"
       },
       "examples": [
         {
@@ -8321,6 +8612,10 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/vca.add",
   "cmd/vca.remove",
   "cmd/vca.set",
+  "cmd/version.add",
+  "cmd/version.delete",
+  "cmd/version.rename",
+  "cmd/version.switch",
   "dialog/importFiles",
   "dialog/importProject",
   "dialog/openProject",
@@ -8436,7 +8731,11 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/track.unfreeze",
   "cmd/vca.add",
   "cmd/vca.remove",
-  "cmd/vca.set"
+  "cmd/vca.set",
+  "cmd/version.add",
+  "cmd/version.delete",
+  "cmd/version.rename",
+  "cmd/version.switch"
 ] as const satisfies readonly EngineOperationName[];
 
 export type EngineOperationName = (typeof ENGINE_OPERATION_NAMES)[number];
@@ -8838,6 +9137,22 @@ export const REQUEST_COVERAGE = {
   "cmd/take.flatten": {
     "kind": "operation",
     "operation": "cmd/take.flatten"
+  },
+  "cmd/version.add": {
+    "kind": "operation",
+    "operation": "cmd/version.add"
+  },
+  "cmd/version.switch": {
+    "kind": "operation",
+    "operation": "cmd/version.switch"
+  },
+  "cmd/version.rename": {
+    "kind": "operation",
+    "operation": "cmd/version.rename"
+  },
+  "cmd/version.delete": {
+    "kind": "operation",
+    "operation": "cmd/version.delete"
   },
   "midimap/learn": {
     "kind": "operation",
@@ -9323,6 +9638,31 @@ export const ENGINE_OPERATION_EXAMPLES = {
         "gain": 0.9,
         "name": "Band VCA"
       }
+    }
+  ],
+  "cmd/version.add": [
+    {
+      "trackId": 7,
+      "name": "Vocal take B"
+    }
+  ],
+  "cmd/version.delete": [
+    {
+      "trackId": 7,
+      "versionId": 31
+    }
+  ],
+  "cmd/version.rename": [
+    {
+      "trackId": 7,
+      "versionId": 31,
+      "name": "Chorus alt"
+    }
+  ],
+  "cmd/version.switch": [
+    {
+      "trackId": 7,
+      "versionId": 31
     }
   ],
   "dialog/importFiles": [

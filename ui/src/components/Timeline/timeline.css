@@ -140,6 +140,7 @@
   min-height: 26px;
   padding: 1px 4px 0 0;
   min-width: 0;
+  flex-shrink: 0; /* overflowing rows CLIP at the row edge — never squash */
 }
 
 .tlh-row-controls {
@@ -151,6 +152,7 @@
   /* wrap: deeply nested folders indent this row — M/S/R must stay reachable */
   flex-wrap: wrap;
   overflow: hidden;
+  flex-shrink: 0; /* a wrapped second line clips below the row instead of squashing */
 }
 
 .tlh-color {
@@ -221,6 +223,94 @@
   padding: 0 4px;
   font-size: 10px;
   border-radius: var(--radius-sm);
+}
+
+/* active track-version chip (row 1, next to the name) — quiet pill, accent on hover */
+.tlh-version-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 72px;
+  height: 15px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 9.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tlh-version-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.tlh-version-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 3rd header row: instrument picker (instrument tracks / MIDI feeders, tall rows).
+   Deliberately quieter than the M/S/R chrome — it reads as part of the row until
+   hovered, then reveals itself as a dropdown. */
+.tlh-row-inst {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 4px 0 0;
+  flex-shrink: 0; /* clip, don't squash (matches the rows above) */
+}
+.tlh-inst-btn {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.tlh-inst-btn:hover:not(:disabled) {
+  background: var(--panel3);
+  border-color: var(--border);
+  color: var(--text);
+}
+.tlh-inst-btn:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.tlh-inst-readonly {
+  cursor: default;
+  opacity: 0.75;
+}
+/* specificity must beat .tlh-inst-btn:hover:not(:disabled) above */
+.tlh-inst-btn.tlh-inst-readonly:hover {
+  background: transparent; /* not interactive — no dropdown affordance */
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.tlh-inst-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tlh-inst-caret {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+.tlh-inst-btn:hover:not(:disabled) .tlh-inst-caret {
+  opacity: 1;
 }
 
 .tlh-resize {

@@ -1318,6 +1318,39 @@ bool isTrackRecord(const std::string& n) {
            n != "MAutomationTrackEvent";
 }
 
+// Human label for a skipped track class (import warnings). "device channel" is the
+// fall-through label the caller treats as LOG-ONLY (hidden carriers). MDeviceTrackEvent is
+// several track types in one class — the containing folder disambiguates (verified
+// on the cubase13_all_tracks.cpr corpus: "FX Channels" / "Group Tracks" /
+// "VCA Tracks" folders; anything else — hidden IO carriers, SX rack/automation
+// carriers — falls through). Unknown classes echo verbatim so nothing hides behind
+// a bad label.
+std::string skippedTrackLabel(const std::string& cls, const std::string& parentName,
+                              const std::string& trackName) {
+    if (cls == "MDeviceTrackEvent") {
+        if (parentName == "VCA Tracks")
+            return "VCA fader";
+        if (parentName == "FX Channels" || (!trackName.empty() && trackName[0] == '#'))
+            return "FX channel";
+        if (parentName == "Group Tracks")
+            return "Group channel";
+        return "device channel";
+    }
+    if (cls == "MSamplerTrackEvent")
+        return "Sampler track";
+    if (cls == "MMarkerTrackEvent")
+        return "Marker track";
+    if (cls == "MPlayRangeTrackEvent" || cls == "MArrangeTrackEvent")
+        return "Arranger track"; // C13 uses MPlayRangeTrackEvent; older eras may differ
+    if (cls == "MChordTrackEvent")
+        return "Chord track";
+    if (cls == "MTransposeTrackEvent")
+        return "Transpose track";
+    if (cls == "MVideoTrackEvent")
+        return "Video track";
+    return cls;
+}
+
 // Decode an SX MIDI track's output routing (CPR_MIXER_FORMAT.md §7.7). The "Track Device"
 // sub-object is the direct-child MMidiTrack record of the MMidiTrackEvent; its body is:
 //   u16 connectionType(=3), lpstr Device Name, <3 B pad>, lpstr Port Name,
@@ -1389,7 +1422,8 @@ void decodeSxMidiRoute(CprCtx& c, const Rec& mte, std::string& deviceOut, int& c
 // Iterate top-level track records in [rangeStart, rangeEnd) by byte-range containment
 // (a cursor skips records nested inside a previously consumed track). Folders recurse.
 void buildTracks(CprCtx& c, const std::vector<const Rec*>& trackRecs, size_t rangeStart,
-                 size_t rangeEnd, uint64_t parentId, int depth) {
+                 size_t rangeEnd, uint64_t parentId, int depth,
+                 const std::string& parentName = std::string()) {
     if (depth > 16)
         return;
     size_t pos = rangeStart;
@@ -1398,14 +1432,8 @@ void buildTracks(CprCtx& c, const std::vector<const Rec*>& trackRecs, size_t ran
             continue;
         pos = k->dataEnd;
 
-        const CprTrackKind kind = classifyTrack(k->name);
-        if (kind == CprTrackKind::Skip) {
-            ++c.tracksSkipped;
-            c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0});
-            continue;
-        }
-
-        // Track name: first MListNode (non-folder) / MTrackList (folder) inside.
+        // Track name: first MListNode (non-folder) / MTrackList (folder) inside —
+        // read BEFORE classification so skip warnings can carry the user's name.
         std::string name;
         for (const Rec& r : c.recs) {
             if (r.hdrOff > k->dataStart && r.dataEnd <= k->dataEnd &&
@@ -1413,6 +1441,31 @@ void buildTracks(CprCtx& c, const std::vector<const Rec*>& trackRecs, size_t ran
                 name = readLpstr(c.b, r.dataStart, r.dataEnd).text;
                 break;
             }
+        }
+
+        const CprTrackKind kind = classifyTrack(k->name);
+        if (kind == CprTrackKind::Skip) {
+            ++c.tracksSkipped;
+            c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0});
+            const std::string label = skippedTrackLabel(k->name, parentName, name);
+            if (label == "device channel") {
+                // Generic device carriers are NOT user-visible tracks: modern
+                // projects hide input/output bus carriers here (under a possibly
+                // LOCALIZED folder name — never key suppression on the English
+                // string), and SX-era projects park rack-VSTi / mixer automation
+                // carriers whose channel content IS imported by the rack + mixer
+                // passes. Toasting them names things the user never saw or can see
+                // alive after the import — log-only.
+                Log::info("cpr import: skipped device carrier '%s' (parent folder '%s')",
+                          name.c_str(), parentName.c_str());
+            } else if (c.ictx.warnings) {
+                c.ictx.warnings->push_back(
+                    name.empty()
+                        ? ("Skipped a " + label + " — this track type isn't supported yet")
+                        : ("Skipped track \"" + name + "\" — " + label +
+                           "s aren't supported yet"));
+            }
+            continue;
         }
 
         // MyDAW's own .cpr exports rename the donor's tempo-carrier track to this
@@ -1433,10 +1486,12 @@ void buildTracks(CprCtx& c, const std::vector<const Rec*>& trackRecs, size_t ran
             t.kind = TrackKind::Folder;
             t.name = !name.empty() ? name : "Folder";
             const uint64_t folderId = t.id;
+            const std::string folderName = t.name; // survives the move below
             c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0}); // no inserts
             c.model.project.tracks.push_back(std::move(t));
             const size_t before = c.model.project.tracks.size();
-            buildTracks(c, trackRecs, k->dataStart, k->dataEnd, folderId, depth + 1);
+            buildTracks(c, trackRecs, k->dataStart, k->dataEnd, folderId, depth + 1,
+                        folderName);
             if (c.model.project.tracks.size() == before) {
                 // Nothing importable inside (e.g. Cubase device/IO folders) — drop it.
                 c.model.project.tracks.pop_back();
@@ -3490,6 +3545,19 @@ bool CprImportProvider::import(const std::string& absPath, const ImportContext& 
         if (isTrackRecord(r.name) && r.hdrOff >= tl->dataStart && r.dataEnd <= tl->dataEnd)
             trackRecs.push_back(&r);
     buildTracks(c, trackRecs, tl->dataStart, tl->dataEnd, 0, 0);
+    // Ruler tracks (MTimeScaleTrack) lack the "TrackEvent" suffix, so they never
+    // reach buildTracks — count and report them here (they are view-only in Cubase;
+    // there is nothing to import, but the user should know they existed).
+    if (ctx.warnings) {
+        int rulers = 0;
+        for (const Rec& r : walker->recs)
+            if (r.name == "MTimeScaleTrack" && r.hdrOff >= tl->dataStart &&
+                r.dataEnd <= tl->dataEnd)
+                ++rulers;
+        if (rulers > 0)
+            ctx.warnings->push_back("Skipped " + std::to_string(rulers) + " ruler track" +
+                                    (rulers == 1 ? "" : "s") + " (view-only in Cubase)");
+    }
     if (ctx.progress)
         ctx.progress(0.85f);
 

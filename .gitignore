@@ -10,6 +10,7 @@ _deps/
 *.pdb
 *.ilk
 npm-debug.log*
+*.tsbuildinfo
 *.timestamp-*.mjs
 .cache/
 *.tmp.*

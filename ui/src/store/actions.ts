@@ -412,6 +412,17 @@ export const setTakeComp = (
 export const flattenTake = (trackId: number, folderId: number) =>
   ws.request("cmd/take.flatten", { trackId, folderId });
 
+/* ---- track versions (alternative playlists) ---- */
+/** Create a new version and switch to it; copy=true clones the current material. */
+export const addTrackVersion = (trackId: number, opts?: { name?: string; copy?: boolean }) =>
+  ws.request("cmd/version.add", { trackId, ...(opts?.name ? { name: opts.name } : {}), ...(opts?.copy ? { copy: true } : {}) });
+export const switchTrackVersion = (trackId: number, versionId: number) =>
+  ws.request("cmd/version.switch", { trackId, versionId });
+export const renameTrackVersion = (trackId: number, versionId: number, name: string) =>
+  ws.request("cmd/version.rename", { trackId, versionId, name });
+export const deleteTrackVersion = (trackId: number, versionId: number) =>
+  ws.request("cmd/version.delete", { trackId, versionId });
+
 export const getPluginParams = (instanceId: number) =>
   ws.request("plugin/getParams", { instanceId });
 

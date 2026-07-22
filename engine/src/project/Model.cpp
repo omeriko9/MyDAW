@@ -54,6 +54,25 @@ std::vector<std::pair<uint64_t, bool>> computeEffectiveMutes(const Model& m) {
 }
 
 namespace {
+void scanClipIds(const Clip& c, uint64_t& maxId) {
+    maxId = std::max(maxId, clipId(c));
+    if (const MidiClip* mc = asMidi(&c)) {
+        for (const Note& n : mc->notes)
+            maxId = std::max(maxId, n.id);
+        for (const MidiCc& cc : mc->cc)
+            maxId = std::max(maxId, cc.id);
+    }
+}
+
+void scanTakeFolderIds(const TakeFolder& f, uint64_t& maxId) {
+    maxId = std::max(maxId, f.id);
+    for (const TakeLane& l : f.lanes) {
+        maxId = std::max(maxId, l.id);
+        for (const Clip& c : l.clips)
+            scanClipIds(c, maxId);
+    }
+}
+
 void scanTrackIds(const Track& t, uint64_t& maxId) {
     maxId = std::max(maxId, t.id);
     maxId = std::max(maxId, t.frozenAssetId);
@@ -62,14 +81,20 @@ void scanTrackIds(const Track& t, uint64_t& maxId) {
     for (const AutomationLane& l : t.automation)
         for (const AutomationPoint& pt : l.points)
             maxId = std::max(maxId, pt.id);
-    for (const Clip& c : t.clips) {
-        maxId = std::max(maxId, clipId(c));
-        if (const MidiClip* mc = asMidi(&c)) {
-            for (const Note& n : mc->notes)
-                maxId = std::max(maxId, n.id);
-            for (const MidiCc& cc : mc->cc)
-                maxId = std::max(maxId, cc.id);
-        }
+    for (const Clip& c : t.clips)
+        scanClipIds(c, maxId);
+    // Comping takes hold real clip/lane ids too (previously missed — nextId could
+    // collide with a take-lane clip after load).
+    for (const TakeFolder& f : t.takeFolders)
+        scanTakeFolderIds(f, maxId);
+    // Parked track-version material keeps project-unique ids; skipping it would let
+    // a tolerant load pick a nextId that collides on the next version switch.
+    for (const TrackVersion& v : t.versions) {
+        maxId = std::max(maxId, v.id);
+        for (const Clip& c : v.clips)
+            scanClipIds(c, maxId);
+        for (const TakeFolder& f : v.takeFolders)
+            scanTakeFolderIds(f, maxId);
     }
 }
 } // namespace

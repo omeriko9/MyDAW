@@ -127,7 +127,9 @@ export async function openProjectFlow(): Promise<void> {
     if (!(await autoSaveIfDirty("Open Project"))) return;
     const { path } = await dialogOpenProject();
     if (!path) return; // user cancelled the native dialog
-    await loadProject(path);
+    // Foreign paths (.cpr) re-run the importer — surface its skip warnings here too.
+    const { warnings } = await loadProject(path);
+    showImportWarnings(warnings);
   } catch (e) {
     logFlowError("open project", e);
   }
@@ -136,7 +138,8 @@ export async function openProjectFlow(): Promise<void> {
 export async function loadRecentFlow(path: string): Promise<void> {
   try {
     if (!(await autoSaveIfDirty("Open Recent Project"))) return;
-    await loadRecentProject(path);
+    const { warnings } = await loadRecentProject(path);
+    showImportWarnings(warnings); // re-imported foreign recents skip the same tracks
     // Recents include imported foreign projects (.cpr/.mid) — the engine re-imports
     // those, so run the same post-import plugin loading as Import Project.
     if (/\.(cpr|midi?)$/i.test(path)) await offerPluginRecreation();
@@ -233,6 +236,23 @@ export function importProjectFlow(): void {
 }
 
 /**
+ * Surface provider warnings about content the import recognized but skipped (e.g. Cubase
+ * track types MyDAW doesn't have yet). Long lists collapse — the full list is in the
+ * engine log. Sticky-ish duration: skipped tracks are easy to miss otherwise.
+ */
+function showImportWarnings(warnings: string[] | undefined): void {
+  if (!warnings || warnings.length === 0) return;
+  const MAX_SHOWN = 5;
+  const shown = warnings.slice(0, MAX_SHOWN);
+  const more = warnings.length - shown.length;
+  const lines = shown.map((w) => `• ${w}`);
+  if (more > 0) lines.push(`…and ${more} more (see the engine log for the full list)`);
+  showToast(`Import finished with ${warnings.length === 1 ? "1 warning" : `${warnings.length} warnings`}:\n${lines.join("\n")}`, "info", {
+    durationMs: 12_000,
+  });
+}
+
+/**
  * Import a foreign project file by absolute path — destructive like Open, so the current
  * project auto-saves first. project/importForeign: the engine adopts the imported model (dirty,
  * no save path) and broadcasts the full project via event/projectChanged.
@@ -240,7 +260,8 @@ export function importProjectFlow(): void {
  */
 export async function importForeignPathFlow(path: string): Promise<"imported" | "cancelled"> {
   if (!(await autoSaveIfDirty("Import Project"))) return "cancelled";
-  await importForeignProject(path);
+  const { warnings } = await importForeignProject(path);
+  showImportWarnings(warnings);
   await offerPluginRecreation();
   return "imported";
 }
@@ -316,7 +337,8 @@ export async function importPickedPaths(paths: string[]): Promise<ImportPathsRes
   if (projectPaths.length > 0) {
     if (!(await autoSaveIfDirty("Import Project"))) return { kind: "none" };
     const path = projectPaths[0];
-    await importForeignProject(path);
+    const { warnings } = await importForeignProject(path);
+    showImportWarnings(warnings);
     await offerPluginRecreation();
     if (projectPaths.length > 1 || mediaPaths.length > 0)
       console.warn(

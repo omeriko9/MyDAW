@@ -35,6 +35,10 @@ struct ImportContext {
     // caller (project/importForeign) applies them to instances that come alive and keeps
     // the rest in an orphan store so the state survives until the first save (SPEC §5.6).
     std::map<uint64_t, std::vector<uint8_t>>* pluginStates = nullptr;
+    // OPTIONAL out-param (may be null — always null-check): human-readable warnings about
+    // content the provider recognized but could not import (e.g. "Skipped track 'Group 01'
+    // — Group channels aren't supported yet"). Surfaced to the user by the import reply.
+    std::vector<std::string>* warnings = nullptr;
 };
 
 class ImportProvider {

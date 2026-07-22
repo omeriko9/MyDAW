@@ -646,6 +646,8 @@ json Api::importForeignPath(const std::string& path, std::string& ec, std::strin
     ictx.projectDirHint = "";
     ictx.assetStore = &app_.assetStore;
     ictx.pluginStates = &pluginStates;
+    std::vector<std::string> warnings; // skipped tracks etc. — surfaced in the reply
+    ictx.warnings = &warnings;
     App* app = &app_;
     const std::string display = fileName(path);
     ictx.progress = [app, display](float pct) {
@@ -697,7 +699,9 @@ json Api::importForeignPath(const std::string& path, std::string& ec, std::strin
     // Remember the import in Open Recent (re-opening re-imports via loadProjectPath's
     // provider routing). addRecent's temp-dir filter still applies.
     app_.projectIO.addRecent(path, fileName(path));
-    return json{{"project", toJson(app_.model.project)}};
+    for (const std::string& w : warnings)
+        Log::warn("project/importForeign: %s", w.c_str());
+    return json{{"project", toJson(app_.model.project)}, {"warnings", warnings}};
 }
 
 /**

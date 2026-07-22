@@ -328,6 +328,7 @@ void addTrackFields(FieldSet& fields) {
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
         "outputTarget", "frozen", "frozenAssetId", "midiTarget", "vcaId", "eq",
         "clipCount", "insertCount", "sendCount", "automationLaneCount", "takeFolderCount",
+        "activeVersionId", "versions",
     };
     fields.insert(std::begin(names), std::end(names));
 }
@@ -365,6 +366,18 @@ json trackSummary(const Track& track) {
     item["sendCount"] = track.sends.size();
     item["automationLaneCount"] = track.automation.size();
     item["takeFolderCount"] = track.takeFolders.size();
+    if (!track.versions.empty()) {
+        // Enumerable ids so cmd/version.switch/rename/delete can be driven from a
+        // query. Parked material stays summarized — a clipCount per entry suffices.
+        item["activeVersionId"] = track.activeVersionId;
+        json versions = json::array();
+        for (const TrackVersion& v : track.versions)
+            versions.push_back(json{{"id", v.id},
+                                    {"name", v.name},
+                                    {"active", v.id == track.activeVersionId},
+                                    {"clipCount", v.clips.size()}});
+        item["versions"] = std::move(versions);
+    }
     return item;
 }
 

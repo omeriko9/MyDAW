@@ -1867,7 +1867,7 @@ bool mapModel(const Project& p, WriterModel& wm, std::vector<std::string>& warni
         automationSkipped = 0, eqSkipped = 0, takeFoldersSkipped = 0,
         mutedClipsExported = 0, channelNotes = 0, statelessInserts = 0,
         unresolvedAudioClips = 0, mutedAudioExported = 0, audioClipMixSkipped = 0,
-        routedLinked = 0, midiInsertsSkipped = 0;
+        routedLinked = 0, midiInsertsSkipped = 0, inactiveVersionsSkipped = 0;
 
     // Instrument-track ordinals + GUIDs (identity only), so routed MIDI tracks can
     // reference their target with the "<GUID>-<slot>" connection string. Ordinals
@@ -1998,6 +1998,8 @@ bool mapModel(const Project& p, WriterModel& wm, std::vector<std::string>& warni
         if (t.eq.isActive())
             ++eqSkipped;
         takeFoldersSkipped += int(t.takeFolders.size());
+        if (!t.versions.empty()) // only the ACTIVE version's material is exported
+            inactiveVersionsSkipped += int(t.versions.size()) - 1;
 
         if (t.kind == TrackKind::Audio) {
             wt.isAudio = true;
@@ -2112,6 +2114,9 @@ bool mapModel(const Project& p, WriterModel& wm, std::vector<std::string>& warni
         warn(std::to_string(eqSkipped) + " track EQ chain(s) skipped");
     if (takeFoldersSkipped)
         warn(std::to_string(takeFoldersSkipped) + " take folder(s) skipped");
+    if (inactiveVersionsSkipped > 0)
+        warn(std::to_string(inactiveVersionsSkipped) +
+             " inactive track version(s) not exported (only the active version is written)");
     if (mutedClipsExported)
         warn(std::to_string(mutedClipsExported) + " muted MIDI clip(s) exported unmuted");
     if (channelNotes)

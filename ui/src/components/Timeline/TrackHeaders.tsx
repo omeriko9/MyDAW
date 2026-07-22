@@ -19,14 +19,20 @@ import {
   addAudioClip,
   addPlugin,
   addTrack,
+  addTrackVersion,
   bounceTrack,
+  deleteTrackVersion,
   duplicateTrack,
+  removePlugin,
   removeTrack,
+  renameTrackVersion,
   reorderTrack,
   setAutomation,
   setTrack,
+  switchTrackVersion,
   unfreezeTrack,
 } from "../../store/actions";
+import { groupPluginVariants } from "../../lib/pluginVariants";
 import {
   hasAssetDrag,
   hasPluginDrag,
@@ -35,7 +41,7 @@ import {
   uploadFiles,
 } from "../../lib/dnd";
 import { extensionOf, projectOnlyExtensions } from "../Transport/projectFlows";
-import { numberIn, usePrefState } from "../../lib/prefs";
+import { loadPref, numberIn, usePrefState } from "../../lib/prefs";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
@@ -59,7 +65,7 @@ import {
   type Row,
   type TrackRowL,
 } from "./layout";
-import type { AddableTrackKind, Track } from "../../protocol/types";
+import type { AddableTrackKind, PluginInfo, Track } from "../../protocol/types";
 
 export const HEADER_W = 220;
 const DRAG_THRESHOLD_PX = 4;
@@ -105,12 +111,14 @@ export interface TrackHeadersProps {
 }
 
 interface PopoverState {
-  kind: "color" | "rename";
+  kind: "color" | "rename" | "renameVersion";
   trackId: number;
   x: number;
   y: number;
   initial: string;
   current?: string;
+  /** renameVersion only */
+  versionId?: number;
 }
 
 interface ReorderVisual {
@@ -149,6 +157,7 @@ export default function TrackHeaders({
   const project = useStore((s) => s.project);
   const selection = useStore((s) => s.selection);
   const setSelection = useStore((s) => s.setSelection);
+  const registry = useStore((s) => s.registry);
   const lanesExpanded = useAutomationUi((s) => s.expanded);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
@@ -498,6 +507,155 @@ export default function TrackHeaders({
     });
   };
 
+  /* ------------------------------------------------------------ track versions */
+
+  const versionable = (t: Track): boolean =>
+    t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
+
+  const switchVersion = (t: Track, versionId: number): void => {
+    if (versionId === t.activeVersionId) return;
+    // the visible clips are about to be replaced by the parked set — a lingering
+    // clip/note selection would point at material that no longer exists on screen
+    setSelection({ clipIds: [], noteIds: [] });
+    fire(switchTrackVersion(t.id, versionId));
+  };
+
+  const versionMenuItems = (t: Track, x: number, y: number): MenuEntry[] => {
+    const versions = t.versions ?? [];
+    const frozen = !!t.frozen;
+    const items: MenuEntry[] = versions.map((v) => ({
+      label: v.name,
+      checked: v.id === t.activeVersionId,
+      disabled: frozen,
+      onClick: () => switchVersion(t, v.id),
+    }));
+    if (items.length > 0) items.push("separator");
+    items.push(
+      {
+        label: "New Version",
+        icon: "plus",
+        disabled: frozen,
+        title: frozen ? "Unfreeze the track to work with versions" : "Start an empty alternative version of this track",
+        onClick: () => {
+          setSelection({ clipIds: [], noteIds: [] });
+          fire(addTrackVersion(t.id));
+        },
+      },
+      {
+        label: "Duplicate Version",
+        disabled: frozen,
+        title: "New version starting as a copy of the current one",
+        onClick: () => {
+          setSelection({ clipIds: [], noteIds: [] });
+          fire(addTrackVersion(t.id, { copy: true }));
+        },
+      },
+    );
+    const active = versions.find((v) => v.id === t.activeVersionId);
+    if (active)
+      items.push({
+        label: "Rename Version…",
+        icon: "pencil",
+        onClick: () =>
+          setPopover({ kind: "renameVersion", trackId: t.id, versionId: active.id, x, y, initial: active.name }),
+      });
+    const inactive = versions.filter((v) => v.id !== t.activeVersionId);
+    if (inactive.length > 0)
+      items.push({
+        label: "Delete Version",
+        icon: "trash",
+        danger: true,
+        submenu: inactive.map((v) => ({
+          label: v.name,
+          danger: true,
+          onClick: () => {
+            const n = v.clips.length;
+            void confirmDialog({
+              title: "Delete track version",
+              message: `Delete version "${v.name}"${n > 0 ? ` and its ${n} clip${n === 1 ? "" : "s"}` : ""}? This can be undone.`,
+              confirmLabel: "Delete",
+              danger: true,
+            }).then((ok) => {
+              if (ok) fire(deleteTrackVersion(t.id, v.id));
+            });
+          },
+        })),
+      });
+    return items;
+  };
+
+  /* ----------------------------------------------- instrument row (3rd row) */
+
+  const isLiveInstrument = (uid: string): boolean => {
+    const info = registry.find((p) => p.uid === uid);
+    return info ? info.isInstrument : false;
+  };
+
+  /**
+   * The track's instrument insert. Registry-confirmed instruments win; a dormant
+   * imported insert (path "", uid unknown to the registry) in the FIRST slot counts
+   * too on instrument tracks — otherwise picking from the menu would ADD a second
+   * instrument in front of it instead of replacing it.
+   */
+  const instrumentInsertOf = (t: Track) => {
+    const known = t.inserts.find((ins) => isLiveInstrument(ins.uid));
+    if (known) return known;
+    const first = t.inserts[0];
+    if (first && !registry.some((p) => p.uid === first.uid)) return first;
+    return undefined;
+  };
+
+  const openInstrumentPicker = (t: Track, x: number, y: number): void => {
+    const current = instrumentInsertOf(t);
+    const favUids = loadPref<string[]>(
+      "browser.pluginFavorites",
+      [],
+      (v) => Array.isArray(v) && v.every((e) => typeof e === "string"),
+    );
+    const instruments = registry.filter((p) => p.isInstrument && !p.blacklisted);
+    const entryFor = (p: PluginInfo): MenuEntry => ({
+      label: p.name,
+      icon: "piano",
+      // Cosmetic mark for the picker as opened; the CLICK path re-resolves fresh.
+      checked: current?.uid === p.uid && (!current.path || current.path === p.path),
+      onClick: () => {
+        // Menus are imperative — this runs later. Re-resolve the track and its
+        // instrument from the live store so a projectChanged between open and click
+        // (or a double-invoke) can't produce a duplicate add/remove pair.
+        const proj = useStore.getState().project;
+        const live = proj?.tracks.find((x) => x.id === t.id);
+        if (!live || live.frozen) return;
+        const cur = (() => {
+          const known = live.inserts.find((ins) => isLiveInstrument(ins.uid));
+          if (known) return known;
+          const first = live.inserts[0];
+          return first && !registry.some((r) => r.uid === first.uid) ? first : undefined;
+        })();
+        if (cur?.uid === p.uid) return; // already this instrument
+        void (async () => {
+          // No replace command in SPEC §5.6 — add at the same index, then remove the
+          // old instance (which shifted to idx+1), exactly like the mixer's replace.
+          const idx = cur ? live.inserts.findIndex((i) => i.instanceId === cur.instanceId) : 0;
+          await addPlugin(live.id, p.uid, Math.max(0, idx));
+          if (cur) await removePlugin(live.id, cur.instanceId);
+        })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
+      },
+    });
+    const favs = instruments
+      .filter((p) => favUids.includes(p.uid))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const items: MenuEntry[] = favs.map(entryFor);
+    if (items.length === 0) {
+      // Nothing starred yet — stay useful: offer the (deduped) instrument list instead.
+      items.push({ label: "No favorite instruments — ★ some in Browser → Plugins", disabled: true });
+      const all = groupPluginVariants(
+        instruments.slice().sort((a, b) => a.name.localeCompare(b.name)),
+      ).plugins.slice(0, 20);
+      if (all.length > 0) items.push("separator", ...all.map(entryFor));
+    }
+    openContextMenu(x, y, items);
+  };
+
   /* ------------------------------------------------------------ context menu */
 
   const openRename = (track: Track, x: number, y: number): void => {
@@ -522,6 +680,8 @@ export default function TrackHeaders({
       { label: "Color…", onClick: () => openColor(t, x, y) },
       { label: "Duplicate Track", onClick: () => fire(duplicateTrack(t.id)) },
     ];
+    if (versionable(t))
+      items.push({ label: "Track Versions", icon: "layers", submenu: versionMenuItems(t, x, y) });
     if (freezable) {
       items.push("separator");
       if (t.frozen) {
@@ -569,6 +729,15 @@ export default function TrackHeaders({
     const showControls = row.height >= 44;
     const indent = 6 + row.depth * 14;
     const armable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
+    const activeVersion = t.versions?.find((v) => v.id === t.activeVersionId);
+    // 3rd row: instrument picker — instrument tracks own an instrument; MIDI feeders
+    // show their host's instrument read-only. Needs the extra height to exist at all.
+    const midiHost =
+      t.kind === "midi" && t.midiTarget
+        ? project?.tracks.find((x) => x.id === t.midiTarget)
+        : undefined;
+    const showInstRow = row.height >= 62 && showControls && (t.kind === "instrument" || !!midiHost);
+    const instrumentInsert = t.kind === "instrument" ? instrumentInsertOf(t) : undefined;
     return (
       <div
         key={t.id}
@@ -634,6 +803,21 @@ export default function TrackHeaders({
           >
             {t.name}
           </span>
+          {activeVersion && (
+            <button
+              type="button"
+              className="tlh-version-chip"
+              title={`Track version: ${activeVersion.name} (${t.versions?.length ?? 0} total) — click to switch`}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                openContextMenu(r.left, r.bottom + 3, versionMenuItems(t, r.left, r.bottom + 3));
+              }}
+            >
+              <Icon name="layers" size={10} />
+              <span className="tlh-version-chip-name">{activeVersion.name}</span>
+            </button>
+          )}
           {t.frozen && (
             <span className="tlh-badges" title="Frozen">
               <Icon name="snowflake" size={12} />
@@ -689,6 +873,49 @@ export default function TrackHeaders({
             >
               A
             </Toggle>
+          </div>
+        )}
+        {showInstRow && (
+          <div className="tlh-row-inst" style={{ paddingLeft: indent }}>
+            {t.kind === "instrument" ? (
+              <button
+                type="button"
+                className="tlh-inst-btn"
+                disabled={!!t.frozen}
+                title={
+                  t.frozen
+                    ? "Track is frozen — unfreeze to change the instrument"
+                    : "Change instrument (favorite instruments)"
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openInstrumentPicker(t, r.left, r.bottom + 2);
+                }}
+              >
+                <Icon name="piano" size={11} />
+                <span className="tlh-inst-name">
+                  {instrumentInsert?.name ?? "Choose instrument…"}
+                </span>
+                <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
+              </button>
+            ) : (
+              // Read-only (a feeder's instrument lives on its host track). A DIV, not
+              // a disabled button: disabled buttons swallow pointer events and would
+              // turn this band click-dead for row select / dblclick-inspect / drag.
+              <div
+                className="tlh-inst-btn tlh-inst-readonly"
+                title={`Plays through "${midiHost?.name ?? ""}" — change the instrument on that track`}
+              >
+                <Icon name="piano" size={11} />
+                <span className="tlh-inst-name">
+                  {`→ ${midiHost?.name ?? ""}${(() => {
+                    const ins = midiHost ? instrumentInsertOf(midiHost) : undefined;
+                    return ins ? `: ${ins.name}` : "";
+                  })()}`}
+                </span>
+              </div>
+            )}
           </div>
         )}
         <div
@@ -810,6 +1037,23 @@ export default function TrackHeaders({
             const trimmed = name.trim();
             if (trimmed && trimmed !== popover.initial) {
               fire(setTrack(popover.trackId, { name: trimmed }));
+            }
+          }}
+          onCancel={() => setPopover(null)}
+        />
+      )}
+      {popover && popover.kind === "renameVersion" && popover.versionId !== undefined && (
+        <FloatingInput
+          x={popover.x}
+          y={popover.y}
+          width={160}
+          initial={popover.initial}
+          placeholder="Version name"
+          onCommit={(name) => {
+            setPopover(null);
+            const trimmed = name.trim();
+            if (trimmed && trimmed !== popover.initial) {
+              fire(renameTrackVersion(popover.trackId, popover.versionId!, trimmed));
             }
           }}
           onCancel={() => setPopover(null)}
