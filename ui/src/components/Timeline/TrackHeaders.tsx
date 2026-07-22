@@ -605,8 +605,11 @@ export default function TrackHeaders({
     return undefined;
   };
 
-  const openInstrumentPicker = (t: Track, x: number, y: number): void => {
-    const current = instrumentInsertOf(t);
+  /** Favorite-instruments menu (falls back to all instruments); `pick` runs on click. */
+  const instrumentMenuItems = (
+    current: { uid: string; path: string } | undefined,
+    pick: (p: PluginInfo) => void,
+  ): MenuEntry[] => {
     const favUids = loadPref<string[]>(
       "browser.pluginFavorites",
       [],
@@ -618,28 +621,7 @@ export default function TrackHeaders({
       icon: "piano",
       // Cosmetic mark for the picker as opened; the CLICK path re-resolves fresh.
       checked: current?.uid === p.uid && (!current.path || current.path === p.path),
-      onClick: () => {
-        // Menus are imperative — this runs later. Re-resolve the track and its
-        // instrument from the live store so a projectChanged between open and click
-        // (or a double-invoke) can't produce a duplicate add/remove pair.
-        const proj = useStore.getState().project;
-        const live = proj?.tracks.find((x) => x.id === t.id);
-        if (!live || live.frozen) return;
-        const cur = (() => {
-          const known = live.inserts.find((ins) => isLiveInstrument(ins.uid));
-          if (known) return known;
-          const first = live.inserts[0];
-          return first && !registry.some((r) => r.uid === first.uid) ? first : undefined;
-        })();
-        if (cur?.uid === p.uid) return; // already this instrument
-        void (async () => {
-          // No replace command in SPEC §5.6 — add at the same index, then remove the
-          // old instance (which shifted to idx+1), exactly like the mixer's replace.
-          const idx = cur ? live.inserts.findIndex((i) => i.instanceId === cur.instanceId) : 0;
-          await addPlugin(live.id, p.uid, Math.max(0, idx));
-          if (cur) await removePlugin(live.id, cur.instanceId);
-        })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
-      },
+      onClick: () => pick(p),
     });
     const favs = instruments
       .filter((p) => favUids.includes(p.uid))
@@ -653,7 +635,49 @@ export default function TrackHeaders({
       ).plugins.slice(0, 20);
       if (all.length > 0) items.push("separator", ...all.map(entryFor));
     }
-    openContextMenu(x, y, items);
+    return items;
+  };
+
+  const openInstrumentPicker = (t: Track, x: number, y: number): void => {
+    const current = instrumentInsertOf(t);
+    openContextMenu(x, y, instrumentMenuItems(current, (p) => {
+      // Menus are imperative — this runs later. Re-resolve the track and its
+      // instrument from the live store so a projectChanged between open and click
+      // (or a double-invoke) can't produce a duplicate add/remove pair.
+      const proj = useStore.getState().project;
+      const live = proj?.tracks.find((x2) => x2.id === t.id);
+      if (!live || live.frozen) return;
+      const cur = (() => {
+        const known = live.inserts.find((ins) => isLiveInstrument(ins.uid));
+        if (known) return known;
+        const first = live.inserts[0];
+        return first && !registry.some((r) => r.uid === first.uid) ? first : undefined;
+      })();
+      if (cur?.uid === p.uid) return; // already this instrument
+      void (async () => {
+        // No replace command in SPEC §5.6 — add at the same index, then remove the
+        // old instance (which shifted to idx+1), exactly like the mixer's replace.
+        const idx = cur ? live.inserts.findIndex((i) => i.instanceId === cur.instanceId) : 0;
+        await addPlugin(live.id, p.uid, Math.max(0, idx));
+        if (cur) await removePlugin(live.id, cur.instanceId);
+      })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
+    }));
+  };
+
+  /**
+   * Unrouted MIDI track (no midiTarget — e.g. an imported .cpr whose rack connection
+   * is dead): picking an instrument CREATES an Instrument track hosting it and routes
+   * this track's MIDI into it — "assign a VST to a midi channel" in one gesture.
+   */
+  const openFeederAssignPicker = (t: Track, x: number, y: number): void => {
+    openContextMenu(x, y, instrumentMenuItems(undefined, (p) => {
+      void (async () => {
+        const { track: inst } = await addTrack("instrument");
+        await setTrack(inst.id, { name: p.name });
+        await addPlugin(inst.id, p.uid);
+        await setTrack(t.id, { midiTarget: inst.id });
+      })().catch((e) => console.warn("[timeline] assign instrument failed:", e));
+    }));
   };
 
   /* ------------------------------------------------------------ context menu */
@@ -730,13 +754,15 @@ export default function TrackHeaders({
     const indent = 6 + row.depth * 14;
     const armable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
     const activeVersion = t.versions?.find((v) => v.id === t.activeVersionId);
-    // 3rd row: instrument picker — instrument tracks own an instrument; MIDI feeders
-    // show their host's instrument read-only. Needs the extra height to exist at all.
+    // 3rd row: instrument picker — instrument tracks own an instrument; MIDI tracks
+    // edit their HOST's instrument (routed) or assign one by creating + routing an
+    // instrument track (unrouted). Needs the extra height to exist at all.
     const midiHost =
       t.kind === "midi" && t.midiTarget
         ? project?.tracks.find((x) => x.id === t.midiTarget)
         : undefined;
-    const showInstRow = row.height >= 62 && showControls && (t.kind === "instrument" || !!midiHost);
+    const showInstRow =
+      row.height >= 62 && showControls && (t.kind === "instrument" || t.kind === "midi");
     const instrumentInsert = t.kind === "instrument" ? instrumentInsertOf(t) : undefined;
     return (
       <div
@@ -899,22 +925,50 @@ export default function TrackHeaders({
                 </span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
-            ) : (
-              // Read-only (a feeder's instrument lives on its host track). A DIV, not
-              // a disabled button: disabled buttons swallow pointer events and would
-              // turn this band click-dead for row select / dblclick-inspect / drag.
-              <div
-                className="tlh-inst-btn tlh-inst-readonly"
-                title={`Plays through "${midiHost?.name ?? ""}" — change the instrument on that track`}
+            ) : midiHost ? (
+              // Routed feeder: the dropdown edits the instrument ON THE HOST track —
+              // "assign a VST to this midi channel" without leaving the channel.
+              <button
+                type="button"
+                className="tlh-inst-btn"
+                disabled={!!midiHost.frozen}
+                title={
+                  midiHost.frozen
+                    ? `Plays through "${midiHost.name}" (frozen — unfreeze to change)`
+                    : `Plays through "${midiHost.name}" — click to change its instrument`
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openInstrumentPicker(midiHost, r.left, r.bottom + 2);
+                }}
               >
                 <Icon name="piano" size={11} />
                 <span className="tlh-inst-name">
-                  {`→ ${midiHost?.name ?? ""}${(() => {
-                    const ins = midiHost ? instrumentInsertOf(midiHost) : undefined;
+                  {`→ ${midiHost.name}${(() => {
+                    const ins = instrumentInsertOf(midiHost);
                     return ins ? `: ${ins.name}` : "";
                   })()}`}
                 </span>
-              </div>
+                <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
+              </button>
+            ) : (
+              // Unrouted MIDI track (dead import connection): assign = create an
+              // instrument track with the picked VST and route into it.
+              <button
+                type="button"
+                className="tlh-inst-btn"
+                title="This MIDI track has no instrument — pick one to create and route it"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openFeederAssignPicker(t, r.left, r.bottom + 2);
+                }}
+              >
+                <Icon name="piano" size={11} />
+                <span className="tlh-inst-name">Assign instrument…</span>
+                <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
+              </button>
             )}
           </div>
         )}
