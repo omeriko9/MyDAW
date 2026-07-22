@@ -70,4 +70,43 @@ describe("groupPluginVariants", () => {
     const { plugins } = groupPluginVariants(list);
     expect(plugins[0].uid).toBe("b");
   });
+
+  it("×N badge counts only USABLE variants — disabled ones drop out", () => {
+    // "disabled 3 of 4 Addictive Drums but the tab still said ×4"
+    const list = [
+      pi("Addictive Drums", { uid: "ad", path: "C:/a/AD.dll", blacklisted: true }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/b/AD.dll", blacklisted: true }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/c/AD.dll", blacklisted: true }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/d/AD.dll" }),
+    ];
+    const { plugins, variantsByKey } = groupPluginVariants(list);
+    expect(plugins).toHaveLength(1);
+    const rep = plugins[0];
+    expect(rep.blacklisted).toBe(false); // the one usable variant represents the group
+    // one usable variant left => no ×N badge at all
+    expect(variantsByKey.size).toBe(0);
+  });
+
+  it("×N badge shows two usable of four", () => {
+    const list = [
+      pi("Addictive Drums", { uid: "ad", path: "C:/a/AD.dll", blacklisted: true }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/b/AD.dll" }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/c/AD.dll", blacklisted: true }),
+      pi("Addictive Drums", { uid: "ad", path: "C:/d/AD.dll" }),
+    ];
+    const { plugins, variantsByKey } = groupPluginVariants(list);
+    const rep = plugins[0];
+    expect(variantsByKey.get(`${rep.format}|${rep.uid}|${rep.bitness}|${rep.path}`)).toHaveLength(2);
+  });
+
+  it("a fully-disabled group keeps its complete variant list", () => {
+    const list = [
+      pi("Old Shell Mono", { uid: "a", path: "C:/x/1.dll", blacklisted: true }),
+      pi("Old Shell Stereo", { uid: "b", path: "C:/x/2.dll", blacklisted: true }),
+    ];
+    const { plugins, variantsByKey } = groupPluginVariants(list);
+    const rep = plugins[0];
+    expect(rep.blacklisted).toBe(true);
+    expect(variantsByKey.get(`${rep.format}|${rep.uid}|${rep.bitness}|${rep.path}`)).toHaveLength(2);
+  });
 });

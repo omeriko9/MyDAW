@@ -66,8 +66,11 @@ export interface GroupedPlugins {
   /** One representative per group, sorted like the input; name left untouched. */
   plugins: PluginInfo[];
   /**
-   * pluginKey(representative) → full names of ALL rows in its group (representative
-   * included), for the "×N variants" badge/tooltip. Only present for groups > 1.
+   * pluginKey(representative) → full names of the group's USABLE (non-blacklisted)
+   * rows, representative included, for the "×N variants" badge/tooltip. Disabled
+   * variants don't count — disabling 3 of 4 drops the badge to the 1 that still
+   * loads. A fully-disabled group keeps its complete list (everything is equally
+   * off). Only present when the counted list has > 1 entries.
    */
   variantsByKey: Map<string, string[]>;
 }
@@ -109,10 +112,15 @@ export function groupPluginVariants(list: readonly PluginInfo[]): GroupedPlugins
     const rep = repByKey.get(key)!;
     const g = groups.get(key)!;
     plugins.push(rep);
-    if (g.length > 1)
+    // Badge counts what the user can USE: blacklisted/disabled members are excluded
+    // (the Plugin Manager is where those are inspected). All-disabled group: keep the
+    // full list — the (blacklisted) representative's badge then means "N disabled".
+    const usable = g.filter((v) => !v.blacklisted);
+    const counted = usable.length > 0 ? usable : g;
+    if (counted.length > 1)
       variantsByKey.set(
         pluginKey(rep),
-        g.map((v) => `${v.name} (${v.format.toUpperCase()} ${v.bitness}-bit)`).sort(),
+        counted.map((v) => `${v.name} (${v.format.toUpperCase()} ${v.bitness}-bit)`).sort(),
       );
   }
   return { plugins, variantsByKey };
