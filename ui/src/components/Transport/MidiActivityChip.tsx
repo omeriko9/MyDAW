@@ -76,20 +76,32 @@ function canSound(t: Track): boolean {
   });
 }
 
+/** Fader below this (~-40 dB) counts as "you will not hear it". */
+const AUDIBLE_VOL = 0.01;
+
 type Diag =
   | { kind: "ok" }
   | { kind: "noListener" }
-  | { kind: "cantSound"; track: Track; dormant: boolean };
+  | { kind: "cantSound"; track: Track; dormant: boolean }
+  | { kind: "fadedOut"; track: Track };
 
 function diagnose(): Diag {
   const p = useStore.getState().project;
   if (!p) return { kind: "ok" };
   const listeners = p.tracks.filter((t) => armable(t) && (t.recordArm || t.monitor));
   if (listeners.length === 0) return { kind: "noListener" };
-  if (listeners.some(canSound)) return { kind: "ok" };
-  const first = listeners[0];
-  const dormant = first.inserts.some((i) => unresolvedIds.has(i.instanceId));
-  return { kind: "cantSound", track: first, dormant };
+  const sounders = listeners.filter(canSound);
+  if (sounders.length === 0) {
+    const first = listeners[0];
+    const dormant = first.inserts.some((i) => unresolvedIds.has(i.instanceId));
+    return { kind: "cantSound", track: first, dormant };
+  }
+  // Third silent-failure class (real support case): the chain is fine but every
+  // sound-capable listener is muted or faded to ~silence — meters flicker at
+  // -60 dB while the user hears nothing and concludes "MIDI is broken".
+  const audible = sounders.some((t) => !t.mute && t.volume >= AUDIBLE_VOL);
+  if (!audible) return { kind: "fadedOut", track: sounders[0] };
+  return { kind: "ok" };
 }
 
 export default function MidiActivityChip() {
@@ -136,8 +148,17 @@ export default function MidiActivityChip() {
       .catch((e) => showToast(`Arming failed: ${e instanceof Error ? e.message : e}`, "error"));
   };
 
+  const fixFader = (track: Track): void => {
+    void setTrack(track.id, { volume: 1, mute: false })
+      .then(() =>
+        showToast(`Raised "${track.name}" to 0 dB (was ~silent) — play again.`, "success"),
+      )
+      .catch((e) => showToast(`Fader fix failed: ${e instanceof Error ? e.message : e}`, "error"));
+  };
+
   const onClick = (): void => {
     if (diag.kind === "noListener") fixArm();
+    else if (diag.kind === "fadedOut") fixFader(diag.track);
     else if (diag.kind === "cantSound" && diag.dormant)
       useStore.getState().setDialogs({ recreatePlugins: true });
     else if (diag.kind === "cantSound") {
@@ -152,7 +173,9 @@ export default function MidiActivityChip() {
       ? "no track armed!"
       : diag.kind === "cantSound"
         ? "instrument not loaded!"
-        : null;
+        : diag.kind === "fadedOut"
+          ? "track faded to silence!"
+          : null;
   const title =
     diag.kind === "noListener"
       ? `MIDI is arriving from "${device ?? "a device"}" but NO track is record-armed or monitoring — the notes go nowhere.\nClick to arm a track that can play them.`
@@ -160,9 +183,11 @@ export default function MidiActivityChip() {
         ? diag.dormant
           ? `"${diag.track.name}" is armed, but its instrument is DORMANT (not loaded — typical after Import Project).\nClick to open Recreate Plugins.`
           : `"${diag.track.name}" is armed, but it has no loaded instrument to make sound.\nClick to open the plugin Browser.`
-        : lit
-          ? `MIDI activity: ${device}`
-          : "MIDI input — lights up when the engine receives notes.\nClick for MIDI device settings.";
+        : diag.kind === "fadedOut"
+          ? `"${diag.track.name}" is armed and its instrument plays — but the track is muted or faded to ~silence (fader < -40 dB).\nClick to raise it to 0 dB.`
+          : lit
+            ? `MIDI activity: ${device}`
+            : "MIDI input — lights up when the engine receives notes.\nClick for MIDI device settings.";
 
   return (
     <button
