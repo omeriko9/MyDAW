@@ -1,11 +1,13 @@
 /**
  * InsertSlots (U3) — the INSERTS section of a channel strip (SPEC §9 / §5.6).
  *
- * Each slot: bypass dot (cmd/plugin.set), truncated name (click → generic editor via
- * openPluginEditorWindow), crash/timeout badge from store.pluginStates with the reason in
- * a tooltip. Right-click opens the plugin's native GUI directly when it has one, else falls
- * back to the options menu (Open Editor / Open Native UI / Bypass / Remove / Move Up/Down /
- * Replace ▸); Alt/Ctrl-right-click always shows that menu. The '+' slot opens a PluginPicker.
+ * Each slot: bypass dot (cmd/plugin.set), truncated name, crash/timeout badge from
+ * store.pluginStates with the reason in a tooltip. Click semantics (user spec
+ * 2026-07-22): single click → the in-app generic editor (deferred ~230ms so a double
+ * click doesn't stack it), DOUBLE click → the plug-in's native GUI (falls back to the
+ * generic editor when it has none), right-click → ALWAYS the options menu (Open
+ * Editor / Open Native UI / Bypass / Remove / Move Up/Down / Replace ▸).
+ * The '+' slot opens a PluginPicker.
  * Accepts plugin drags from the Browser (lib/dnd PLUGIN_MIME). Slots themselves drag
  * Cubase-style (lib/dnd INSERT_MIME): within the channel = reorder; onto another channel =
  * MOVE with state (Alt at drop = COPY with settings); dropped on nothing = REMOVE, Escape
@@ -175,20 +177,30 @@ export function InsertSlots({ track }: { track: Track }) {
       },
     ];
 
-  // Right-click opens the plugin's native GUI directly when it has one; otherwise (built-in
-  // effects, or a VST with no editor) it falls back to the options menu. Alt/Ctrl-right-click
-  // always shows the options menu, so a native-GUI plugin still exposes bypass/remove/move.
+  // Right-click = the options menu, ALWAYS (user spec 2026-07-22: the native GUI
+  // moved to double-click; the menu keeps "Open Native UI" for discoverability).
   const slotContext = (ins: PluginInstance, idx: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const { clientX, clientY, altKey, ctrlKey, metaKey } = e;
-    const showMenu = () => openContextMenu(clientX, clientY, buildSlotMenu(ins, idx));
-    if (altKey || ctrlKey || metaKey || ins.format === "builtin") {
-      showMenu();
-      return;
+    openContextMenu(e.clientX, e.clientY, buildSlotMenu(ins, idx));
+  };
+
+  // Single click opens the in-app generic editor — DEFERRED past the double-click
+  // window so a double click opens ONLY the native GUI instead of stacking both.
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slotClick = (ins: PluginInstance) => () => {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null;
+      openEditor(ins.instanceId);
+    }, 230);
+  };
+  const slotDoubleClick = (ins: PluginInstance) => () => {
+    if (clickTimer.current) {
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
     }
-    // VST/VST3 — try the native editor; openEditor rejects when the plugin has none.
-    actions.openPluginEditor(ins.instanceId).catch(showMenu);
+    void openBestEditor(ins);
   };
 
   /* ---- drag & drop -----------------------------------------------------------
@@ -332,13 +344,13 @@ export function InsertSlots({ track }: { track: Track }) {
               onDragEnd={endDrag(ins)}
               onDragOver={slotDragOver(idx)}
               onDrop={slotDrop(idx)}
-              onClick={() => openEditor(ins.instanceId)}
-              onDoubleClick={() => void openBestEditor(ins)}
+              onClick={slotClick(ins)}
+              onDoubleClick={slotDoubleClick(ins)}
               onContextMenu={slotContext(ins, idx)}
               title={
                 dormant
                   ? `${ins.name} — NOT LOADED (imported plugin without a live instance). Click the badge or use File ▸ Recreate Plugins to load or substitute it.`
-                  : `${ins.name} — click: in-app editor · double-click: the plug-in's own window · right-click: native UI · Alt+right-click: options · drag: reorder, or move to another channel · Alt+drag: copy (with settings) · drop outside: remove`
+                  : `${ins.name} — click: in-app editor · double-click: the plug-in's own window · right-click: options · drag: reorder, or move to another channel · Alt+drag: copy (with settings) · drop outside: remove`
               }
             >
               <button
@@ -350,6 +362,7 @@ export function InsertSlots({ track }: { track: Track }) {
                   e.stopPropagation();
                   void actions.setPlugin(ins.instanceId, { bypass: !ins.bypass });
                 }}
+                onDoubleClick={(e) => e.stopPropagation()}
               />
               <span className="mxslot-name">{ins.name}</span>
               {dormant ? (
