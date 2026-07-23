@@ -10,7 +10,7 @@
  * after every recreate and on every projectChanged; rows render ONLY engine-reported state.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../../store/store";
 import {
   getPluginFolders,
@@ -19,6 +19,7 @@ import {
   scanPlugins,
   setPluginFolders,
 } from "../../store/actions";
+import { loadPref } from "../../lib/prefs";
 import type { PluginFormat, PluginRecreateResult, UnresolvedPlugin } from "../../protocol/types";
 import { ws } from "../../protocol/ws";
 import { Modal } from "../common/Modal";
@@ -88,6 +89,29 @@ export default function RecreatePluginsDialog() {
   const open = useStore((s) => s.dialogs.recreatePlugins);
   const setDialogs = useStore((s) => s.setDialogs);
   const scanProgress = useStore((s) => s.scanProgress);
+  const registry = useStore((s) => s.registry);
+  const project = useStore((s) => s.project);
+
+  // Favorite instruments (Browser ★) — offered as substitutes on missing INSTRUMENT
+  // rows: after an import the user usually just wants "one of MY instruments" there,
+  // whether or not the fuzzy matcher found anything close. Pref re-read per open.
+  const favoriteInstruments = useMemo(() => {
+    if (!open) return [];
+    const favUids = loadPref<string[]>(
+      "browser.pluginFavorites",
+      [],
+      (v) => Array.isArray(v) && v.every((e) => typeof e === "string"),
+    );
+    return registry
+      .filter((p) => p.isInstrument && !p.blacklisted && favUids.includes(p.uid))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [open, registry]);
+
+  /** The unresolved insert is a track's INSTRUMENT (slot 0 of an instrument track). */
+  const isInstrumentSlot = (p: UnresolvedPlugin): boolean => {
+    const t = project?.tracks.find((x) => x.id === p.trackId);
+    return t?.kind === "instrument" && p.slotIndex === 0;
+  };
 
   const [rows, setRows] = useState<Row[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -395,7 +419,22 @@ export default function RecreatePluginsDialog() {
                   } no live plugin instance. Recreate them from the plugin registry.`}
             </div>
             <div className="dlg-list">
-              {rows.map(({ p, status }) => (
+              {rows.map(({ p, status }) => {
+                // ★ favorites lead the picker on instrument rows (deduped against the
+                // fuzzy suggestions), ABOVE "keep waiting" — with no good fuzzy
+                // candidate they are usually the actual answer.
+                const favOptions =
+                  status.kind !== "ok" && !p.inRegistry && isInstrumentSlot(p)
+                    ? favoriteInstruments
+                        .filter((f) => !(p.suggestions ?? []).some((s) => s.uid === f.uid))
+                        .map((f) => ({
+                          value: f.uid,
+                          label: `★ Use favorite: ${f.name} (${f.format.toUpperCase()} ${f.bitness}-bit)`,
+                        }))
+                    : [];
+                const showPicker =
+                  status.kind !== "ok" && favOptions.length + (p.suggestions?.length ?? 0) > 0;
+                return (
                 <div className="dlg-item" key={p.instanceId}>
                   <Icon name={status.kind === "missing" ? "warning" : "plug"} size={14} />
                   <span className="col grow" style={{ minWidth: 0 }}>
@@ -411,7 +450,7 @@ export default function RecreatePluginsDialog() {
                         {p.source}
                       </span>
                     ) : null}
-                    {status.kind !== "ok" && (p.suggestions?.length ?? 0) > 0 ? (
+                    {showPicker ? (
                       <span className="row gap1" style={{ marginTop: 3 }}>
                         <Select
                           value={subs.get(p.instanceId) ?? ""}
@@ -427,6 +466,7 @@ export default function RecreatePluginsDialog() {
                           disabled={busy || scanning}
                           title="Recreate this insert as a similar installed plugin instead (state carries over only within the same plugin format)"
                           options={[
+                            ...favOptions,
                             { value: "", label: "Substitute: keep waiting for the exact plugin" },
                             ...(p.suggestions ?? []).map((s) => ({
                               value: s.uid,
@@ -444,7 +484,8 @@ export default function RecreatePluginsDialog() {
                   </span>
                   <StatusBadge status={status} />
                 </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
