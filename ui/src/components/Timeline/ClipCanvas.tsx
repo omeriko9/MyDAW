@@ -64,6 +64,7 @@ import { confirmDialog } from "../Dialogs/confirm";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
 import { addTrackMenuItems } from "./TrackHeaders";
+import { assignInstrumentToTrack } from "./instrumentAssign";
 import {
   drawAutomationLane,
   drawClip,
@@ -1771,11 +1772,19 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const plug = readPluginDrag(dt);
     if (plug) {
       if (track && track.kind === "midi") {
-        // MIDI channels host no audio plugins (Cubase semantics).
-        showToast(
-          "MIDI tracks can't host plugins — drop on an Instrument or Audio track, or on empty space to create one.",
-          "info",
-        );
+        // An INSTRUMENT dropped on a MIDI channel lands on its host instrument track
+        // (or creates + routes one) — same semantics as the header dropdown. Only
+        // effects have nowhere to go (MIDI channels host no audio plugins).
+        const info = useStore.getState().registry.find((p) => p.uid === plug.uid);
+        if (info?.isInstrument) {
+          if (!assignInstrumentToTrack(track, info))
+            showToast("The target instrument track is frozen — unfreeze it first.", "info");
+        } else {
+          showToast(
+            "MIDI tracks can't host effect plugins — drop on an Instrument or Audio track, or on empty space to create one.",
+            "info",
+          );
+        }
       } else if (track) {
         fire(addPlugin(track.id, plug.uid));
       } else {

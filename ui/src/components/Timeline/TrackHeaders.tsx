@@ -34,6 +34,11 @@ import {
 } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import {
+  assignInstrumentToFeeder,
+  assignInstrumentToTrack,
+  replaceInstrumentOn,
+} from "./instrumentAssign";
+import {
   hasAssetDrag,
   hasPluginDrag,
   readAssetDrag,
@@ -381,7 +386,23 @@ export default function TrackHeaders({
     if (plug) {
       e.preventDefault();
       e.stopPropagation();
-      if (!t.frozen) fire(addPlugin(t.id, plug.uid));
+      if (t.frozen) return;
+      const info = registry.find((r) => r.uid === plug.uid);
+      if (t.kind === "midi") {
+        // Same semantics as the header dropdown: an instrument dropped on a MIDI
+        // channel lands on its HOST (or creates + routes one when unrouted).
+        if (info?.isInstrument) {
+          if (!assignInstrumentToTrack(t, info))
+            showToast("The target instrument track is frozen — unfreeze it first.", "info");
+        } else {
+          showToast(
+            "MIDI tracks can't host effect plugins — drop it on an instrument or audio track.",
+            "info",
+          );
+        }
+        return;
+      }
+      fire(addPlugin(t.id, plug.uid));
       return;
     }
     const asset = readAssetDrag(dt);
@@ -640,28 +661,9 @@ export default function TrackHeaders({
 
   const openInstrumentPicker = (t: Track, x: number, y: number): void => {
     const current = instrumentInsertOf(t);
-    openContextMenu(x, y, instrumentMenuItems(current, (p) => {
-      // Menus are imperative — this runs later. Re-resolve the track and its
-      // instrument from the live store so a projectChanged between open and click
-      // (or a double-invoke) can't produce a duplicate add/remove pair.
-      const proj = useStore.getState().project;
-      const live = proj?.tracks.find((x2) => x2.id === t.id);
-      if (!live || live.frozen) return;
-      const cur = (() => {
-        const known = live.inserts.find((ins) => isLiveInstrument(ins.uid));
-        if (known) return known;
-        const first = live.inserts[0];
-        return first && !registry.some((r) => r.uid === first.uid) ? first : undefined;
-      })();
-      if (cur?.uid === p.uid) return; // already this instrument
-      void (async () => {
-        // No replace command in SPEC §5.6 — add at the same index, then remove the
-        // old instance (which shifted to idx+1), exactly like the mixer's replace.
-        const idx = cur ? live.inserts.findIndex((i) => i.instanceId === cur.instanceId) : 0;
-        await addPlugin(live.id, p.uid, Math.max(0, idx));
-        if (cur) await removePlugin(live.id, cur.instanceId);
-      })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
-    }));
+    // replaceInstrumentOn re-resolves live state at click time (menus are imperative —
+    // a projectChanged between open and click must not double-apply).
+    openContextMenu(x, y, instrumentMenuItems(current, (p) => replaceInstrumentOn(t.id, p)));
   };
 
   /**
@@ -670,14 +672,7 @@ export default function TrackHeaders({
    * this track's MIDI into it — "assign a VST to a midi channel" in one gesture.
    */
   const openFeederAssignPicker = (t: Track, x: number, y: number): void => {
-    openContextMenu(x, y, instrumentMenuItems(undefined, (p) => {
-      void (async () => {
-        const { track: inst } = await addTrack("instrument");
-        await setTrack(inst.id, { name: p.name });
-        await addPlugin(inst.id, p.uid);
-        await setTrack(t.id, { midiTarget: inst.id });
-      })().catch((e) => console.warn("[timeline] assign instrument failed:", e));
-    }));
+    openContextMenu(x, y, instrumentMenuItems(undefined, (p) => assignInstrumentToFeeder(t.id, p)));
   };
 
   /* ------------------------------------------------------------ context menu */
