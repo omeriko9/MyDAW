@@ -101,7 +101,7 @@ export default function Ruler() {
     ctx.clearRect(0, 0, w, RULER_H);
 
     // strip backgrounds
-    ctx.fillStyle = colors.panel;
+    ctx.fillStyle = colors.ruler;
     ctx.fillRect(0, 0, w, RULER_H);
     ctx.fillStyle = "rgba(0,0,0,0.22)";
     ctx.fillRect(0, 0, w, RULER_LOOP_H);

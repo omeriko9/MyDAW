@@ -39,11 +39,15 @@ export interface TlColors {
   playhead: string;
   danger: string;
   warn: string;
+  /** ruler strip background (--tl-ruler-bg; = --panel except themed washes) */
+  ruler: string;
 }
 
 export function tlColors(): TlColors {
   return {
-    bg: themeVar("--bg"),
+    // the ARRANGEMENT pane's surface, not the global bg — the canvas must match
+    // the pane tint around it (Prism gives every pane a genuinely different hue)
+    bg: themeVar("--pane-arrange"),
     panel: themeVar("--panel"),
     border: themeVar("--border"),
     borderLight: themeVar("--border-light"),
@@ -55,6 +59,7 @@ export function tlColors(): TlColors {
     playhead: themeVar("--playhead"),
     danger: themeVar("--danger"),
     warn: themeVar("--warn"),
+    ruler: themeVar("--tl-ruler-bg"),
   };
 }
 

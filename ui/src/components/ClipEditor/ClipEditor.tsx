@@ -60,7 +60,7 @@ interface CeColors {
 
 function ceColors(): CeColors {
   return {
-    bg: themeVar("--bg"),
+    bg: themeVar("--pane-clip"), // match the pane tint (Prism: rose)
     border: themeVar("--border"),
     borderLight: themeVar("--border-light"),
     textDim: themeVar("--text-dim"),

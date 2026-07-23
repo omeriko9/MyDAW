@@ -324,6 +324,8 @@
  * ==========================================================================*/
 
 :root {
+  /* ruler strip background (canvas-drawn — Ruler.tsx resolves via themeVar) */
+  --tl-ruler-bg: var(--panel);
   --pane-arrange: #16171c;
   --pane-mixer: #191a21;
   --pane-piano: #171a20;
@@ -367,13 +369,150 @@
    All backgrounds keep >= 4.5:1 contrast with --text (#24262f); the visualizer
    goes deepest (it is canvas-dominated) but stays mid-tone for its labels. */
 :root[data-theme="prism"] {
-  --pane-arrange: #dfe8fb; /* arrangement — sky blue */
-  --pane-mixer: #d6ecdc;   /* mixer — mint green */
-  --pane-piano: #eadff8;   /* piano roll — lavender */
-  --pane-sheet: #f6efd9;   /* sheet music — manuscript cream */
-  --pane-clip: #f9dfe9;    /* clip editor — rose */
-  --pane-viz: #aeb9d2;     /* visualizer — deep steel blue */
-  --pane-browser: #f7e6d2; /* browser — peach */
+  --pane-arrange: #d7e3f8; /* arrangement — sky blue */
+  --pane-mixer: #cde8d6;   /* mixer — mint green */
+  --pane-piano: #e3d3f6;   /* piano roll — lavender */
+  --pane-sheet: #f3ead0;   /* sheet music — manuscript cream */
+  --pane-clip: #f7d5e3;    /* clip editor — rose */
+  --pane-viz: #a3aecb;     /* visualizer — deep steel blue */
+  --pane-browser: #f5dfc4; /* browser — peach */
+
+  /* strong per-pane hues (borders, active tabs, toolbar edges) + toolbar washes */
+  --prism-arrange: #3b6fd4;
+  --prism-mixer: #2e9457;
+  --prism-piano: #7e52d6;
+  --prism-sheet: #a8842a;
+  --prism-clip: #cc4f88;
+  --prism-viz: #45608f;
+  --prism-browser: #cc7a2e;
+  --prism-wash-arrange: #c9daf6;
+  --prism-wash-mixer: #bde2c9;
+  --prism-wash-piano: #d8c6f1;
+  --prism-wash-sheet: #ecdfb4;
+  --prism-wash-clip: #f2c8da;
+  --prism-wash-viz: #93a5c9;
+  --prism-wash-browser: #efd4b1;
+  --prism-gradient: linear-gradient(
+    90deg,
+    #3b6fd4,
+    #2e9457,
+    #a8842a,
+    #cc7a2e,
+    #cc4f88,
+    #7e52d6
+  );
+  --tl-ruler-bg: var(--prism-wash-arrange); /* canvas ruler joins the blue family */
+}
+
+/* ---- Prism chrome: the theme is INTRUSIVE on purpose ------------------------
+   Each pane's toolbar takes a wash of its hue with a colored edge; the arrange
+   ruler, track-header column and dock tabs join in; the transport and status
+   bars carry a full prism gradient strip. Scoped rules here OUTRANK the
+   component defaults (higher specificity than the plain class selectors). */
+
+/* pane toolbars — hue wash + colored bottom edge */
+:root[data-theme="prism"] .pr-toolbar {
+  background: var(--prism-wash-piano);
+  border-bottom: 1px solid var(--prism-piano);
+}
+:root[data-theme="prism"] .mixer-toolbar {
+  background: var(--prism-wash-mixer);
+  border-bottom: 1px solid var(--prism-mixer);
+}
+:root[data-theme="prism"] .ce-toolbar {
+  background: var(--prism-wash-clip);
+  border-bottom: 1px solid var(--prism-clip);
+}
+:root[data-theme="prism"] .sm-toolbar {
+  background: var(--prism-wash-sheet);
+  border-bottom: 1px solid var(--prism-sheet);
+}
+:root[data-theme="prism"] .viz-toolbar {
+  background: var(--prism-wash-viz);
+  border-bottom: 1px solid var(--prism-viz);
+}
+:root[data-theme="prism"] .browser-toolbar {
+  background: var(--prism-wash-browser);
+}
+
+/* arrangement: colored ruler + a blue-tinged header column */
+:root[data-theme="prism"] .tl-ruler,
+:root[data-theme="prism"] .tl-corner {
+  background: var(--prism-wash-arrange);
+  border-bottom: 1px solid var(--prism-arrange);
+}
+:root[data-theme="prism"] .tl-left {
+  background: #eaf1fc;
+}
+:root[data-theme="prism"] .tlh-row {
+  background: #eef4fd;
+}
+/* the scoped base rule above outranks the component's state variants — restate them */
+:root[data-theme="prism"] .tlh-row[data-selected="true"],
+:root[data-theme="prism"] .tlh-row[data-droppable="true"] {
+  background: var(--accent-soft);
+}
+
+/* browser panel + rail pick up the peach family */
+:root[data-theme="prism"] .app-side,
+:root[data-theme="prism"] .app-rail {
+  background: #f9ecd9;
+}
+
+/* dock tab strip: the ACTIVE tab wears the color of the pane it shows */
+:root[data-theme="prism"] .app-dock:has(.mixer-root) .tab[data-on="true"],
+:root[data-theme="prism"] .app-dock-half:has(.mixer-root) .tab[data-on="true"] {
+  color: var(--prism-mixer);
+  border-color: var(--prism-mixer);
+  background: var(--prism-wash-mixer);
+}
+:root[data-theme="prism"] .app-dock:has(.pr-root) .tab[data-on="true"],
+:root[data-theme="prism"] .app-dock-half:has(.pr-root) .tab[data-on="true"] {
+  color: var(--prism-piano);
+  border-color: var(--prism-piano);
+  background: var(--prism-wash-piano);
+}
+:root[data-theme="prism"] .app-dock:has(.ce-root) .tab[data-on="true"],
+:root[data-theme="prism"] .app-dock-half:has(.ce-root) .tab[data-on="true"] {
+  color: var(--prism-clip);
+  border-color: var(--prism-clip);
+  background: var(--prism-wash-clip);
+}
+:root[data-theme="prism"] .app-dock:has(.sm-root) .tab[data-on="true"],
+:root[data-theme="prism"] .app-dock-half:has(.sm-root) .tab[data-on="true"] {
+  color: var(--prism-sheet);
+  border-color: var(--prism-sheet);
+  background: var(--prism-wash-sheet);
+}
+:root[data-theme="prism"] .app-dock:has(.viz-root) .tab[data-on="true"],
+:root[data-theme="prism"] .app-dock-half:has(.viz-root) .tab[data-on="true"] {
+  color: var(--prism-viz);
+  border-color: var(--prism-viz);
+  background: var(--prism-wash-viz);
+}
+
+/* transport + status bars: full prism gradient strips frame the workspace */
+:root[data-theme="prism"] .transport-bar {
+  position: relative;
+}
+:root[data-theme="prism"] .transport-bar::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--prism-gradient);
+  pointer-events: none;
+}
+:root[data-theme="prism"] .status-bar {
+  position: relative;
+}
+:root[data-theme="prism"] .status-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--prism-gradient);
+  pointer-events: none;
 }
 
 /* The tokens are defined here; each pane APPLIES its own in its component stylesheet
