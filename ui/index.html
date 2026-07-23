@@ -11,7 +11,7 @@
          style mirrors theme.css --bg/--text for both values. -->
     <script>
       (function () {
-        var ok = { dark: 1, light: 1, slate: 1, sepia: 1 };
+        var ok = { dark: 1, light: 1, slate: 1, sepia: 1, prism: 1 };
         var t = "dark";
         try {
           var saved = JSON.parse(localStorage.getItem("mydaw.ui.theme"));
@@ -42,6 +42,11 @@
       html[data-theme="sepia"] body {
         background: #ddd0b8;
         color: #33291d;
+      }
+      html[data-theme="prism"],
+      html[data-theme="prism"] body {
+        background: #f1f2f7;
+        color: #24262f;
       }
     </style>
   </head>

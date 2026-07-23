@@ -342,7 +342,8 @@
   --pm-fx: #4dc3cd;   /* effects — teal */
 }
 :root[data-theme="light"] .pm-page,
-:root[data-theme="sepia"] .pm-page {
+:root[data-theme="sepia"] .pm-page,
+:root[data-theme="prism"] .pm-page {
   --pm-inst: #7b46c8;
   --pm-fx: #1f8e98;
 }

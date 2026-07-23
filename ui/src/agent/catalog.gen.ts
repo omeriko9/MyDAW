@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "80f8d49a909442b83b0e012724d95b9b9b8a1cb74adcb7126ff0cfb44c6d7aaf";
+export const AGENT_CATALOG_SHA256 = "d33bb6a606558e5302584ef5bcb9bf302cf0cd4eebe60029e547372eb3b39881";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -8398,7 +8398,8 @@ export const AGENT_CATALOG: AgentCatalog = {
               "dark",
               "light",
               "slate",
-              "sepia"
+              "sepia",
+              "prism"
             ]
           }
         },
@@ -8416,7 +8417,8 @@ export const AGENT_CATALOG: AgentCatalog = {
               "dark",
               "light",
               "slate",
-              "sepia"
+              "sepia",
+              "prism"
             ]
           }
         },
@@ -9281,7 +9283,7 @@ export interface UiOperationMap {
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };
   "ui/selection.get": { req: {  }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
   "ui/selection.set": { req: { "selection": { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; }; "mode"?: "replace" | "add" | "toggle"; }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
-  "ui/theme.set": { req: { "theme": "dark" | "light" | "slate" | "sepia"; }; reply: { "theme": "dark" | "light" | "slate" | "sepia"; } };
+  "ui/theme.set": { req: { "theme": "dark" | "light" | "slate" | "sepia" | "prism"; }; reply: { "theme": "dark" | "light" | "slate" | "sepia" | "prism"; } };
   "ui/tool.set": { req: { "tool": "select" | "draw" | "erase" | "split"; }; reply: { "tool": "select" | "draw" | "erase" | "split"; } };
   "ui/viewport.set": { req: (unknown) | (unknown) | (unknown) | (unknown) | (unknown); reply: { "zoomX": number; "zoomY": number; "scrollX": number; "scrollY": number; } };
 }

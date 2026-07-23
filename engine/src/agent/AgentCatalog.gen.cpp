@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "80f8d49a909442b83b0e012724d95b9b9b8a1cb74adcb7126ff0cfb44c6d7aaf";
+const char kAgentCatalogSha256[] = "d33bb6a606558e5302584ef5bcb9bf302cf0cd4eebe60029e547372eb3b39881";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -8378,7 +8378,8 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "dark",
               "light",
               "slate",
-              "sepia"
+              "sepia",
+              "prism"
             ]
           }
         },
@@ -8396,7 +8397,8 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "dark",
               "light",
               "slate",
-              "sepia"
+              "sepia",
+              "prism"
             ]
           }
         },

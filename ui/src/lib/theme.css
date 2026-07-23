@@ -257,6 +257,63 @@
 }
 
 /* ============================================================================
+ * Prism — the light theme's contract with a violet accent and one DIFFERENT
+ * color per pane (see the pane tints below): the panes carry the identity, so
+ * the shared chrome stays near-neutral light. Some panes sit mid-tone (darker
+ * than light's surfaces) but all of them keep AA contrast with --text.
+ * ==========================================================================*/
+
+:root[data-theme="prism"] {
+  --bg: #f1f2f7;
+  --panel: #fcfcfe;
+  --panel2: #eeeff6;
+  --panel3: #e2e4f0;
+  --border: #d6d8e6;
+  --border-light: #c1c5da;
+  --text: #24262f;
+  --text-dim: #5d6274;
+  --text-faint: #8e94a8;
+  --accent: #6c5ce7;
+  --accent-hover: #5a4bd4;
+  --accent-soft: #e7e2fb;
+  --danger: #cf4444;
+  --danger-soft: #f8dfdf;
+  --warn: #a97b1e;
+  --warn-soft: #f4ead0;
+  --ok: #35924a;
+  --ok-soft: #def0e0;
+  --selection: rgba(108, 92, 231, 0.2);
+  --playhead: #14161c;
+  --shadow: 0 4px 16px rgba(40, 30, 80, 0.18);
+  --shadow-sm: 0 2px 6px rgba(40, 30, 80, 0.12);
+
+  --on-accent: #fff;
+  --accent-active: #4f41c4;
+  --panel-pressed: #dcdfec;
+  --bg-sunken: #e8eaf3;
+  --groove: #dbdeeb;
+  --tooltip-bg: #26243a;
+  --tooltip-text: #efeef8;
+  --scroll-thumb: #c2c6da;
+  --scroll-thumb-hover: #a8aec6;
+  --accent-border: #c9c0f0;
+  --danger-border: #ecc2c2;
+  --danger-text: #a92f2f;
+  --warn-border: #e2cfa0;
+  --warn-text: #7d5c12;
+  --ok-border: #b9dcc0;
+  --ok-text: #256f38;
+  --knob-face: #f7f8fc;
+  --knob-face-hi: #ffffff;
+  --knob-edge: #b6bcd4;
+  --pointer: #3a3d52;
+  --thumb: #7d84a0;
+  --thumb-hover: #5e6480;
+
+  color-scheme: light;
+}
+
+/* ============================================================================
  * Per-pane surface tints
  * ----------------------------------------------------------------------------
  * Each editor gets a slightly different background so you can tell at a glance
@@ -304,6 +361,19 @@
   --pane-clip: #dccdb9;
   --pane-viz: #d6c9b1;
   --pane-browser: #dbcfb6;
+}
+
+/* Prism: not tints — a genuinely different hue per pane (the theme's whole point).
+   All backgrounds keep >= 4.5:1 contrast with --text (#24262f); the visualizer
+   goes deepest (it is canvas-dominated) but stays mid-tone for its labels. */
+:root[data-theme="prism"] {
+  --pane-arrange: #dfe8fb; /* arrangement — sky blue */
+  --pane-mixer: #d6ecdc;   /* mixer — mint green */
+  --pane-piano: #eadff8;   /* piano roll — lavender */
+  --pane-sheet: #f6efd9;   /* sheet music — manuscript cream */
+  --pane-clip: #f9dfe9;    /* clip editor — rose */
+  --pane-viz: #aeb9d2;     /* visualizer — deep steel blue */
+  --pane-browser: #f7e6d2; /* browser — peach */
 }
 
 /* The tokens are defined here; each pane APPLIES its own in its component stylesheet

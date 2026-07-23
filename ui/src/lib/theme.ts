@@ -20,7 +20,7 @@ import { loadPref, oneOf, savePref } from "./prefs";
  * Slate and Sepia are deliberately mid-tone rather than another dark/light pair:
  * Slate is a cool blue-grey with light type, Sepia a warm paper with dark type.
  */
-export type ThemeName = "dark" | "light" | "slate" | "sepia";
+export type ThemeName = "dark" | "light" | "slate" | "sepia" | "prism";
 
 /** window CustomEvent fired (on the MAIN window) after the theme changed. */
 export const THEME_EVENT = "mydaw:themechange";
@@ -30,9 +30,10 @@ export const THEMES: Array<{ value: ThemeName; label: string }> = [
   { value: "slate", label: "Slate" },
   { value: "sepia", label: "Sepia" },
   { value: "light", label: "Light" },
+  { value: "prism", label: "Prism" },
 ];
 
-const isThemeName = oneOf<ThemeName>("dark", "light", "slate", "sepia");
+const isThemeName = oneOf<ThemeName>("dark", "light", "slate", "sepia", "prism");
 
 let current: ThemeName = loadPref<ThemeName>("ui.theme", "dark", isThemeName);
 
@@ -54,7 +55,8 @@ export function themeOf(el: Element): ThemeName {
 }
 
 /** True for themes whose surfaces are light enough to need dark type. */
-export const isLightTheme = (t: ThemeName): boolean => t === "light" || t === "sepia";
+export const isLightTheme = (t: ThemeName): boolean =>
+  t === "light" || t === "sepia" || t === "prism";
 
 /**
  * Track a pop-out document: stamped immediately and on every later switch.

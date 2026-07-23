@@ -65,6 +65,22 @@
   --pr-vel-bg: #333944;
 }
 
+/* Prism — lavender rows matching the pane's hue, dark type. */
+:root[data-theme="prism"] .pr-root {
+  --pr-row-white: #f1eafb;
+  --pr-row-black: #e4dbf4;
+  --pr-grid-fine: #d9cfec;
+  --pr-grid-beat: #c7bade;
+  --pr-grid-bar: #a698c4;
+  --pr-grid-octave: #b8abd2;
+  --pr-key-white: #fbf9fe;
+  --pr-key-black: #2e2a3a;
+  --pr-key-text: #8d84a2;
+  --pr-key-border: #b7aed0;
+  --pr-outside: rgba(120, 105, 160, 0.18);
+  --pr-vel-bg: #ece4f7;
+}
+
 /* Sepia — warm paper rows, dark type. */
 :root[data-theme="sepia"] .pr-root {
   --pr-row-white: #e7dcc4;
