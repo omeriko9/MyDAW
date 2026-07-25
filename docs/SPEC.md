@@ -146,17 +146,27 @@ the entire drag.
   first — fired whenever the Open Recent list changes: save, save-as, load, recover, import).
 
 ### 5.2 Commands — tracks
-- `cmd/track.add {kind:"audio"|"midi"|"instrument"|"folder"|"bus", name?, index?, channels?:1|2}`
-  → `{track: Track}` (instrument = midi track whose first insert is expected to be an instrument)
+- `cmd/track.add {kind:"audio"|"midi"|"instrument"|"folder"|"bus"|"marker"|"arranger"|"chord"|"transpose", name?, index?, channels?:1|2}`
+  → `{track: Track}` (instrument = midi track whose first insert is expected to be an instrument).
+  `marker`/`arranger`/`chord`/`transpose` are VIEW-ROW lanes over project-level data
+  (`markers[]`, `arranger`, `chordEvents[]`, `transposeEvents[]`): max ONE of each per
+  project (`bad_request` on a second), no clips/inserts/sends/mixer strip, invisible to the
+  audio graph like folders, fixed row height, cannot be duplicated.
 - `cmd/track.remove {trackId}` ; `cmd/track.reorder {trackId, newIndex, parentId?}`
 - `cmd/track.set {trackId, patch:{name?,color?,height?,volume?,pan?,mute?,solo?,recordArm?,
-  monitor?, inputDevice?, inputChannel?, outputTarget?, midiTarget?, vcaId?}}` (outputTarget: trackId
+  monitor?, inputDevice?, inputChannel?, outputTarget?, midiTarget?, midiOutChannel?, vcaId?}}` (outputTarget: trackId
   of bus, or "master", or "none"). `vcaId` assigns the track to a VCA group (0 clears; changing it
   is structural). `midiTarget` (number): valid ONLY on `kind:"midi"` tracks — routes the
   track's MIDI into the `kind:"instrument"` track with that id (one shared instrument instance can
   serve several MIDI tracks); the target must exist and be an instrument track (`bad_request`
   otherwise); `0` clears and is always accepted. Changing it is structural (graph rebuild).
   Instrument tracks never carry a midiTarget, so feeder routing is acyclic by construction.
+  `midiOutChannel` (number, 0..16): valid on `kind:"midi"`/`"instrument"` tracks — `0` (default)
+  sends every event on the channel it was played/imported with, `1..16` forces every channel-voice
+  message the track ORIGINATES (baked clip notes + CC, live input thru, injected preview) onto that
+  channel, so N MIDI tracks can each address one part of a multitimbral instrument. Events a feeder
+  delivers to its target keep the FEEDER's channel — the target never re-stamps them. Changing it is
+  structural (the channel is baked into the render plan); notes held across the change are released.
   A routed MIDI track ("feeder") contributes no audio of its own (its inserts are bypassed);
   muting a feeder silences only its events; soloing a feeder keeps its target instrument audible
   (and soloing the instrument keeps its feeders' events flowing).
@@ -243,7 +253,27 @@ the entire drag.
   parameter without the caller assembling paramRefs by hand. `source` is `"live"` when the names
   came from a running plugin and `"model"` when the plugin is not loaded (ids only — names are not
   stored in the project).
-- `cmd/marker.add {beat,name}` / `cmd/marker.set {markerId,patch}` / `cmd/marker.remove {markerId}`
+- `cmd/marker.add {beat,name,endBeat?,color?}` / `cmd/marker.set {markerId,patch}` /
+  `cmd/marker.remove {markerId}`. `endBeat > beat` makes a CYCLE (range) marker (clicking it
+  in the marker lane sets the loop); patching `beat` on a cycle marker moves the whole range,
+  `endBeat <= beat` collapses it to a point marker.
+- **Arranger** (`project.arranger`, §6): `cmd/arranger.addSection {startBeat, endBeat?, name?,
+  color?}` → `{section}`; `cmd/arranger.setSection {sectionId, patch}`;
+  `cmd/arranger.removeSection {sectionId}` (also drops it from the chain);
+  `cmd/arranger.setChain {chain?, active?, locateToStart?}` — replaces the ordered play chain
+  (section ids, repeats allowed; ids must exist) and/or toggles it. An ACTIVE chain drives the
+  transport section-to-section (jump table derived beats→samples; re-derived on tempo change,
+  load, undo; a locate re-enters the chain at the landed section) and OVERRIDES the loop
+  region; after the last chain step playback continues linearly. `cmd/arranger.flatten {}`
+  bakes the chain into a linear timeline (windowed clip copies per step, same rules as
+  take.flatten), then clears sections + chain (structural).
+- **Chord track** (`project.chordEvents`, §6): `cmd/chord.add {beat, root 0..11, quality?,
+  tensions?, bass?}` → `{chord}`; `cmd/chord.set {chordId, patch}`; `cmd/chord.remove
+  {chordId}`. Symbols only (no playback); the piano roll tints chord-tone rows per region.
+- **Transpose track** (`project.transposeEvents`, §6): `cmd/transpose.add {beat, semitones
+  -24..24}` → `{event}`; `cmd/transpose.set {eventId, patch}`; `cmd/transpose.remove
+  {eventId}`. From each event's beat onward MIDI notes are pitch-shifted at graph-bake time
+  (structural; clips keep raw pitches; export/midi is untransposed; audio is not stretched).
 - `cmd/tempo.set {bpm}` ; `cmd/timesig.set {num, den}` (v1: single tempo/timesig; schema is a map
   for future) ; `cmd/loop.set {startBeat,endBeat,enabled}`
 - `cmd/grid.set {division?, snap?, triplet?, swing?}` — patch semantics onto `project.grid` (§6);
@@ -454,14 +484,19 @@ Project = {
   timeSigMap: [{bar: number, num: number, den: number}],
   loop: {startBeat: number, endBeat: number, enabled: boolean},
   grid: {division: number /*beats*/, snap: boolean, triplet: boolean, swing: number /*0..1*/},
-  markers: [{id, beat, name, color?}],
+  markers: [{id, beat, endBeat? /*> beat = cycle marker*/, name, color?}],
+  arranger?: {sections: [{id, name, startBeat, endBeat, color?}], chain: [sectionId],
+              activeChain?: bool},  // omitted when empty; chain ids validated on load
+  chordEvents?: [{id, beat, root /*0..11*/, quality, tensions?, bass?}], // sorted by beat
+  transposeEvents?: [{id, beat, semitones /*-24..24*/}],                 // sorted by beat
   tracks: Track[],                                   // ordered, tree via parentId (folders)
   masterTrack: Track,                                // kind:"master"
   assets: [{id, file, originalPath?, sampleRate, channels, lengthSamples, missing?:bool}],
   nextId: number, ui?: {zoomX?, zoomY?, scrollX?, ...} // opaque to engine
 }
 Track = {
-  id, kind: "audio"|"midi"|"instrument"|"folder"|"bus"|"master", name, color, height?,
+  id, kind: "audio"|"midi"|"instrument"|"folder"|"bus"|"master"|"marker"|"arranger"|"chord"|
+        "transpose" /*view rows: lanes over project-level data, max one each*/, name, color, height?,
   parentId?: number /*folder*/, channels: 1|2,
   volume: number /*linear, 1=0dB*/, pan: number /*-1..1*/, mute, solo, recordArm, monitor?: bool,
   inputDevice?: string, inputChannel?: number, outputTarget: number|"master"|"none",
@@ -469,6 +504,8 @@ Track = {
   midiTarget?: number,  // kind:"midi" only: id of the instrument track this track's MIDI is
                         // routed into (shared instance, §5.2); omitted when 0/none. A load
                         // clears values that don't reference an existing instrument track.
+  midiOutChannel?: number, // kind:"midi"/"instrument": 0/omitted = as played, 1..16 = force this
+                           // track's MIDI onto that channel (multitimbral instruments, §5.2)
   inserts: PluginInstance[],
   eq?: {bypass: bool, bands: EqBand[]},            // per-track channel EQ; omitted when no bands && !bypass
   sends: [{destTrackId, level, pre, enabled}],

@@ -81,6 +81,17 @@ function inputChannelOptions(maxInputs: number, stereo: boolean): SelectOption[]
   return opts;
 }
 
+/** MIDI output channel: "As played" keeps each event's own channel, 1..16 forces every
+ *  note/CC this track sends onto one channel of a multitimbral instrument. */
+const midiChannelOptions: SelectOption[] = [
+  { value: "0", label: "As played" },
+  ...Array.from({ length: 16 }, (_, i) => ({
+    value: String(i + 1),
+    label: `Channel ${i + 1}`,
+    group: "MIDI channel",
+  })),
+];
+
 /** MIDI-learn chip for one paramRef: "MIDI" to learn, "CC<n>" when mapped (click to unmap),
  *  "…" while armed and awaiting a control move. Mirrors store.midiMaps / store.midiLearnArm. */
 function MidiLearnChip({ paramRef, label }: { paramRef: string; label: string }) {
@@ -120,6 +131,7 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
   const isFolder = track.kind === "folder";
   const isAudio = track.kind === "audio";
   const isMidi = track.kind === "midi";
+  const isInstrument = track.kind === "instrument";
   const canArm = track.kind === "audio" || track.kind === "midi" || track.kind === "instrument";
   const buses = project.tracks.filter((t) => t.kind === "bus" && t.id !== id);
 
@@ -295,6 +307,19 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
             options={midiOutOptions}
             onChange={(v) => void setTrack(id, { midiTarget: Number(v) })}
             title="Route this track's MIDI into a shared instrument track"
+          />
+        </div>
+      )}
+
+      {(isMidi || isInstrument) && (
+        <div className="insp-row">
+          <span className="insp-label">Channel</span>
+          <Select
+            className="grow"
+            value={String(track.midiOutChannel ?? 0)}
+            options={midiChannelOptions}
+            onChange={(v) => void setTrack(id, { midiOutChannel: Number(v) })}
+            title="MIDI output channel — force this track's notes onto one channel of a multitimbral instrument"
           />
         </div>
       )}

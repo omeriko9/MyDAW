@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d33bb6a606558e5302584ef5bcb9bf302cf0cd4eebe60029e547372eb3b39881";
+const char kAgentCatalogSha256[] = "0bf87e2fbb80ac3f5d6e8a374aed236bc31de2f8ad05a18a6858c282ee6f5b56";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -12,13 +12,17 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
   "schemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "schemas": {
     "AddableTrackKind": {
-      "description": "kinds creatable via cmd/track.add",
+      "description": "kinds creatable via cmd/track.add; marker/arranger/chord/transpose are view-row lanes over project-level data (max ONE of each per project, no clips/inserts/mixer)",
       "enum": [
         "audio",
         "midi",
         "instrument",
         "folder",
-        "bus"
+        "bus",
+        "marker",
+        "arranger",
+        "chord",
+        "transpose"
       ],
       "type": "string"
     },
@@ -33,6 +37,161 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "Arranger": {
+      "additionalProperties": false,
+      "description": "Arranger track data (project-level): named timeline sections + an ordered play chain. activeChain drives the transport section-to-section (overrides the loop region).",
+      "properties": {
+        "activeChain": {
+          "type": "boolean"
+        },
+        "chain": {
+          "description": "Ordered section ids; repeats allowed.",
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/schemas/ArrangerSection"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sections",
+        "chain"
+      ],
+      "type": "object"
+    },
+    "ArrangerAddSectionReply": {
+      "additionalProperties": false,
+      "properties": {
+        "section": {
+          "$ref": "#/schemas/ArrangerSection"
+        }
+      },
+      "required": [
+        "section"
+      ],
+      "type": "object"
+    },
+    "ArrangerAddSectionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "endBeat": {
+          "description": "must be > startBeat; default startBeat+4",
+          "type": "number"
+        },
+        "name": {
+          "description": "default: next letter A, B, C...",
+          "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "startBeat"
+      ],
+      "type": "object"
+    },
+    "ArrangerRemoveSectionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "sectionId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sectionId"
+      ],
+      "type": "object"
+    },
+    "ArrangerSection": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "endBeat": {
+          "description": "must be > startBeat",
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "startBeat",
+        "endBeat"
+      ],
+      "type": "object"
+    },
+    "ArrangerSectionPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "string"
+        },
+        "endBeat": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ArrangerSetChainRequest": {
+      "additionalProperties": false,
+      "description": "Replace the play chain and/or toggle it. Chain ids must reference existing sections. locateToStart moves the playhead to the first section when activating.",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "chain": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "locateToStart": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ArrangerSetSectionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "patch": {
+          "$ref": "#/schemas/ArrangerSectionPatch"
+        },
+        "sectionId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sectionId",
+        "patch"
+      ],
       "type": "object"
     },
     "Asset": {
@@ -531,6 +690,130 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "ChordAddReply": {
+      "additionalProperties": false,
+      "properties": {
+        "chord": {
+          "$ref": "#/schemas/ChordEvent"
+        }
+      },
+      "required": [
+        "chord"
+      ],
+      "type": "object"
+    },
+    "ChordAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "bass": {
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "quality": {
+          "description": "default \"maj\"",
+          "type": "string"
+        },
+        "root": {
+          "description": "0..11 pitch class, 0 = C",
+          "type": "number"
+        },
+        "tensions": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "beat",
+        "root"
+      ],
+      "type": "object"
+    },
+    "ChordEvent": {
+      "additionalProperties": false,
+      "description": "Chord track symbol: root pitch class 0..11 (0=C) + quality string; optional tensions text and slash-chord bass.",
+      "properties": {
+        "bass": {
+          "description": "0..11 slash-chord bass pitch class; absent = root position",
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "quality": {
+          "description": "\"maj\" \"min\" \"dim\" \"aug\" \"maj7\" \"min7\" \"7\" \"sus2\" \"sus4\" ...",
+          "type": "string"
+        },
+        "root": {
+          "description": "0..11 pitch class, 0 = C",
+          "type": "number"
+        },
+        "tensions": {
+          "description": "display text, e.g. \"9\" or \"b13\"",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "beat",
+        "root",
+        "quality"
+      ],
+      "type": "object"
+    },
+    "ChordPatch": {
+      "additionalProperties": false,
+      "properties": {
+        "bass": {
+          "description": "-1 clears (root position)",
+          "type": "number"
+        },
+        "beat": {
+          "type": "number"
+        },
+        "quality": {
+          "type": "string"
+        },
+        "root": {
+          "type": "number"
+        },
+        "tensions": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ChordRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "chordId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "chordId"
+      ],
+      "type": "object"
+    },
+    "ChordSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "chordId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/ChordPatch"
+        }
+      },
+      "required": [
+        "chordId",
+        "patch"
+      ],
+      "type": "object"
+    },
     "Clip": {
       "anyOf": [
         {
@@ -672,6 +955,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "ClipDuplicateRequest": {
       "additionalProperties": false,
       "properties": {
+        "atSource": {
+          "description": "true: copies land ON the originals (same startBeat) for move-by-delta gestures; default places them right after (Ctrl+D).",
+          "type": "boolean"
+        },
         "clipIds": {
           "items": {
             "type": "number"
@@ -1450,6 +1737,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "color": {
           "type": "string"
         },
+        "endBeat": {
+          "description": "Cycle (range) marker end; > beat = range, absent/0 = point marker. Clicking a cycle marker sets the loop.",
+          "type": "number"
+        },
         "id": {
           "type": "number"
         },
@@ -1479,6 +1770,13 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "beat": {
           "type": "number"
         },
+        "color": {
+          "type": "string"
+        },
+        "endBeat": {
+          "description": "Cycle (range) marker end; > beat = range, absent/0 = point marker. Clicking a cycle marker sets the loop.",
+          "type": "number"
+        },
         "name": {
           "type": "string"
         }
@@ -1497,6 +1795,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "color": {
           "type": "string"
+        },
+        "endBeat": {
+          "description": "Set > beat for a cycle marker; <= beat collapses to a point marker.",
+          "type": "number"
         },
         "name": {
           "type": "string"
@@ -2596,9 +2898,20 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "Project": {
       "additionalProperties": false,
       "properties": {
+        "arranger": {
+          "$ref": "#/schemas/Arranger",
+          "description": "Absent when empty (no sections/chain)."
+        },
         "assets": {
           "items": {
             "$ref": "#/schemas/Asset"
+          },
+          "type": "array"
+        },
+        "chordEvents": {
+          "description": "Chord track symbols, sorted by beat; absent when empty.",
+          "items": {
+            "$ref": "#/schemas/ChordEvent"
           },
           "type": "array"
         },
@@ -2647,6 +2960,13 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "description": "ordered, tree via parentId (folders)",
           "items": {
             "$ref": "#/schemas/Track"
+          },
+          "type": "array"
+        },
+        "transposeEvents": {
+          "description": "Transpose track events, sorted by beat; absent when empty.",
+          "items": {
+            "$ref": "#/schemas/TransposeEvent"
           },
           "type": "array"
         },
@@ -3179,6 +3499,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "kind": {
           "$ref": "#/schemas/TrackKind"
         },
+        "midiOutChannel": {
+          "description": "MIDI output channel (kind \"midi\"/\"instrument\"): 0/absent = as played (events keep their own channel), 1..16 = force this track's MIDI onto that channel — how several MIDI tracks drive one multitimbral instrument (SPEC §6).",
+          "type": "number"
+        },
         "midiTarget": {
           "description": "MIDI routing (kind \"midi\" only): id of an Instrument-kind track that receives this track's MIDI — one shared plugin instance for N midi tracks. Absent/0 = none, the track plays through its own inserts (SPEC §6).",
           "type": "number"
@@ -3408,7 +3732,11 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "instrument",
         "folder",
         "bus",
-        "master"
+        "master",
+        "marker",
+        "arranger",
+        "chord",
+        "transpose"
       ],
       "type": "string"
     },
@@ -3426,6 +3754,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "inputDevice": {
           "type": "string"
+        },
+        "midiOutChannel": {
+          "description": "kind \"midi\"/\"instrument\" — force this track's MIDI onto channel 1..16 (for multitimbral instruments); 0 = as played.",
+          "type": "number"
         },
         "midiTarget": {
           "description": "kind \"midi\" only — Instrument-track id to route this track's MIDI into; 0 clears.",
@@ -3627,6 +3959,97 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "$ref": "#/schemas/MetronomeState"
         }
       },
+      "type": "object"
+    },
+    "TransposeAddReply": {
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "$ref": "#/schemas/TransposeEvent"
+        }
+      },
+      "required": [
+        "event"
+      ],
+      "type": "object"
+    },
+    "TransposeAddRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "semitones": {
+          "description": "-24..24",
+          "type": "number"
+        }
+      },
+      "required": [
+        "beat",
+        "semitones"
+      ],
+      "type": "object"
+    },
+    "TransposeEvent": {
+      "additionalProperties": false,
+      "description": "From `beat` onward MIDI notes are shifted by `semitones` at playback (baked into the render plan; clips keep raw pitches, export/midi is untransposed).",
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "id": {
+          "type": "number"
+        },
+        "semitones": {
+          "description": "-24..24",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "beat",
+        "semitones"
+      ],
+      "type": "object"
+    },
+    "TransposePatch": {
+      "additionalProperties": false,
+      "properties": {
+        "beat": {
+          "type": "number"
+        },
+        "semitones": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TransposeRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "eventId"
+      ],
+      "type": "object"
+    },
+    "TransposeSetRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "eventId": {
+          "type": "number"
+        },
+        "patch": {
+          "$ref": "#/schemas/TransposePatch"
+        }
+      },
+      "required": [
+        "eventId",
+        "patch"
+      ],
       "type": "object"
     },
     "UiLayout": {
@@ -3887,6 +4310,180 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/arranger.addSection",
+      "category": "arrangement",
+      "description": "Add a named arranger section over a beat range (arranger track, project-level).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "section.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ArrangerAddSectionRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ArrangerAddSectionReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "name": "Verse",
+            "startBeat": 0,
+            "endBeat": 16
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/arranger.flatten",
+      "category": "arrangement",
+      "description": "Bake the arranger chain into a linear timeline (windowed clip copies per step), then clear sections and chain.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "cmd/arranger.removeSection",
+      "category": "arrangement",
+      "description": "Remove an arranger section (also removed from the chain).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ArrangerRemoveSectionRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "sectionId": 12
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/arranger.setChain",
+      "category": "arrangement",
+      "description": "Replace the arranger play chain and/or activate it. Active chain jumps the transport section-to-section and OVERRIDES the loop region.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ArrangerSetChainRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "chain": [
+              12,
+              12,
+              14
+            ],
+            "active": true,
+            "locateToStart": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/arranger.setSection",
+      "category": "arrangement",
+      "description": "Patch an arranger section's name, range, or color.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ArrangerSetSectionRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "sectionId": 12,
+            "patch": {
+              "name": "Chorus",
+              "endBeat": 32
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/automation.clear",
       "category": "automation",
       "description": "Remove automation points from a lane, either entirely or only within a span of bars/beats.",
@@ -4049,6 +4646,111 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                 "value": 0.5
               }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/chord.add",
+      "category": "arrangement",
+      "description": "Add a chord symbol to the chord track at a beat (root 0..11, 0 = C).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "chord.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/ChordAddRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ChordAddReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "beat": 8,
+            "root": 9,
+            "quality": "min7"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/chord.remove",
+      "category": "arrangement",
+      "description": "Remove a chord symbol from the chord track.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ChordRemoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "chordId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/chord.set",
+      "category": "arrangement",
+      "description": "Patch a chord symbol's beat, root, quality, tensions, or bass.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ChordSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "chordId": 31,
+            "patch": {
+              "quality": "7",
+              "tensions": "b9"
+            }
           }
         }
       ]
@@ -5765,6 +6467,109 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/transpose.add",
+      "category": "arrangement",
+      "description": "Add a transpose event: from this beat onward MIDI playback shifts by semitones (-24..24). Baked at plan build; clips keep raw pitches.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "event.id"
+      ],
+      "input": {
+        "$ref": "#/schemas/TransposeAddRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/TransposeAddReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "beat": 32,
+            "semitones": 2
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/transpose.remove",
+      "category": "arrangement",
+      "description": "Remove a transpose event.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "destructive"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TransposeRemoveRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "eventId": 44
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/transpose.set",
+      "category": "arrangement",
+      "description": "Patch a transpose event's beat or semitones.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TransposeSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "eventId": 44,
+            "patch": {
+              "semitones": -3
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/vca.add",
       "category": "vca",
       "description": "Add a VCA control channel.",
@@ -6430,7 +7235,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "export/midi",
       "category": "export",
-      "description": "Export project MIDI content to a Standard MIDI File.",
+      "description": "Export project MIDI content to a Standard MIDI File (format 1, one track per midi/instrument track, on each track's midiOutChannel).",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -8019,7 +8824,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "ui/layout.set",
       "category": "ui",
-      "description": "Open, close, or choose browser, inspector, minimap, agent, and bottom-dock layout.",
+      "description": "Open, close, or choose browser, inspector, minimap, agent, and bottom-dock layout (incl. the split dock second pane).",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8065,6 +8870,24 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                 "type": "null"
               }
             ]
+          },
+          "bottomTab2": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mixer",
+                  "pianoRoll",
+                  "clipEditor",
+                  "sheetMusic",
+                  "visualizer"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Second bottom-dock pane (split dock); null closes the split."
           }
         }
       },
@@ -8083,7 +8906,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "ui/midi.transform",
       "category": "ui",
-      "description": "Run a pure high-level MIDI transformation on explicit or selected notes.",
+      "description": "Run a pure high-level MIDI transformation (transpose, legato, humanize, scale/reverse, delete doubles) on explicit or selected notes; one undoable notes.edit.",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8355,7 +9178,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "ui/theme.set",
       "category": "ui",
-      "description": "Apply the per-user light or dark theme.",
+      "description": "Apply a UI theme (dark, light, slate, sepia, prism).",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8477,7 +9300,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "ui/viewport.set",
       "category": "ui",
-      "description": "Patch or fit the viewport of the timeline or an editor pane.",
+      "description": "Patch or fit the viewport of the timeline or an editor pane (fit uses the same zoom-to-content path as the Z key).",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8741,10 +9564,18 @@ const char kAgentPromptsJson[] = R"MYDAW_AGENT({
 }
 )MYDAW_AGENT";
 constexpr std::string_view kBatchableOperationNames[] = {
+    "cmd/arranger.addSection",
+    "cmd/arranger.flatten",
+    "cmd/arranger.removeSection",
+    "cmd/arranger.setChain",
+    "cmd/arranger.setSection",
     "cmd/automation.clear",
     "cmd/automation.ramp",
     "cmd/automation.set",
     "cmd/cc.edit",
+    "cmd/chord.add",
+    "cmd/chord.remove",
+    "cmd/chord.set",
     "cmd/clip.addAudio",
     "cmd/clip.addMidi",
     "cmd/clip.delete",
@@ -8784,6 +9615,9 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/track.setEq",
     "cmd/track.setSend",
     "cmd/track.unfreeze",
+    "cmd/transpose.add",
+    "cmd/transpose.remove",
+    "cmd/transpose.set",
     "cmd/vca.add",
     "cmd/vca.remove",
     "cmd/vca.set",

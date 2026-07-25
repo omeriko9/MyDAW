@@ -326,7 +326,7 @@ void addTrackFields(FieldSet& fields) {
     static const char* names[] = {
         "id", "index", "kind", "name", "color", "height", "parentId", "channels", "volume",
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
-        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "vcaId", "eq",
+        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiOutChannel", "vcaId", "eq",
         "clipCount", "insertCount", "sendCount", "automationLaneCount", "takeFolderCount",
         "activeVersionId", "versions",
     };
@@ -358,6 +358,8 @@ json trackSummary(const Track& track) {
         item["frozenAssetId"] = track.frozenAssetId;
     if (track.midiTarget != 0)
         item["midiTarget"] = track.midiTarget;
+    if (track.midiOutChannel > 0)
+        item["midiOutChannel"] = track.midiOutChannel;
     if (track.vcaId != 0)
         item["vcaId"] = track.vcaId;
     item["eq"] = toJson(track.eq);
@@ -614,6 +616,11 @@ json projectSummary(App& app, QueryBudget& budget) {
                 {"markerCount", project.markers.size()},
                 {"pluginInstanceCount", pluginCount},
                 {"vcaCount", project.vcas.size()},
+                {"arrangerSectionCount", project.arranger.sections.size()},
+                {"arrangerChainLength", project.arranger.chain.size()},
+                {"arrangerChainActive", project.arranger.activeChain},
+                {"chordEventCount", project.chordEvents.size()},
+                {"transposeEventCount", project.transposeEvents.size()},
                 {"tempoMapCount", project.tempoMap.size()},
                 {"timeSigMapCount", project.timeSigMap.size()},
                 {"tempo", tempo},
@@ -630,7 +637,9 @@ json projectSummary(App& app, QueryBudget& budget) {
 FieldSet projectSummaryFields() {
     return FieldSet{"name", "formatVersion", "sampleRate", "path", "dirty", "trackCount",
                     "clipCount", "noteCount", "controllerCount", "assetCount", "markerCount",
-                    "pluginInstanceCount", "vcaCount", "tempoMapCount", "timeSigMapCount",
+                    "pluginInstanceCount", "vcaCount", "arrangerSectionCount",
+                    "arrangerChainLength", "arrangerChainActive", "chordEventCount",
+                    "transposeEventCount", "tempoMapCount", "timeSigMapCount",
                     "tempo", "timeSignature", "loop", "grid"};
 }
 
@@ -974,7 +983,69 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 continue;
             items.push_back(toJson(marker));
         }
-        fields = {"id", "beat", "name", "color"};
+        fields = {"id", "beat", "endBeat", "name", "color"};
+    } else if (args.view == "arranger") {
+        // Arranger track data (TRACK_TYPES_PLAN §3.6): sections + play chain in ONE item
+        // (the chain references section ids, so splitting them would force two round
+        // trips for every edit).
+        if (!validateWhereKeys(args.where, {}, errCode, errMsg))
+            return json();
+        const Arranger& a = app.model.project.arranger;
+        budget.inspect(a.sections.size() + a.chain.size(), "arranger entries");
+        items.push_back(toJson(a));
+        fields = {"sections", "chain", "activeChain"};
+    } else if (args.view == "chord_events") {
+        // Chord track symbols (root 0..11, 0 = C), sorted by beat.
+        if (!validateWhereKeys(args.where, {"chordId", "beat"}, errCode, errMsg))
+            return json();
+        uint64_t chordId = 0;
+        bool hasChordId = false;
+        double beat = 0.0;
+        bool hasBeat = false;
+        if (!readId(args.where, "chordId", false, false, chordId, hasChordId, errCode, errMsg) ||
+            !readNumber(args.where, "beat", 0.0, beat, hasBeat, errCode, errMsg))
+            return json();
+        budget.inspect(app.model.project.chordEvents.size(), "chord events");
+        bool found = !hasChordId;
+        for (const ChordEvent& chord : app.model.project.chordEvents) {
+            if (hasChordId && chord.id != chordId)
+                continue;
+            found = true;
+            if (hasBeat && chord.beat != beat)
+                continue;
+            items.push_back(toJson(chord));
+        }
+        if (!found) {
+            fail(errCode, errMsg, "not_found", "chordId not found: " + std::to_string(chordId));
+            return json();
+        }
+        fields = {"id", "beat", "root", "quality", "tensions", "bass"};
+    } else if (args.view == "transpose_events") {
+        // Transpose track events (playback pitch offset from beat onward), sorted by beat.
+        if (!validateWhereKeys(args.where, {"eventId", "beat"}, errCode, errMsg))
+            return json();
+        uint64_t eventId = 0;
+        bool hasEventId = false;
+        double beat = 0.0;
+        bool hasBeat = false;
+        if (!readId(args.where, "eventId", false, false, eventId, hasEventId, errCode, errMsg) ||
+            !readNumber(args.where, "beat", 0.0, beat, hasBeat, errCode, errMsg))
+            return json();
+        budget.inspect(app.model.project.transposeEvents.size(), "transpose events");
+        bool found = !hasEventId;
+        for (const TransposeEvent& ev : app.model.project.transposeEvents) {
+            if (hasEventId && ev.id != eventId)
+                continue;
+            found = true;
+            if (hasBeat && ev.beat != beat)
+                continue;
+            items.push_back(toJson(ev));
+        }
+        if (!found) {
+            fail(errCode, errMsg, "not_found", "eventId not found: " + std::to_string(eventId));
+            return json();
+        }
+        fields = {"id", "beat", "semitones"};
     } else if (args.view == "assets") {
         if (!validateWhereKeys(args.where, {"assetId", "missing"}, errCode, errMsg))
             return json();
@@ -1094,9 +1165,13 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
             if (!hasType || type == "output")
                 items.push_back(json{{"trackId", track.id}, {"trackName", track.name},
                                      {"type", "output"}, {"target", toJson(track.outputTarget)}});
-            if (track.midiTarget != 0 && (!hasType || type == "midi"))
-                items.push_back(json{{"trackId", track.id}, {"trackName", track.name},
-                                     {"type", "midi"}, {"target", track.midiTarget}});
+            if (track.midiTarget != 0 && (!hasType || type == "midi")) {
+                json item{{"trackId", track.id}, {"trackName", track.name},
+                          {"type", "midi"}, {"target", track.midiTarget}};
+                if (track.midiOutChannel > 0)
+                    item["midiOutChannel"] = track.midiOutChannel; // 1..16 forced channel
+                items.push_back(std::move(item));
+            }
             if (track.vcaId != 0 && (!hasType || type == "vca"))
                 items.push_back(json{{"trackId", track.id}, {"trackName", track.name},
                                      {"type", "vca"}, {"target", track.vcaId}});
@@ -1111,7 +1186,8 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 }
             }
         });
-        fields = {"trackId", "trackName", "type", "target", "sendIndex", "level", "pre", "enabled"};
+        fields = {"trackId", "trackName", "type", "target", "midiOutChannel", "sendIndex",
+                  "level", "pre", "enabled"};
     } else if (args.view == "sends") {
         if (!validateWhereKeys(args.where, {"trackId", "sendIndex", "destTrackId"},
                                errCode, errMsg))
@@ -1586,7 +1662,17 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
         }
         fields = {"level", "line"};
     } else {
-        fail(errCode, errMsg, "unknown_view", "unknown query view: " + args.view);
+        // Self-documenting for agents: name every view so a typo'd call teaches the
+        // full surface in one round trip. Keep in sync with the chain above.
+        fail(errCode, errMsg, "unknown_view",
+             "unknown query view: " + args.view +
+                 " — valid views: project_summary, tempo_map, time_signature_map, grid, "
+                 "loop, tracks, track, clips, clip, notes, controllers, automation, "
+                 "markers, arranger, chord_events, transpose_events, assets, vcas, vca, "
+                 "take_folders, takes, routing, sends, plugin_instances, plugin_params, "
+                 "plugin_presets, plugin_registry, transport, engine_status, "
+                 "audio_devices, midi_inputs, midi_maps, recent_projects, settings, "
+                 "unresolved_plugins, logs");
         return json();
     }
 

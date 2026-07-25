@@ -189,6 +189,18 @@ void TrackNode::adoptMidiState(const TrackNode& prev) noexcept {
     feederWasMuted_ = prev.feederWasMuted_;
     adoptedHandoff_ = true;
 
+    // Output channel just changed (inspector "MIDI Channel"): every note the adopted
+    // ledger holds is sounding on the OLD channel and its release would now be stamped
+    // with the NEW one. Queue the offs here, while the ledger still knows where they
+    // went — the clip half is caught by the orphan scan below, live/feeder notes are
+    // not, and a note held across the edit would drone until panic.
+    if (prev.cfg_.midiOutChannel != cfg_.midiOutChannel && liveNotes_.total > 0) {
+        for (int pitch = 0; pitch < 128; ++pitch)
+            for (int ch = 0; ch < 16; ++ch)
+                for (int k = 0; k < liveNotes_.count[pitch][ch]; ++k)
+                    pendingOffs_.push(pitch, ch, /*fromClip=*/false);
+    }
+
     // Rebuild-orphan scan (control thread, non-RT — we are pre-publish): a tracked
     // clip note with NO matching note-off at/after the playhead in the NEW baked
     // events belongs to a clip that was deleted or moved away — queue its release
@@ -211,7 +223,9 @@ void TrackNode::adoptMidiState(const TrackNode& prev) noexcept {
                     continue;
                 bool hasOff = false;
                 for (size_t i = lo; i < ev.size(); ++i) {
-                    if (!ev[i].on && ev[i].pitch == pitch && (ev[i].channel & 0x0F) == ch) {
+                    // Baked channels are raw; the ledger speaks the OUTPUT channel.
+                    if (!ev[i].on && ev[i].pitch == pitch &&
+                        outChannelRt(ev[i].channel & 0x0F) == ch) {
                         hasOff = true;
                         break;
                     }
@@ -252,10 +266,11 @@ void TrackNode::scheduleCcChaseRt(int64_t s0) noexcept {
         const CcEvent& e = cc[static_cast<size_t>(last[ctl])];
         MidiEvent m = MidiEvent::make3(e.data[0], e.data[1], e.data[2], 0);
         m.size = e.size;
+        applyOutChannelRt(m);
         midiScratch_.add(m);
     }
     if (hasPitchBend_ && last[128] < 0)
-        midiScratch_.add(MidiEvent::pitchBend(0, 0, 0)); // re-center before first point
+        midiScratch_.add(MidiEvent::pitchBend(outChannelRt(0), 0, 0)); // re-center before first point
 }
 
 void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
@@ -309,6 +324,7 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
             MidiEvent m = MidiEvent::make3(e.data[0], e.data[1], e.data[2],
                                            static_cast<int>(e.sample - s0));
             m.size = e.size;
+            applyOutChannelRt(m);
             midiScratch_.add(m);
         }
     }
@@ -328,7 +344,7 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
     for (size_t i = lo; i < ev.size() && ev[i].sample < s1; ++i) {
         const NoteEvent& e = ev[i];
         const int off = static_cast<int>(e.sample - s0);
-        const int ch = e.channel & 0x0F;
+        const int ch = outChannelRt(e.channel & 0x0F);
         if (e.on) {
             if (midiScratch_.add(MidiEvent::noteOn(ch, e.pitch, e.velocity, off)))
                 clipNotes_.noteOn(e.pitch, ch); // counted per on — overlaps release cleanly
@@ -442,8 +458,9 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
     // release, and after a rebuild the adopted ledger may not know a note the old
     // plan's node was tracking (a spurious off is harmless). Ons stay gated.
     if (liveMidi) {
-        for (const MidiEvent& e : *liveMidi) {
+        for (MidiEvent e : *liveMidi) {
             if (cfg_.liveMidi || e.isNoteOff() || e.isAllNotesOff() || e.isAllSoundOff()) {
+                applyOutChannelRt(e); // play what the track plays, keyboard channel or not
                 if (midiScratch_.add(e))
                     trackLiveNoteRt(e);
                 else if (e.isNoteOff())
@@ -455,6 +472,7 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
     if (!injectedMidi_.empty()) {
         for (MidiEvent e : injectedMidi_) {
             e.sampleOffset = 0;
+            applyOutChannelRt(e);
             if (midiScratch_.add(e))
                 trackLiveNoteRt(e);
             else if (e.isNoteOff())

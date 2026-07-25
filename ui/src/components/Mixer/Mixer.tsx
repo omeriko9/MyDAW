@@ -11,6 +11,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { loadBoolPref, loadPref, oneOf, savePref } from "../../lib/prefs";
+import { isViewRowKind } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
@@ -96,6 +97,7 @@ export default function Mixer() {
     const regular = project.tracks.filter(
       (t) =>
         t.kind !== "folder" &&
+        !isViewRowKind(t.kind) && // marker/arranger/chord/transpose lanes have no channel
         t.kind !== "bus" &&
         t.kind !== "master" &&
         (showMidi || t.kind !== "midi") &&

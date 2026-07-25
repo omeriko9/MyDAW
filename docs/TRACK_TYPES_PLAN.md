@@ -1,9 +1,19 @@
 # Track Types Plan — full Cubase 13 track-list parity
 
-Status: **PLAN ONLY** (2026-07-22). Nothing in this document is implemented unless the
-"MyDAW today" column says so. Companion work already shipped: the CPR importer now emits
-per-track **skip warnings** (surfaced as a toast after Import Project), so every type
-listed here is at least *visible* to the user when a `.cpr` contains it.
+Status: **IMPLEMENTED** (2026-07-25) except the items marked OPEN below. Shipped in this
+batch: native `marker`/`arranger`/`chord`/`transpose` view-row track kinds (project-level
+data + timeline lanes + inspector editors + commands + agent catalog), arranger chain
+playback (Transport jump table) + flatten, transpose bake, piano-roll chord-tone
+highlight, cycle markers (`Marker.endBeat`), and CPR import of Group/FX→bus, VCA→Vca,
+sampler→instrument+empty `builtin:sampler`, view-row lanes.
+
+OPEN (needs fixtures/format archaeology — warn honestly meanwhile):
+- CPR **event** decode for marker/chord/transpose/arranger lanes: every available fixture
+  (C13 all-tracks + the 2004-2024 corpus) stores these tracks EMPTY, so the event byte
+  formats are unevidenced. The lanes import empty with a warning.
+- CPR **source routing** to Group/FX buses (`OutputBusValue` ordinal semantics unpinned —
+  needs a fixture with varied routing) and **send** import; VCA **membership** attr.
+- Sampler phase B (embedded sample blob), 3.9 ruler, 3.10 video, 3.11 tempo/sig lanes.
 
 Evidence base: the corpus scan of `c:\temp\cubase13_all_tracks.cpr` + the exported track
 archives in `c:\temp\cubase13_all_tracks_exported` (one file per track type), plus the

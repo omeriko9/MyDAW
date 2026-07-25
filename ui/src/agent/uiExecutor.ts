@@ -11,6 +11,16 @@
 import { applyTheme, type ThemeName } from "../lib/theme";
 import { savePref } from "../lib/prefs";
 import {
+  invokeEditAction,
+  loopToSelection,
+  zoomToFitPane,
+  type KeyContextName,
+} from "../lib/keyboard";
+import { pasteAt } from "../lib/clipboard";
+import * as MF from "../lib/midiFunctions";
+import { editNotes } from "../store/actions";
+import type { MidiClip, Note } from "../protocol/types";
+import {
   useStore,
   type BottomTab,
   type FocusedPane,
@@ -128,10 +138,14 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
 
     case "ui/viewport.set": {
       if (args.fit !== undefined) {
-        throw new UiOpError(
-          "unsupported_operation",
-          "viewport fit-to-content is not available from the agent yet; set explicit zoom/scroll",
-        );
+        // Fit-to-content: same path as the Z key / zoom pills (per-pane handlers).
+        const pane = typeof args.pane === "string" ? args.pane : store.focusedPane;
+        const fitPane: KeyContextName =
+          pane === "pianoRoll" || pane === "clipEditor" || pane === "sheetMusic"
+            ? pane
+            : "timeline";
+        const applied = zoomToFitPane(fitPane);
+        return { fit: true, pane: fitPane, applied };
       }
       const patch: Record<string, number> = {};
       for (const key of ["zoomX", "zoomY", "scrollX", "scrollY"] as const) {
@@ -160,6 +174,12 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
         patch.bottomTab = args.bottomTab as BottomTab;
       } else if (args.bottomTab === null) {
         patch.bottomTab = null;
+      }
+      // Split dock: the second bottom pane (UI_IMPROVE Tier 2); null closes the split.
+      if (typeof args.bottomTab2 === "string" && BOTTOM_TABS.has(args.bottomTab2)) {
+        patch.bottomTab2 = args.bottomTab2 as BottomTab;
+      } else if (args.bottomTab2 === null) {
+        patch.bottomTab2 = null;
       }
       store.setPanels(patch);
       return { applied: patch };
@@ -202,23 +222,106 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
 
     case "ui/edit.invoke": {
       const action = String(args.action);
-      if (action === "clearSelection") {
-        store.clearSelection();
-        return { action };
+      switch (action) {
+        case "clearSelection":
+          store.clearSelection();
+          return { action };
+        case "paste": {
+          // atBeat pastes at an explicit position; otherwise the context-aware
+          // menu path (focused pane first) decides, exactly like Ctrl+V.
+          const atBeat = asNumber(args.atBeat);
+          if (atBeat !== undefined) {
+            void pasteAt(atBeat).catch((err) => console.warn("[agent] paste failed:", err));
+            return { action, atBeat };
+          }
+          invokeEditAction("paste");
+          return { action };
+        }
+        case "copy":
+        case "cut":
+        case "delete":
+        case "duplicate":
+        case "selectAll":
+          // Same context-aware entry point the menu bar uses (PINNED name).
+          invokeEditAction(action);
+          return { action };
+        case "zoomToFit": {
+          const fp = store.focusedPane;
+          const pane: KeyContextName =
+            fp === "pianoRoll" || fp === "clipEditor" || fp === "sheetMusic" ? fp : "timeline";
+          return { action, applied: zoomToFitPane(pane) };
+        }
+        case "locatorsToSelection":
+          // "P" — loop to the selected clips' bounds (no clip selection = no-op).
+          loopToSelection();
+          return { action };
+        default:
+          throw new UiOpError("invalid_arguments", `unknown edit action: ${action}`);
       }
-      throw new UiOpError(
-        "unsupported_operation",
-        `ui/edit.invoke "${action}" is not available from the agent in this build; use ` +
-          "mydaw_execute/mydaw_batch for engine edits",
-      );
     }
 
-    case "ui/midi.transform":
-      throw new UiOpError(
-        "unsupported_operation",
-        "ui/midi.transform is not available from the agent in this build; use mydaw_execute " +
-          "cmd/notes.edit or cmd/notes.quantize for MIDI edits",
+    case "ui/midi.transform": {
+      // The Piano Roll's MIDI-functions menu, agent-flavored: pure transforms from
+      // lib/midiFunctions over explicit notes (clipId+noteIds), a whole clip, or the
+      // current note selection in the active MIDI clip; committed as ONE cmd/notes.edit.
+      const transform = String(args.transform);
+      const project = store.project;
+      if (!project) throw new UiOpError("no_project", "no project loaded");
+      const explicitClipId = asNumber(args.clipId);
+      const clipId = explicitClipId ?? store.activeMidiClipId ?? undefined;
+      if (clipId === undefined)
+        throw new UiOpError(
+          "invalid_arguments",
+          "no clipId given and no active MIDI clip — pass clipId (mydaw_query view:clips)",
+        );
+      let clip: MidiClip | undefined;
+      for (const t of project.tracks) {
+        const c = t.clips.find((x) => x.id === clipId);
+        if (c) {
+          if (c.type !== "midi") throw new UiOpError("invalid_arguments", "clipId is not a MIDI clip");
+          clip = c;
+          break;
+        }
+      }
+      if (!clip) throw new UiOpError("not_found", `clipId not found: ${clipId}`);
+      const idFilter = asIntArray(args.noteIds);
+      const selected = explicitClipId === undefined && idFilter.length === 0
+        ? store.selection.noteIds
+        : [];
+      const wanted = idFilter.length > 0 ? idFilter : selected;
+      const notes: Note[] =
+        wanted.length > 0 ? clip.notes.filter((n) => wanted.includes(n.id)) : [...clip.notes];
+      if (notes.length === 0)
+        throw new UiOpError("invalid_arguments", "no notes matched (clip empty or bad noteIds)");
+      const o = asObject(args.options);
+      const num = (key: string, fallback?: number): number => {
+        const v = asNumber(o[key]);
+        if (v === undefined && fallback === undefined)
+          throw new UiOpError("invalid_arguments", `options.${key} is required for ${transform}`);
+        return v ?? (fallback as number);
+      };
+      let patch: MF.NotesPatch;
+      switch (transform) {
+        case "transpose": patch = MF.transpose(notes, num("semitones")); break;
+        case "fixedLength": patch = MF.fixedLength(notes, num("lengthBeats")); break;
+        case "legato": patch = MF.legato(notes); break;
+        case "humanizeTiming": patch = MF.humanizeTiming(notes, num("maxBeats", 0.05)); break;
+        case "humanizeVelocity": patch = MF.humanizeVelocity(notes, num("amount", 10)); break;
+        case "scaleVelocity": patch = MF.scaleVelocity(notes, num("multiplier", 1), num("add", 0)); break;
+        case "reverse": patch = MF.reverse(notes); break;
+        case "deleteDoubles": patch = MF.deleteDoubles(notes); break;
+        default:
+          throw new UiOpError("invalid_arguments", `unknown transform: ${transform}`);
+      }
+      const updates = patch.update?.length ?? 0;
+      const removes = patch.remove?.length ?? 0;
+      if (updates === 0 && removes === 0)
+        return { transform, clipId, notes: notes.length, updated: 0, removed: 0 };
+      void editNotes(clipId, patch).catch((err) =>
+        console.warn("[agent] midi.transform commit failed:", err),
       );
+      return { transform, clipId, notes: notes.length, updated: updates, removed: removes };
+    }
 
     default:
       throw new UiOpError("unknown_operation", `unknown UI operation: ${operation}`);

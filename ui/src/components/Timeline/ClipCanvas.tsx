@@ -23,16 +23,32 @@ import type { Selection, Tool } from "../../store/store";
 import type { RecordingNotesEvent } from "../../protocol/types";
 import {
   addAudioClip,
+  addChord,
+  addMarker,
   addMidiClip,
   addPlugin,
   addTrack,
+  addTranspose,
   commitParam,
   deleteClips,
   duplicateClips,
+  flattenArranger,
+  locate,
   moveClips,
+  removeArrangerSection,
+  removeChord,
+  removeMarker,
+  removeTranspose,
   resizeClip,
+  addArrangerSection,
+  setArrangerChain,
+  setArrangerSection,
   setAutomation,
+  setChord,
   setClip,
+  setLoop,
+  setMarker,
+  setTranspose,
   splitClips,
   processAudioClip,
   stretchClip,
@@ -40,6 +56,14 @@ import {
   undo,
   redo,
 } from "../../store/actions";
+import {
+  CHORD_QUALITIES,
+  PITCH_NAMES,
+  drawViewRow,
+  viewRowHit,
+  yToTranspose,
+} from "./viewRows";
+import { isViewRowKind } from "../../protocol/types";
 import { copySelection, cutSelection, findClipById, hasClipboard, pasteAt } from "../../lib/clipboard";
 import { useAutomationUi } from "./automationUi";
 import { registerKeyContext, toggleLoop, zoomToFitPane } from "../../lib/keyboard";
@@ -73,10 +97,12 @@ import {
   laneValueToY,
   laneYToValue,
   tlColors,
+  SMALL_FONT,
   type LaneOverride,
   type TlColors,
 } from "./clipRender";
 import {
+  DEFAULT_TRACK_H,
   EDGE_HIT_PX,
   FADE_HIT_PX,
   MAX_ZOOM_X,
@@ -196,10 +222,14 @@ type Drag =
       allowTrack: boolean;
       deltaBeats: number;
       targetTrackId: number | null;
+      /** dropped past the last track row: the commit CREATES the track(s) (Cubase) */
+      newTrack: boolean;
       valid: boolean;
       dup: boolean;
       moved: boolean;
       wasSelected: boolean;
+      /** Shift+press: toggle this clip's selection on release IF it stayed a click. */
+      pendingToggle: boolean;
     }
   | {
       kind: "resize";
@@ -260,6 +290,23 @@ type Drag =
       origCurve: number;
       curve: number;
       moved: boolean;
+    }
+  | {
+      /** View-row item drag (marker flag/range, arranger section, chord, transpose). */
+      kind: "viewItem";
+      itemType: "marker" | "section" | "chord" | "transpose";
+      id: number;
+      mode: "move" | "start" | "end";
+      /** grab offset: item beat - pointer beat (keeps the grab point under the cursor) */
+      grabOffset: number;
+      beat: number;
+      endBeat?: number;
+      semitones?: number;
+      origBeat: number;
+      origEnd?: number;
+      rowTop: number;
+      rowH: number;
+      moved: boolean;
     };
 
 type Zone = "body" | "l" | "r" | "fadeIn" | "fadeOut";
@@ -274,7 +321,15 @@ interface ClipHit {
 
 type OverlayState =
   | { kind: "rename"; clipId: number; x: number; y: number; initial: string }
-  | { kind: "color"; ids: number[]; x: number; y: number; current?: string };
+  | { kind: "color"; ids: number[]; x: number; y: number; current?: string }
+  | {
+      kind: "viewRename";
+      itemType: "marker" | "section";
+      id: number;
+      x: number;
+      y: number;
+      initial: string;
+    };
 
 interface StateSnap {
   project: Project | null;
@@ -345,6 +400,16 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     el.style.left = `${clientX + 14}px`;
     el.style.top = `${clientY - 18}px`;
     hudOnRef.current = true;
+  };
+  /**
+   * Snap-state suffix for drag HUDs: tells the user Shift gives free-form placement
+   * while the grid is on, and confirms it while Shift is held. Silent when the grid
+   * is already off (nothing to bypass).
+   */
+  const snapHint = (shiftHeld: boolean): string => {
+    if (shiftHeld) return " · snap off";
+    const g = stateRef.current.project?.grid;
+    return g && g.snap && g.division > 0 ? " · ⇧ free" : "";
   };
   /** Trim trailing zeros: 1.50 → "1.5", 2.00 → "2". */
   const trimNum = (n: number): string => n.toFixed(2).replace(/\.?0+$/, "") || "0";
@@ -572,6 +637,29 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       ctx.lineTo(w, ry + row.height - 0.5);
       ctx.stroke();
 
+      // view-row lanes: project-level data drawn instead of clips
+      if (isViewRowKind(track.kind)) {
+        const vd = d && d.kind === "viewItem" && d.moved ? d : null;
+        drawViewRow(ctx, track.kind as "marker" | "arranger" | "chord" | "transpose", proj, {
+          y: ry,
+          h: row.height,
+          w,
+          vp: v,
+          colors,
+          trackColor: track.color,
+          preview: vd
+            ? {
+                type: vd.itemType,
+                id: vd.id,
+                beat: vd.beat,
+                endBeat: vd.endBeat,
+                semitones: vd.semitones,
+              }
+            : null,
+        });
+        continue;
+      }
+
       for (const clip of track.clips) {
         if (hideOriginals?.has(clip.id)) continue;
         let startBeat = clip.startBeat;
@@ -691,19 +779,44 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
     // move ghosts
     if (d && d.kind === "move" && d.moved) {
+      // Drop-to-create-track: dashed placeholder band(s) below the last row, one per
+      // source track, with the clip ghosts drawn inside them.
+      const newRowTops = new Map<number, { top: number; height: number }>();
+      if (d.newTrack) {
+        const srcOrder = [...new Set([...d.origins.values()].map((o) => o.trackId))];
+        let top = rowsBottom(rws);
+        for (const srcId of srcOrder) {
+          const srcRow = trackRowOf(rws, srcId);
+          const height = srcRow?.height ?? DEFAULT_TRACK_H;
+          newRowTops.set(srcId, { top, height });
+          const ry = top - scrollY;
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = colors.accent;
+          ctx.fillStyle = withAlpha(colors.accent, 0.07);
+          ctx.fillRect(0, ry, w, height);
+          ctx.strokeRect(0.5, ry + 0.5, w - 1, height - 1);
+          ctx.restore();
+          ctx.fillStyle = colors.accent;
+          ctx.font = SMALL_FONT;
+          ctx.fillText("new track", 6, ry + height / 2 + 3.5);
+          top += height;
+        }
+      }
       for (const id of d.ids) {
         const o = d.origins.get(id);
         if (!o) continue;
         const tgtId = d.allowTrack && d.targetTrackId !== null ? d.targetTrackId : o.trackId;
+        const placeholder = d.newTrack ? newRowTops.get(o.trackId) : undefined;
         const row = trackRowOf(rws, tgtId) ?? trackRowOf(rws, o.trackId);
         const clip = clipById(proj, id);
         if (!row || !clip) continue;
         drawClip(ctx, {
           clip,
           x: beatToPx(o.startBeat + d.deltaBeats, v),
-          y: row.top - scrollY,
+          y: (placeholder?.top ?? row.top) - scrollY,
           w: o.lenBeats * v.zoomX,
-          h: row.height,
+          h: placeholder?.height ?? row.height,
           canvasW: w,
           color: clip.color ?? row.track.color,
           selected: true,
@@ -994,6 +1107,87 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
+    // view-row lanes: drag items (marker/section/chord/transpose); erase deletes.
+    if (track && isViewRowKind(track.kind) && row && row.kind === "track") {
+      const vKind = track.kind as "marker" | "arranger" | "chord" | "transpose";
+      const vhit = viewRowHit(vKind, proj, vx, st.vp);
+      if (!vhit) return; // creation is a double-click gesture
+      if (st.tool === "erase") {
+        if (vhit.type === "marker") fire(removeMarker(vhit.marker.id));
+        else if (vhit.type === "section") fire(removeArrangerSection(vhit.section.id));
+        else if (vhit.type === "chord") fire(removeChord(vhit.chord.id));
+        else fire(removeTranspose(vhit.event.id));
+        return;
+      }
+      let dNew: Extract<Drag, { kind: "viewItem" }>;
+      if (vhit.type === "marker") {
+        const m = vhit.marker;
+        dNew = {
+          kind: "viewItem",
+          itemType: "marker",
+          id: m.id,
+          mode: vhit.part === "end" ? "end" : "move",
+          grabOffset: (vhit.part === "end" ? (m.endBeat ?? m.beat) : m.beat) - rawBeat,
+          beat: m.beat,
+          endBeat: m.endBeat,
+          origBeat: m.beat,
+          origEnd: m.endBeat,
+          rowTop: row.top,
+          rowH: row.height,
+          moved: false,
+        };
+      } else if (vhit.type === "section") {
+        const s = vhit.section;
+        dNew = {
+          kind: "viewItem",
+          itemType: "section",
+          id: s.id,
+          mode: vhit.part === "body" ? "move" : vhit.part,
+          grabOffset:
+            (vhit.part === "end" ? s.endBeat : s.startBeat) - rawBeat,
+          beat: s.startBeat,
+          endBeat: s.endBeat,
+          origBeat: s.startBeat,
+          origEnd: s.endBeat,
+          rowTop: row.top,
+          rowH: row.height,
+          moved: false,
+        };
+      } else if (vhit.type === "chord") {
+        const c = vhit.chord;
+        dNew = {
+          kind: "viewItem",
+          itemType: "chord",
+          id: c.id,
+          mode: "move",
+          grabOffset: c.beat - rawBeat,
+          beat: c.beat,
+          origBeat: c.beat,
+          rowTop: row.top,
+          rowH: row.height,
+          moved: false,
+        };
+      } else {
+        const t = vhit.event;
+        dNew = {
+          kind: "viewItem",
+          itemType: "transpose",
+          id: t.id,
+          mode: "move",
+          grabOffset: t.beat - rawBeat,
+          beat: t.beat,
+          semitones: t.semitones,
+          origBeat: t.beat,
+          rowTop: row.top,
+          rowH: row.height,
+          moved: false,
+        };
+      }
+      dragRef.current = dNew;
+      capture();
+      return;
+    }
+
     if (st.tool === "split") {
       if (hit) {
         const start = hit.clip.startBeat;
@@ -1056,17 +1250,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         return;
       }
 
-      // body — selection + potential move
-      if (additive) {
+      // body — selection + potential move.
+      // Ctrl/Cmd+click toggles selection immediately. SHIFT is different: it is also the
+      // free-form (snap-off) modifier, so holding it BEFORE pressing must still start a
+      // drag — the selection toggle is deferred to pointerup and only fires if the
+      // gesture turned out to be a click (no movement).
+      if (additive && !e.shiftKey) {
         const ids = st.selection.clipIds.includes(clip.id)
           ? st.selection.clipIds.filter((i) => i !== clip.id)
           : [...st.selection.clipIds, clip.id];
         selectClips(ids);
         return;
       }
+      const pendingToggle = e.shiftKey;
       const wasSelected = st.selection.clipIds.includes(clip.id);
       const ids = wasSelected ? st.selection.clipIds : [clip.id];
-      if (!wasSelected) selectClips(ids, [hit.row.track.id]);
+      // With a deferred toggle we must not disturb the selection on press.
+      if (!wasSelected && !pendingToggle) selectClips(ids, [hit.row.track.id]);
 
       const origins = new Map<number, MoveOrigin>();
       let minStart = Number.POSITIVE_INFINITY;
@@ -1096,10 +1296,12 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         allowTrack: sameTrack,
         deltaBeats: 0,
         targetTrackId: null,
+        newTrack: false,
         valid: true,
         dup: e.altKey,
         moved: false,
         wasSelected,
+        pendingToggle,
       };
       capture();
       return;
@@ -1133,6 +1335,33 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const grid = proj.grid;
 
     switch (d.kind) {
+      case "viewItem": {
+        const snapped = Math.max(0, snapB(rawBeat + d.grabOffset, grid, e.shiftKey));
+        if (!d.moved && Math.abs((snapped - (d.mode === "end" ? (d.origEnd ?? d.origBeat) : d.origBeat)) * st.vp.zoomX) <= MOVE_THRESHOLD_PX
+            && d.itemType !== "transpose")
+          return; // click, not a drag (transpose also tracks y, so it goes live at once)
+        d.moved = true;
+        if (d.mode === "move") {
+          const delta = snapped - d.origBeat;
+          d.beat = snapped;
+          if (d.origEnd !== undefined && d.origEnd > 0) d.endBeat = d.origEnd + delta;
+          if (d.itemType === "transpose")
+            d.semitones = yToTranspose(cy, d.rowTop, d.rowH); // cy is content-space (rowAtY space)
+        } else if (d.mode === "start") {
+          d.beat = Math.min(snapped, (d.origEnd ?? snapped) - 0.001);
+          d.endBeat = d.origEnd;
+        } else {
+          d.beat = d.origBeat;
+          d.endBeat = Math.max(snapped, d.origBeat + 0.001);
+        }
+        const hud =
+          d.itemType === "transpose" && d.semitones !== undefined
+            ? `${formatBarsBeatsShort(d.beat, proj.timeSigMap)} · ${d.semitones > 0 ? "+" : ""}${d.semitones} st`
+            : formatBarsBeatsShort(d.mode === "end" ? (d.endBeat ?? d.beat) : d.beat, proj.timeSigMap);
+        showDragHud(e.clientX, e.clientY, hud + snapHint(e.shiftKey));
+        draw();
+        return;
+      }
       case "move": {
         const o = d.origins.get(d.primaryId);
         if (!o) return;
@@ -1140,28 +1369,41 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         d.deltaBeats = Math.max(snapped - o.startBeat, -d.minStart);
         d.dup = e.altKey;
         const row = rowAtY(st.rows, cy);
+        // Past the last row = "drop onto empty space": the commit creates the track(s)
+        // the clips need (Cubase drops a part below the track list to make a track).
+        const belowLastRow = d.allowTrack && !row && cy > rowsBottom(st.rows);
         if (d.allowTrack && row && row.kind === "track" && row.track.id !== d.sourceTrackId) {
           d.targetTrackId = row.track.id;
+          d.newTrack = false;
           const tgt = row.track;
           d.valid = [...d.origins.values()].every((or) => trackAcceptsClip(tgt, or.type));
         } else {
           d.targetTrackId = null;
+          d.newTrack = belowLastRow;
           d.valid = true;
         }
         if (
           !d.moved &&
-          (Math.abs((rawBeat - d.grabBeat) * st.vp.zoomX) > MOVE_THRESHOLD_PX || d.targetTrackId !== null)
+          (Math.abs((rawBeat - d.grabBeat) * st.vp.zoomX) > MOVE_THRESHOLD_PX ||
+            d.targetTrackId !== null ||
+            d.newTrack)
         ) {
           d.moved = true;
         }
         if (d.moved && o) {
           const pos = formatBarsBeatsShort(o.startBeat + d.deltaBeats, proj.timeSigMap);
+          const newTrackHint = d.newTrack
+            ? d.origins.size > 1
+              ? ` · new tracks (${new Set([...d.origins.values()].map((x) => x.trackId)).size})`
+              : " · new track"
+            : "";
           showDragHud(
             e.clientX,
             e.clientY,
             pos +
               (d.dup ? " · copy" : "") +
-              (e.shiftKey ? " · snap off" : "") +
+              newTrackHint +
+              snapHint(e.shiftKey) +
               (d.targetTrackId !== null && !d.valid ? " · incompatible track" : ""),
           );
         }
@@ -1190,7 +1432,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             ? `from ${formatBarsBeatsShort(d.start, proj.timeSigMap)}`
             : `to ${formatBarsBeatsShort(d.start + d.len, proj.timeSigMap)}`) +
             ` · ${trimNum(d.len)}b` +
-            (e.shiftKey ? " · snap off" : ""),
+            snapHint(e.shiftKey),
         );
         draw();
         return;
@@ -1215,7 +1457,8 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         showDragHud(
           e.clientX,
           e.clientY,
-          `${formatBarsBeatsShort(d.start, proj.timeSigMap)} → ${formatBarsBeatsShort(d.end, proj.timeSigMap)} · ${trimNum(d.end - d.start)}b`,
+          `${formatBarsBeatsShort(d.start, proj.timeSigMap)} → ${formatBarsBeatsShort(d.end, proj.timeSigMap)} · ${trimNum(d.end - d.start)}b` +
+            snapHint(e.shiftKey),
         );
         draw();
         return;
@@ -1322,10 +1565,101 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     }
 
     switch (d.kind) {
+      case "viewItem": {
+        if (!d.moved) {
+          // click without a drag: cycle markers / sections set the loop to their range;
+          // point markers locate the playhead (the standard marker-strip gestures)
+          if (d.itemType === "marker") {
+            if (d.origEnd !== undefined && d.origEnd > d.origBeat)
+              fire(setLoop(d.origBeat, d.origEnd, true));
+            else void locate(d.origBeat);
+          } else if (d.itemType === "section" && d.origEnd !== undefined) {
+            fire(setLoop(d.origBeat, d.origEnd, true));
+          }
+          break;
+        }
+        if (d.itemType === "marker") {
+          // engine carries a cycle range along on beat changes; the end edge patches endBeat
+          fire(setMarker(d.id, d.mode === "end" ? { endBeat: d.endBeat } : { beat: d.beat }));
+        } else if (d.itemType === "section") {
+          fire(setArrangerSection(d.id, { startBeat: d.beat, endBeat: d.endBeat }));
+        } else if (d.itemType === "chord") {
+          fire(setChord(d.id, { beat: d.beat }));
+        } else {
+          fire(setTranspose(d.id, { beat: d.beat, ...(d.semitones !== undefined ? { semitones: d.semitones } : {}) }));
+        }
+        break;
+      }
       case "move": {
         if (!d.moved) {
+          // Shift+click that never moved: this was an additive click after all.
+          if (d.pendingToggle) {
+            const cur = useStore.getState().selection.clipIds;
+            selectClips(
+              cur.includes(d.primaryId)
+                ? cur.filter((i) => i !== d.primaryId)
+                : [...cur, d.primaryId],
+            );
+            break;
+          }
           // click on an already-selected clip without dragging → reduce selection to it
           if (d.wasSelected) selectClips([d.primaryId]);
+          break;
+        }
+        // Shift+drag of an unselected clip: it becomes the selection once it moves.
+        if (d.pendingToggle && !d.wasSelected) selectClips(d.ids);
+        // Dropped past the last track: create the destination track(s) first, then move
+        // (or copy) onto them — one new track per SOURCE track, of the kind that clip
+        // needs (audio clip -> audio track, midi clip -> midi track), so multi-track
+        // drags keep their layout. Cubase-style "drop below the list to make a track".
+        if (d.newTrack) {
+          // The new track mirrors the SOURCE track's kind (an instrument track's part
+          // lands on a new instrument track, a midi track's on a midi track), falling
+          // back to the clip's own kind when the source is gone.
+          const bySource = new Map<number, "audio" | "midi" | "instrument">();
+          for (const or of d.origins.values()) {
+            if (bySource.has(or.trackId)) continue;
+            const srcKind = proj.tracks.find((t) => t.id === or.trackId)?.kind;
+            bySource.set(
+              or.trackId,
+              srcKind === "audio" || srcKind === "midi" || srcKind === "instrument"
+                ? srcKind
+                : or.type === "audio"
+                  ? "audio"
+                  : "midi",
+            );
+          }
+          void (async () => {
+            try {
+              const created = new Map<number, number>(); // source trackId -> new trackId
+              for (const [srcTrackId, kind] of bySource) {
+                const res = await addTrack(kind);
+                created.set(srcTrackId, res.track.id);
+              }
+              // Group the dragged clips by their source track so each group lands on the
+              // track created for it (a plain single-clip drag is just one group).
+              for (const [srcTrackId, newTrackId] of created) {
+                const ids = d.ids.filter((id) => d.origins.get(id)?.trackId === srcTrackId);
+                if (ids.length === 0) continue;
+                if (d.dup) {
+                  const r = await duplicateClips(ids, true);
+                  const newIds = r.clips.map((c) => c.id);
+                  await moveClips(newIds, d.deltaBeats, newTrackId);
+                  selectClips(newIds);
+                } else {
+                  await moveClips(ids, d.deltaBeats, newTrackId);
+                }
+              }
+              showToast(
+                created.size === 1
+                  ? "Created a track for the dropped clip"
+                  : `Created ${created.size} tracks for the dropped clips`,
+              );
+            } catch (err) {
+              console.warn("[timeline] drop-to-new-track failed:", err);
+              showToast("Could not create a track for the dropped clip");
+            }
+          })();
           break;
         }
         const tgt =
@@ -1333,7 +1667,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             ? d.targetTrackId
             : undefined;
         if (d.dup) {
-          duplicateClips(d.ids)
+          // Copies land ON the originals (atSource), then move by the drag delta —
+          // Alt+drag to another track at the same position keeps the same startBeat
+          // (Cubase semantics; the old after-the-original placement made the copy land
+          // one clip-length late).
+          duplicateClips(d.ids, true)
             .then(async (r) => {
               const newIds = r.clips.map((c) => c.id);
               if (d.deltaBeats !== 0 || tgt !== undefined) {
@@ -1443,6 +1781,36 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const st = stateRef.current;
     const proj = st.project;
     const row = rowAtY(st.rows, cy);
+    // view rows: double-click creates on empty space, edits on an item
+    if (proj && row && row.kind === "track" && isViewRowKind(row.track.kind)) {
+      const vKind = row.track.kind as "marker" | "arranger" | "chord" | "transpose";
+      const vhit = viewRowHit(vKind, proj, vx, st.vp);
+      const beat = snapB(pxToBeat(vx, st.vp), proj.grid, e.shiftKey);
+      if (!vhit) {
+        if (vKind === "marker") {
+          fire(addMarker(beat, `Marker ${proj.markers.length + 1}`, e.altKey ? beat + 4 : undefined));
+        } else if (vKind === "arranger") {
+          const step = Math.max(1, gridStepBeats(proj.grid));
+          fire(addArrangerSection({ startBeat: beat, endBeat: beat + Math.max(4, step) }));
+        } else if (vKind === "chord") {
+          void addChord({ beat, root: 0, quality: "maj" }).then((r) => {
+            openViewItemMenu(e.clientX, e.clientY, { type: "chord", chord: r.chord });
+          });
+        } else {
+          fire(addTranspose(beat, yToTranspose(cy, row.top, row.height)));
+        }
+        return;
+      }
+      // double-click an item: rename (marker/section) or open its editor menu
+      if (vhit.type === "marker") {
+        setOverlay({ kind: "viewRename", itemType: "marker", id: vhit.marker.id, x: e.clientX, y: e.clientY, initial: vhit.marker.name });
+      } else if (vhit.type === "section") {
+        setOverlay({ kind: "viewRename", itemType: "section", id: vhit.section.id, x: e.clientX, y: e.clientY, initial: vhit.section.name });
+      } else {
+        openViewItemMenu(e.clientX, e.clientY, vhit);
+      }
+      return;
+    }
     // select-tool double-click on an empty midi/instrument lane: create a one-bar clip
     // and open it in the piano roll (the standard "add a note block" gesture)
     if (
@@ -1490,6 +1858,192 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     }
   };
 
+  /* ------------------------------------------------- view-row item menus */
+
+  /** Editor menu for a view-row item (chord root/quality pickers, transpose steps,
+   *  marker/section options + delete). Chord/transpose have no text to rename, so
+   *  the context menu IS their editor. */
+  const openViewItemMenu = (
+    mx: number,
+    my: number,
+    vhit: NonNullable<ReturnType<typeof viewRowHit>>,
+  ): void => {
+    const proj = stateRef.current.project;
+    if (!proj) return;
+    const items: MenuEntry[] = [];
+    if (vhit.type === "chord") {
+      const c = vhit.chord;
+      items.push(
+        {
+          label: `Root: ${PITCH_NAMES[c.root % 12]}`,
+          submenu: PITCH_NAMES.map((n, i) => ({
+            label: n,
+            checked: c.root === i,
+            onClick: () => fire(setChord(c.id, { root: i })),
+          })),
+        },
+        {
+          label: `Quality: ${CHORD_QUALITIES.find((q) => q.id === c.quality)?.label ?? c.quality}`,
+          submenu: CHORD_QUALITIES.map((q) => ({
+            label: q.label,
+            checked: c.quality === q.id,
+            onClick: () => fire(setChord(c.id, { quality: q.id })),
+          })),
+        },
+        {
+          label: c.bass !== undefined && c.bass >= 0 ? `Bass: /${PITCH_NAMES[c.bass % 12]}` : "Bass: root",
+          submenu: [
+            { label: "Root position", checked: !(c.bass !== undefined && c.bass >= 0), onClick: () => fire(setChord(c.id, { bass: -1 })) },
+            ...PITCH_NAMES.map((n, i) => ({
+              label: `/${n}`,
+              checked: c.bass === i,
+              onClick: () => fire(setChord(c.id, { bass: i })),
+            })),
+          ],
+        },
+        "separator",
+        { label: "Delete Chord", icon: "trash", danger: true, onClick: () => fire(removeChord(c.id)) },
+      );
+    } else if (vhit.type === "transpose") {
+      const t = vhit.event;
+      items.push(
+        {
+          label: `Semitones: ${t.semitones > 0 ? "+" : ""}${t.semitones}`,
+          submenu: [12, 7, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -7, -12].map((s) => ({
+            label: s > 0 ? `+${s}` : String(s),
+            checked: t.semitones === s,
+            onClick: () => fire(setTranspose(t.id, { semitones: s })),
+          })),
+        },
+        "separator",
+        { label: "Delete Transpose Event", icon: "trash", danger: true, onClick: () => fire(removeTranspose(t.id)) },
+      );
+    } else if (vhit.type === "marker") {
+      const m = vhit.marker;
+      const cycle = (m.endBeat ?? 0) > m.beat;
+      items.push(
+        {
+          label: "Rename…",
+          icon: "pencil",
+          onClick: () =>
+            setOverlay({ kind: "viewRename", itemType: "marker", id: m.id, x: mx, y: my, initial: m.name }),
+        },
+        cycle
+          ? { label: "Set Loop to Range", icon: "loop", onClick: () => fire(setLoop(m.beat, m.endBeat!, true)) }
+          : {
+              label: "Make Cycle Marker (+1 bar)",
+              icon: "loop",
+              onClick: () => {
+                const ts = timeSigAtBeat(m.beat, proj.timeSigMap);
+                fire(setMarker(m.id, { endBeat: m.beat + (ts.num * 4) / ts.den }));
+              },
+            },
+        "separator",
+        { label: "Delete Marker", icon: "trash", danger: true, onClick: () => fire(removeMarker(m.id)) },
+      );
+    } else {
+      const s = vhit.section;
+      const a = proj.arranger;
+      const chain = a?.chain ?? [];
+      items.push(
+        {
+          label: "Rename…",
+          icon: "pencil",
+          onClick: () =>
+            setOverlay({ kind: "viewRename", itemType: "section", id: s.id, x: mx, y: my, initial: s.name }),
+        },
+        {
+          label: "Append to Chain",
+          icon: "plus",
+          onClick: () => fire(setArrangerChain({ chain: [...chain, s.id] })),
+        },
+        {
+          label: "Remove from Chain",
+          disabled: !chain.includes(s.id),
+          onClick: () => fire(setArrangerChain({ chain: chain.filter((id) => id !== s.id) })),
+        },
+        { label: "Set Loop to Section", icon: "loop", onClick: () => fire(setLoop(s.startBeat, s.endBeat, true)) },
+        "separator",
+        { label: "Delete Section", icon: "trash", danger: true, onClick: () => fire(removeArrangerSection(s.id)) },
+      );
+    }
+    openContextMenu(mx, my, items);
+  };
+
+  /** Row-level (empty space) menu for a view row: create + arranger chain controls. */
+  const openViewRowMenu = (
+    mx: number,
+    my: number,
+    vKind: "marker" | "arranger" | "chord" | "transpose",
+    beat: number,
+    cy: number,
+    rowTop: number,
+    rowH: number,
+  ): void => {
+    const proj = stateRef.current.project;
+    if (!proj) return;
+    const items: MenuEntry[] = [];
+    if (vKind === "marker") {
+      items.push(
+        { label: "Add Marker", icon: "marker", onClick: () => fire(addMarker(beat, `Marker ${proj.markers.length + 1}`)) },
+        { label: "Add Cycle Marker (1 bar)", icon: "loop", onClick: () => {
+          const ts = timeSigAtBeat(beat, proj.timeSigMap);
+          fire(addMarker(beat, `Cycle ${proj.markers.length + 1}`, beat + (ts.num * 4) / ts.den));
+        } },
+      );
+    } else if (vKind === "arranger") {
+      const a = proj.arranger;
+      const hasChain = (a?.chain.length ?? 0) > 0;
+      items.push(
+        { label: "Add Section", icon: "plus", onClick: () => fire(addArrangerSection({ startBeat: beat, endBeat: beat + 4 })) },
+        "separator",
+        {
+          label: a?.activeChain ? "Deactivate Chain" : "Activate Chain",
+          icon: "play",
+          disabled: !hasChain,
+          onClick: () => fire(setArrangerChain({ active: !a?.activeChain, locateToStart: !a?.activeChain })),
+        },
+        {
+          label: "Clear Chain",
+          disabled: !hasChain,
+          onClick: () => fire(setArrangerChain({ chain: [] })),
+        },
+        {
+          label: "Flatten Chain to Timeline…",
+          icon: "export",
+          disabled: !hasChain,
+          onClick: () => {
+            void confirmDialog({
+              title: "Flatten arranger chain",
+              message:
+                "Rebuild the timeline as the chain plays (windowed clip copies per section), then clear the sections and chain? This can be undone.",
+              confirmLabel: "Flatten",
+            }).then((ok) => {
+              if (ok) fire(flattenArranger());
+            });
+          },
+        },
+      );
+    } else if (vKind === "chord") {
+      items.push({
+        label: "Add Chord",
+        icon: "plus",
+        onClick: () => {
+          void addChord({ beat, root: 0, quality: "maj" }).then((r) =>
+            openViewItemMenu(mx, my, { type: "chord", chord: r.chord }),
+          );
+        },
+      });
+    } else {
+      items.push({
+        label: "Add Transpose Event",
+        icon: "plus",
+        onClick: () => fire(addTranspose(beat, yToTranspose(cy, rowTop, rowH))),
+      });
+    }
+    openContextMenu(mx, my, items);
+  };
+
   /* ----------------------------------------------------------- context menu */
 
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>): void => {
@@ -1509,6 +2063,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     // lane rows: menu on a point (delete / clear lane) — a bare right-click must not
     // destroy data. Empty lane space offers Clear Lane only when points exist.
     const row = rowAtY(st.rows, cy);
+    if (row && row.kind === "track" && isViewRowKind(row.track.kind)) {
+      const vKind = row.track.kind as "marker" | "arranger" | "chord" | "transpose";
+      const vhit = viewRowHit(vKind, proj, vx, st.vp);
+      if (vhit) openViewItemMenu(e.clientX, e.clientY, vhit);
+      else openViewRowMenu(e.clientX, e.clientY, vKind, pasteBeat, cy, row.top, row.height);
+      return;
+    }
     if (row && row.kind === "lane") {
       const pt = laneHitPoint(row, vx, cy, st.vp);
       const clearLane: MenuEntry = {
@@ -1952,6 +2513,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             setOverlay(null);
             const trimmed = name.trim();
             if (trimmed && trimmed !== overlay.initial) fire(setClip(overlay.clipId, { name: trimmed }));
+          }}
+          onCancel={() => setOverlay(null)}
+        />
+      )}
+      {overlay && overlay.kind === "viewRename" && (
+        <FloatingInput
+          x={overlay.x}
+          y={overlay.y}
+          width={160}
+          initial={overlay.initial}
+          placeholder={overlay.itemType === "marker" ? "Marker name" : "Section name"}
+          onCommit={(name) => {
+            setOverlay(null);
+            const trimmed = name.trim();
+            if (!trimmed || trimmed === overlay.initial) return;
+            if (overlay.itemType === "marker") fire(setMarker(overlay.id, { name: trimmed }));
+            else fire(setArrangerSection(overlay.id, { name: trimmed }));
           }}
           onCancel={() => setOverlay(null)}
         />

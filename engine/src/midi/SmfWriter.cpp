@@ -133,6 +133,13 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
         if (t.kind != TrackKind::Midi && t.kind != TrackKind::Instrument)
             continue;
         std::vector<TEvent> evs;
+        // Track MIDI output channel (SPEC §6 midiOutChannel): the exported file must speak
+        // the same channels as playback, so a multitimbral arrangement survives the trip.
+        // 0 = as played — each event keeps the channel it carries.
+        const int forcedCh = std::clamp(t.midiOutChannel, 0, 16) - 1;
+        const auto chOf = [forcedCh](int noteCh) {
+            return static_cast<uint8_t>(forcedCh >= 0 ? forcedCh : std::clamp(noteCh, 0, 15));
+        };
         if (!t.name.empty()) {
             TEvent e;
             e.prio = -1;
@@ -161,8 +168,9 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
                     static_cast<uint8_t>(std::clamp(n.pitch, 0, 127));
                 const uint8_t vel =
                     static_cast<uint8_t>(std::clamp(n.velocity, 1, 127));
-                evs.push_back(TEvent{on, 2, {0x90, pitch, vel}});
-                evs.push_back(TEvent{off, 0, {0x80, pitch, 0}});
+                const uint8_t ch = chOf(n.channel);
+                evs.push_back(TEvent{on, 2, {static_cast<uint8_t>(0x90 | ch), pitch, vel}});
+                evs.push_back(TEvent{off, 0, {static_cast<uint8_t>(0x80 | ch), pitch, 0}});
                 ++totalNotes;
             }
             for (const MidiCc& pt : mc->cc) {
@@ -174,15 +182,19 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
                 TEvent e;
                 e.tick = tick;
                 e.prio = 1;
+                // Clip CC carries no channel of its own (it is baked on 0 for playback too).
+                const uint8_t cc = chOf(0);
                 if (pt.controller == 128) { // pitch bend, 14-bit (0.5 = center)
                     const long raw = std::lround(
                         std::clamp(pt.value, 0.0, 1.0) * 16383.0);
-                    e.bytes = {0xE0, static_cast<uint8_t>(raw & 0x7F),
+                    e.bytes = {static_cast<uint8_t>(0xE0 | cc),
+                               static_cast<uint8_t>(raw & 0x7F),
                                static_cast<uint8_t>((raw >> 7) & 0x7F)};
                 } else if (pt.controller == 129) { // channel aftertouch
-                    e.bytes = {0xD0, u7(pt.value)};
+                    e.bytes = {static_cast<uint8_t>(0xD0 | cc), u7(pt.value)};
                 } else {
-                    e.bytes = {0xB0, static_cast<uint8_t>(pt.controller),
+                    e.bytes = {static_cast<uint8_t>(0xB0 | cc),
+                               static_cast<uint8_t>(pt.controller),
                                u7(pt.value)};
                 }
                 evs.push_back(std::move(e));

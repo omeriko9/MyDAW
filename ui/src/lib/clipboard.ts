@@ -7,10 +7,16 @@
  * cutSelection()   — copySelection + cmd/clip.delete (one undo entry for the delete).
  * pasteAt(beat?)   — reconstruct via cmd/clip.addMidi / cmd/clip.addAudio using the
  *                    pinned optional payload extensions (notes/name/color/gain/fades/
- *                    srcOffset/lengthSamples). Default paste position = playhead
- *                    (transportBus.last). Clips land on their ORIGINAL tracks; multi-clip
- *                    selections keep relative beat offsets (earliest clip = paste point).
- *                    Returns the new clip ids and selects them.
+ *                    srcOffset/lengthSamples). Multi-clip selections keep relative beat
+ *                    offsets. TARGETING (Cubase-style Ctrl+C/Ctrl+V):
+ *                      - a DIFFERENT track selected than the copy's anchor track →
+ *                        clips land on the selected track (multi-track selections keep
+ *                        their track spacing by index offset) at the SAME time mark as
+ *                        the source — copy a clip, click another channel, Ctrl+V.
+ *                      - otherwise → original tracks at the playhead (classic paste).
+ *                      - an explicit `beat` (context menu "Paste here") always wins.
+ *                    Kind-incompatible mappings (audio clip → midi track etc.) are
+ *                    skipped with a warning. Returns the new clip ids and selects them.
  *
  * v1 tradeoff: pasting N clips issues N add commands → N undo entries (SPEC has no
  * batch-add). Duplicate (Ctrl+D) uses cmd/clip.duplicate instead, which is one entry.
@@ -107,24 +113,61 @@ function notesToInputs(notes: ReadonlyArray<NoteInput & { id?: number }>): NoteI
   }));
 }
 
+/** Can this track hold this clip? (audio clips need audio tracks; midi needs midi/instrument) */
+function trackTakesClip(track: Track, clip: Clip): boolean {
+  if (isAudioClip(clip)) return track.kind === "audio";
+  return track.kind === "midi" || track.kind === "instrument";
+}
+
 /**
- * Paste the clipboard. `beat` defaults to the current playhead (transportBus.last,
- * 0 before the first transport event). Clips go to their original tracks; entries whose
- * source track no longer exists are skipped. Returns the new clip ids (also selected).
+ * Paste the clipboard (see the targeting contract in the header comment). Entries whose
+ * resolved track no longer exists or can't hold the clip kind are skipped. Returns the
+ * new clip ids (also selected).
  */
 export async function pasteAt(beat?: number): Promise<number[]> {
   const s = useStore.getState();
   const project = s.project;
   if (!project || !clipboard || clipboard.entries.length === 0) return [];
 
-  const targetBeat = Math.max(0, beat ?? transportBus.last?.beat ?? 0);
   const { entries, baseBeat } = clipboard;
-  const trackIds = new Set<number>(project.tracks.map((t) => t.id));
+  const indexOf = new Map<number, number>(project.tracks.map((t, i) => [t.id, i]));
+
+  // Anchor = the TOPMOST source track still present (multi-track selections keep their
+  // vertical spacing relative to it when re-targeted).
+  let anchorIdx: number | null = null;
+  for (const e of entries) {
+    const idx = indexOf.get(e.trackId);
+    if (idx !== undefined && (anchorIdx === null || idx < anchorIdx)) anchorIdx = idx;
+  }
+  const selTrackId = s.selection.trackIds[0];
+  const selIdx = selTrackId !== undefined ? indexOf.get(selTrackId) : undefined;
+  // Re-target when a DIFFERENT track is selected than the anchor.
+  const retarget =
+    selIdx !== undefined && anchorIdx !== null && project.tracks[selIdx].id !==
+      project.tracks[anchorIdx].id;
+
+  // Position: explicit beat > re-target keeps the SOURCE time mark > playhead.
+  const targetBeat = Math.max(
+    0,
+    beat ?? (retarget ? baseBeat : (transportBus.last?.beat ?? 0)),
+  );
 
   const newIds: number[] = [];
+  let skipped = 0;
   for (const entry of entries) {
-    if (!trackIds.has(entry.trackId)) {
-      console.warn(`[clipboard] paste: source track ${entry.trackId} no longer exists — skipping clip`);
+    const srcIdx = indexOf.get(entry.trackId);
+    let destTrack: Track | undefined;
+    if (retarget && srcIdx !== undefined && anchorIdx !== null) {
+      const mapped = selIdx! + (srcIdx - anchorIdx);
+      destTrack = project.tracks[mapped];
+    } else if (srcIdx !== undefined) {
+      destTrack = project.tracks[srcIdx];
+    }
+    if (!destTrack || !trackTakesClip(destTrack, entry.clip)) {
+      ++skipped;
+      console.warn(
+        `[clipboard] paste: no compatible target track for clip "${entry.clip.name ?? entry.clip.id}" — skipped`,
+      );
       continue;
     }
     const clip = entry.clip;
@@ -132,7 +175,7 @@ export async function pasteAt(beat?: number): Promise<number[]> {
     try {
       if (isMidiClip(clip)) {
         const r = await ws.request("cmd/clip.addMidi", {
-          trackId: entry.trackId,
+          trackId: destTrack.id,
           startBeat,
           lengthBeats: clip.lengthBeats,
           notes: notesToInputs(clip.notes),
@@ -142,7 +185,7 @@ export async function pasteAt(beat?: number): Promise<number[]> {
         newIds.push(r.clip.id);
       } else if (isAudioClip(clip)) {
         const r = await ws.request("cmd/clip.addAudio", {
-          trackId: entry.trackId,
+          trackId: destTrack.id,
           startBeat,
           assetId: clip.assetId,
           name: clip.name,
@@ -160,6 +203,8 @@ export async function pasteAt(beat?: number): Promise<number[]> {
     }
   }
 
+  if (skipped > 0)
+    console.warn(`[clipboard] paste: ${skipped} clip(s) had no compatible target track`);
   if (newIds.length > 0) {
     useStore.getState().setSelection({ clipIds: newIds, noteIds: [] });
   }

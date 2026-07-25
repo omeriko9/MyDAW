@@ -51,6 +51,7 @@ import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
+import { openBestEditor } from "../PluginEditor/openEditor";
 import { confirmDialog } from "../Dialogs/confirm";
 import { Icon, type IconName } from "../common/icons";
 import { Toggle } from "../common/Toggle";
@@ -71,6 +72,7 @@ import {
   type TrackRowL,
 } from "./layout";
 import type { AddableTrackKind, PluginInfo, Track } from "../../protocol/types";
+import { isViewRowKind } from "../../protocol/types";
 
 export const HEADER_W = 220;
 const DRAG_THRESHOLD_PX = 4;
@@ -89,6 +91,11 @@ const ADDABLE: Array<{ kind: AddableTrackKind; label: string; icon: IconName }> 
   { kind: "instrument", label: "Instrument Track", icon: "piano" },
   { kind: "bus", label: "Bus Track", icon: "mixer" },
   { kind: "folder", label: "Folder Track", icon: "folder" },
+  // View-row lanes over project-level data (max one of each; the engine rejects dupes)
+  { kind: "marker", label: "Marker Track", icon: "marker" },
+  { kind: "arranger", label: "Arranger Track", icon: "layers" },
+  { kind: "chord", label: "Chord Track", icon: "staff" },
+  { kind: "transpose", label: "Transpose Track", icon: "chevronUp" },
 ];
 
 export function addTrackMenuItems(index?: number): MenuEntry[] {
@@ -318,6 +325,7 @@ export default function TrackHeaders({
 
   const onResizePointerDown = (e: React.PointerEvent<HTMLDivElement>, row: TrackRowL): void => {
     if (e.button !== 0) return;
+    if (isViewRowKind(row.track.kind)) return; // view rows are fixed height
     e.stopPropagation();
     heightRef.current = {
       trackId: row.track.id,
@@ -659,6 +667,35 @@ export default function TrackHeaders({
     return items;
   };
 
+  /**
+   * The instrument row is click-to-pick / double-click-to-edit, so the picker opens on a
+   * timer the second click cancels — same 230 ms split the mixer's insert slots use, and
+   * the same "native window if it has one, else the in-app editor" resolution
+   * (openBestEditor). A dormant or missing instrument has nothing to open: the double
+   * click then just falls through to the picker.
+   */
+  const instClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelInstClick = (): void => {
+    if (instClickTimer.current) {
+      clearTimeout(instClickTimer.current);
+      instClickTimer.current = null;
+    }
+  };
+  const deferInstClick = (open: () => void): void => {
+    cancelInstClick();
+    instClickTimer.current = setTimeout(() => {
+      instClickTimer.current = null;
+      open();
+    }, 230);
+  };
+  /** Double-click on an instrument dropdown: open the plugin's editor. */
+  const openInstrumentEditor = (host: Track, fallback: () => void): void => {
+    cancelInstClick();
+    const ins = instrumentInsertOf(host);
+    if (ins) void openBestEditor(ins);
+    else fallback();
+  };
+
   const openInstrumentPicker = (t: Track, x: number, y: number): void => {
     const current = instrumentInsertOf(t);
     // replaceInstrumentOn re-resolves live state at click time (menus are imperative —
@@ -906,12 +943,17 @@ export default function TrackHeaders({
                 title={
                   t.frozen
                     ? "Track is frozen — unfreeze to change the instrument"
-                    : "Change instrument (favorite instruments)"
+                    : "Click: change instrument (favorites) · double-click: open its editor"
                 }
                 onClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  openInstrumentPicker(t, r.left, r.bottom + 2);
+                  deferInstClick(() => openInstrumentPicker(t, r.left, r.bottom + 2));
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openInstrumentEditor(t, () => openInstrumentPicker(t, r.left, r.bottom + 2));
                 }}
               >
                 <Icon name="piano" size={11} />
@@ -930,12 +972,19 @@ export default function TrackHeaders({
                 title={
                   midiHost.frozen
                     ? `Plays through "${midiHost.name}" (frozen — unfreeze to change)`
-                    : `Plays through "${midiHost.name}" — click to change its instrument`
+                    : `Plays through "${midiHost.name}" — click to change its instrument, double-click to open its editor`
                 }
                 onClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  openInstrumentPicker(midiHost, r.left, r.bottom + 2);
+                  deferInstClick(() => openInstrumentPicker(midiHost, r.left, r.bottom + 2));
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openInstrumentEditor(midiHost, () =>
+                    openInstrumentPicker(midiHost, r.left, r.bottom + 2),
+                  );
                 }}
               >
                 <Icon name="piano" size={11} />

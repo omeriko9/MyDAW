@@ -171,6 +171,19 @@ private:
     json markerAdd(const json& p, CmdResult& r);
     json markerSet(const json& p, CmdResult& r);
     json markerRemove(const json& p, CmdResult& r);
+    // View-row track data (TRACK_TYPES_PLAN §3.6-3.8)
+    void syncArrangerToTransport(); // beats -> samples jump table (edit/tempo/load/undo)
+    json arrangerAddSection(const json& p, CmdResult& r);
+    json arrangerSetSection(const json& p, CmdResult& r);
+    json arrangerRemoveSection(const json& p, CmdResult& r);
+    json arrangerSetChain(const json& p, CmdResult& r);
+    json arrangerFlatten(const json& p, CmdResult& r);
+    json chordAdd(const json& p, CmdResult& r);
+    json chordSet(const json& p, CmdResult& r);
+    json chordRemove(const json& p, CmdResult& r);
+    json transposeAdd(const json& p, CmdResult& r);
+    json transposeSet(const json& p, CmdResult& r);
+    json transposeRemove(const json& p, CmdResult& r);
     json tempoSet(const json& p, CmdResult& r);
     json timesigSet(const json& p, CmdResult& r);
     json tempoMapSet(const json& p, CmdResult& r);

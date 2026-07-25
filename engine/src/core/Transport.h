@@ -63,6 +63,23 @@ public:
     void setCountInBars(int bars);         // 0 | 1 | 2 (transport/setMetronome)
     void setMetronomeEnabled(bool enabled);
 
+    // ----- arranger chain (TRACK_TYPES_PLAN §3.6) ---------------------------
+    // One entry per chain position: play [start, end), then jump to `to` (the next
+    // step's start; `to` < 0 on the LAST step = no jump, playback continues linearly).
+    // While the chain is active it OVERRIDES the loop region (documented v1 tradeoff —
+    // a repeated section in the chain IS a loop). Steps are double-buffered so the RT
+    // thread never reads a half-written table; the step counter re-derives on locate.
+    struct ArrangerStep {
+        int64_t start = 0;
+        int64_t end = 0;
+        int64_t to = -1;
+    };
+    static constexpr int kMaxArrangerSteps = 512;
+    // Main thread. count is clamped to kMaxArrangerSteps; active with count==0 = inactive.
+    void setArrangerSteps(const ArrangerStep* steps, int count, bool active);
+    bool arrangerActive() const { return arrActive_.load(std::memory_order_acquire); }
+    int arrangerStep() const { return arrStep_.load(std::memory_order_acquire); }
+
     // ----- queries (any thread) --------------------------------------------
     TransportState state() const { return static_cast<TransportState>(state_.load(std::memory_order_acquire)); }
     bool isPlaying() const { return state() != TransportState::Stopped; } // playing or recording
@@ -130,6 +147,17 @@ private:
     std::atomic<int64_t> countInRemaining_{0};
     std::atomic<int64_t> countInTotal_{0};
     std::atomic<int64_t> lastPlayStart_{0}; // position where playback/recording last began
+
+    // Arranger chain: double-buffered step table (control writes the inactive buffer,
+    // then flips arrBuf_). arrStep_ = the chain position the playhead is inside/awaiting.
+    ArrangerStep arrSteps_[2][kMaxArrangerSteps];
+    std::atomic<int> arrCount_[2]{0, 0};
+    std::atomic<int> arrBuf_{0};
+    std::atomic<bool> arrActive_{false};
+    std::atomic<int> arrStep_{0};
+    // Recompute arrStep_ for a playhead position: first step whose [start,end) contains
+    // pos; else past-the-end (no jumps fire until re-derived).
+    void rederiveArrangerStep(int64_t pos);
 };
 
 } // namespace mydaw

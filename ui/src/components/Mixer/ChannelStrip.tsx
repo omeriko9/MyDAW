@@ -40,6 +40,12 @@ export const KIND_ICONS: Record<TrackKind, IconName> = {
   folder: "folder",
   bus: "sliders",
   master: "mixer",
+  // View rows never render a mixer strip (filtered like folders); entries exist only
+  // to keep the Record total over TrackKind.
+  marker: "marker",
+  arranger: "layers",
+  chord: "staff",
+  transpose: "chevronUp",
 };
 
 function panText(v: number): string {

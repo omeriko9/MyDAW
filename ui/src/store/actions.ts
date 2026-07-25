@@ -15,9 +15,15 @@ import { ws } from "../protocol/ws";
 import type {
   AddableTrackKind,
   AppSettings,
+  ArrangerAddSectionRequest,
+  ArrangerSectionPatch,
+  ArrangerSetChainRequest,
   AutomationAddPoint,
   AutomationPointUpdate,
   CcInput,
+  ChordAddRequest,
+  ChordPatch,
+  TransposePatch,
   CcUpdate,
   ClipEdge,
   ClipPatch,
@@ -157,8 +163,10 @@ export const joinClips = (clipIds: number[]) => ws.request("cmd/clip.join", { cl
 
 export const deleteClips = (clipIds: number[]) => ws.request("cmd/clip.delete", { clipIds });
 
-export const duplicateClips = (clipIds: number[]) =>
-  ws.request("cmd/clip.duplicate", { clipIds });
+/** atSource: copies land ON the originals (Alt+drag measures its delta from there);
+ *  default places them right after (Ctrl+D). */
+export const duplicateClips = (clipIds: number[], atSource?: boolean) =>
+  ws.request("cmd/clip.duplicate", { clipIds, ...(atSource ? { atSource } : {}) });
 
 export const setClip = (clipId: number, patch: ClipPatch, transient?: boolean) =>
   ws.request("cmd/clip.set", { clipId, patch }, transient);
@@ -197,14 +205,46 @@ export const setAutomation = (
   transient?: boolean,
 ) => ws.request("cmd/automation.set", { trackId, paramRef, ...edits }, transient);
 
-export const addMarker = (beat: number, name: string) =>
-  ws.request("cmd/marker.add", { beat, name });
+export const addMarker = (beat: number, name: string, endBeat?: number) =>
+  ws.request("cmd/marker.add", { beat, name, ...(endBeat !== undefined ? { endBeat } : {}) });
 
 export const setMarker = (markerId: number, patch: MarkerPatch) =>
   ws.request("cmd/marker.set", { markerId, patch });
 
 export const removeMarker = (markerId: number) =>
   ws.request("cmd/marker.remove", { markerId });
+
+/* ---- arranger / chord / transpose (view-row track data, TRACK_TYPES_PLAN §3.6-3.8) */
+
+export const addArrangerSection = (req: ArrangerAddSectionRequest) =>
+  ws.request("cmd/arranger.addSection", req);
+
+export const setArrangerSection = (sectionId: number, patch: ArrangerSectionPatch) =>
+  ws.request("cmd/arranger.setSection", { sectionId, patch });
+
+export const removeArrangerSection = (sectionId: number) =>
+  ws.request("cmd/arranger.removeSection", { sectionId });
+
+export const setArrangerChain = (req: ArrangerSetChainRequest) =>
+  ws.request("cmd/arranger.setChain", req);
+
+export const flattenArranger = () => ws.request("cmd/arranger.flatten", {});
+
+export const addChord = (req: ChordAddRequest) => ws.request("cmd/chord.add", req);
+
+export const setChord = (chordId: number, patch: ChordPatch) =>
+  ws.request("cmd/chord.set", { chordId, patch });
+
+export const removeChord = (chordId: number) => ws.request("cmd/chord.remove", { chordId });
+
+export const addTranspose = (beat: number, semitones: number) =>
+  ws.request("cmd/transpose.add", { beat, semitones });
+
+export const setTranspose = (eventId: number, patch: TransposePatch) =>
+  ws.request("cmd/transpose.set", { eventId, patch });
+
+export const removeTranspose = (eventId: number) =>
+  ws.request("cmd/transpose.remove", { eventId });
 
 export const setTempo = (bpm: number, transient?: boolean) =>
   ws.request("cmd/tempo.set", { bpm }, transient);

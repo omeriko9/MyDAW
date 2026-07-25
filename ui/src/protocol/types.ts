@@ -45,8 +45,56 @@ export interface Grid {
 export interface Marker {
   id: number;
   beat: number;
+  /** Cycle (range) marker end; > beat = range, absent/0 = point marker. */
+  endBeat?: number;
   name: string;
   color?: string;
+}
+
+/** Arranger section: a named beat range on the arranger track (TRACK_TYPES_PLAN §3.6). */
+export interface ArrangerSection {
+  id: number;
+  name: string;
+  startBeat: number;
+  /** must be > startBeat */
+  endBeat: number;
+  color?: string;
+}
+
+/**
+ * Arranger track data (project-level): sections + ordered play chain. activeChain
+ * drives the transport section-to-section and overrides the loop region.
+ */
+export interface Arranger {
+  sections: ArrangerSection[];
+  /** ordered section ids; repeats allowed */
+  chain: number[];
+  activeChain?: boolean;
+}
+
+/** Chord track symbol: root pitch class 0..11 (0 = C) + quality (TRACK_TYPES_PLAN §3.7). */
+export interface ChordEvent {
+  id: number;
+  beat: number;
+  /** 0..11 pitch class, 0 = C */
+  root: number;
+  /** "maj" "min" "dim" "aug" "maj7" "min7" "7" "sus2" "sus4" ... */
+  quality: string;
+  /** optional display text, e.g. "9" or "b13" */
+  tensions?: string;
+  /** 0..11 slash-chord bass pitch class; absent = root position */
+  bass?: number;
+}
+
+/**
+ * Transpose track event (TRACK_TYPES_PLAN §3.8): from `beat` onward MIDI playback is
+ * shifted by `semitones` (baked at plan build; clips keep raw pitches).
+ */
+export interface TransposeEvent {
+  id: number;
+  beat: number;
+  /** -24..24 */
+  semitones: number;
 }
 
 export interface Asset {
@@ -226,9 +274,27 @@ export interface TrackEq {
   bands: EqBand[];
 }
 
-export type TrackKind = "audio" | "midi" | "instrument" | "folder" | "bus" | "master";
-/** kinds creatable via cmd/track.add */
+export type TrackKind =
+  | "audio"
+  | "midi"
+  | "instrument"
+  | "folder"
+  | "bus"
+  | "master"
+  | "marker"
+  | "arranger"
+  | "chord"
+  | "transpose";
+/**
+ * kinds creatable via cmd/track.add; marker/arranger/chord/transpose are view-row
+ * lanes over project-level data (max ONE of each per project, no clips/inserts/mixer)
+ */
 export type AddableTrackKind = Exclude<TrackKind, "master">;
+/** view-row lanes: a timeline row over project-level data (no clips/audio/mixer strip) */
+export const VIEW_ROW_KINDS: readonly TrackKind[] = ["marker", "arranger", "chord", "transpose"];
+export function isViewRowKind(kind: TrackKind): boolean {
+  return VIEW_ROW_KINDS.includes(kind);
+}
 
 /** trackId of a bus, or "master", or "none" */
 export type OutputTarget = number | "master" | "none";
@@ -259,6 +325,12 @@ export interface Track {
    * track plays through its own inserts (SPEC §6).
    */
   midiTarget?: number;
+  /**
+   * MIDI output channel (kind "midi"/"instrument"): 0/absent = as played (events keep
+   * their own channel), 1..16 = force this track's MIDI onto that channel — how several
+   * MIDI tracks drive one multitimbral instrument (SPEC §6).
+   */
+  midiOutChannel?: number;
   /** VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader. */
   vcaId?: number;
   /** Channel EQ — absent/empty bands and not bypassed => no EQ (SPEC §6). */
@@ -315,6 +387,12 @@ export interface Project {
   loop: LoopRegion;
   grid: Grid;
   markers: Marker[];
+  /** Absent when empty (no sections/chain). */
+  arranger?: Arranger;
+  /** Chord track symbols, sorted by beat; absent when empty. */
+  chordEvents?: ChordEvent[];
+  /** Transpose track events, sorted by beat; absent when empty. */
+  transposeEvents?: TransposeEvent[];
   /** ordered, tree via parentId (folders) */
   tracks: Track[];
   /** kind: "master" */
@@ -621,6 +699,8 @@ export interface TrackPatch {
   outputTarget?: OutputTarget;
   /** kind "midi" only — Instrument-track id to route this track's MIDI into; 0 clears. */
   midiTarget?: number;
+  /** kind "midi"/"instrument" — force this track's MIDI onto channel 1..16; 0 = as played. */
+  midiOutChannel?: number;
   /** VCA-group id this track belongs to; 0 clears. */
   vcaId?: number;
 }
@@ -770,6 +850,9 @@ export interface ClipDeleteRequest {
 
 export interface ClipDuplicateRequest {
   clipIds: number[];
+  /** true: copies land ON the originals (same startBeat) — the Alt+drag copy gesture
+   *  moves them by the drag delta afterwards. Default/absent: right after (Ctrl+D). */
+  atSource?: boolean;
 }
 
 export interface ClipDuplicateReply {
@@ -950,7 +1033,10 @@ export interface AutomationSetRequest {
 
 export interface MarkerAddRequest {
   beat: number;
+  /** Cycle (range) marker end; > beat = range, absent/0 = point marker. Clicking a cycle marker sets the loop. */
+  endBeat?: number;
   name: string;
+  color?: string;
 }
 
 export interface MarkerAddReply {
@@ -960,8 +1046,107 @@ export interface MarkerAddReply {
 
 export interface MarkerPatch {
   beat?: number;
+  /** Set > beat for a cycle marker; <= beat collapses to a point marker. */
+  endBeat?: number;
   name?: string;
   color?: string;
+}
+
+/* ---- arranger / chord / transpose (view-row track data) ---- */
+
+export interface ArrangerAddSectionRequest {
+  /** default: next letter A, B, C... */
+  name?: string;
+  startBeat: number;
+  /** must be > startBeat; default startBeat+4 */
+  endBeat?: number;
+  color?: string;
+}
+
+export interface ArrangerAddSectionReply {
+  section: ArrangerSection;
+}
+
+export interface ArrangerSectionPatch {
+  name?: string;
+  startBeat?: number;
+  endBeat?: number;
+  color?: string;
+}
+
+export interface ArrangerSetSectionRequest {
+  sectionId: number;
+  patch: ArrangerSectionPatch;
+}
+
+export interface ArrangerRemoveSectionRequest {
+  sectionId: number;
+}
+
+/**
+ * Replace the play chain and/or toggle it. Chain ids must reference existing sections.
+ * locateToStart moves the playhead to the first section when activating.
+ */
+export interface ArrangerSetChainRequest {
+  chain?: number[];
+  active?: boolean;
+  locateToStart?: boolean;
+}
+
+export interface ChordAddRequest {
+  beat: number;
+  /** 0..11 pitch class, 0 = C */
+  root: number;
+  /** default "maj" */
+  quality?: string;
+  tensions?: string;
+  bass?: number;
+}
+
+export interface ChordAddReply {
+  chord: ChordEvent;
+}
+
+export interface ChordPatch {
+  beat?: number;
+  root?: number;
+  quality?: string;
+  tensions?: string;
+  /** -1 clears (root position) */
+  bass?: number;
+}
+
+export interface ChordSetRequest {
+  chordId: number;
+  patch: ChordPatch;
+}
+
+export interface ChordRemoveRequest {
+  chordId: number;
+}
+
+export interface TransposeAddRequest {
+  beat: number;
+  /** -24..24 */
+  semitones: number;
+}
+
+export interface TransposeAddReply {
+  event: TransposeEvent;
+}
+
+export interface TransposePatch {
+  beat?: number;
+  semitones?: number;
+}
+
+export interface TransposeSetRequest {
+  eventId: number;
+  patch: TransposePatch;
+}
+
+export interface TransposeRemoveRequest {
+  eventId: number;
 }
 
 export interface MarkerSetRequest {
@@ -1574,6 +1759,17 @@ export interface RequestMap {
   "cmd/marker.add": { req: MarkerAddRequest; reply: MarkerAddReply };
   "cmd/marker.set": { req: MarkerSetRequest; reply: EmptyObject };
   "cmd/marker.remove": { req: MarkerRemoveRequest; reply: EmptyObject };
+  "cmd/arranger.addSection": { req: ArrangerAddSectionRequest; reply: ArrangerAddSectionReply };
+  "cmd/arranger.setSection": { req: ArrangerSetSectionRequest; reply: EmptyObject };
+  "cmd/arranger.removeSection": { req: ArrangerRemoveSectionRequest; reply: EmptyObject };
+  "cmd/arranger.setChain": { req: ArrangerSetChainRequest; reply: EmptyObject };
+  "cmd/arranger.flatten": { req: EmptyObject; reply: EmptyObject };
+  "cmd/chord.add": { req: ChordAddRequest; reply: ChordAddReply };
+  "cmd/chord.set": { req: ChordSetRequest; reply: EmptyObject };
+  "cmd/chord.remove": { req: ChordRemoveRequest; reply: EmptyObject };
+  "cmd/transpose.add": { req: TransposeAddRequest; reply: TransposeAddReply };
+  "cmd/transpose.set": { req: TransposeSetRequest; reply: EmptyObject };
+  "cmd/transpose.remove": { req: TransposeRemoveRequest; reply: EmptyObject };
   "cmd/tempo.set": { req: TempoSetRequest; reply: EmptyObject };
   "cmd/timesig.set": { req: TimeSigSetRequest; reply: EmptyObject };
   "cmd/tempoMap.set": { req: TempoMapSetRequest; reply: EmptyObject };

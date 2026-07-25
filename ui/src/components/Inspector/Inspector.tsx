@@ -13,6 +13,8 @@ import { TrackSection } from "./TrackSection";
 import { TakesSection } from "./TakesSection";
 import { ClipSection } from "./ClipSection";
 import { MarkersSection } from "./MarkersSection";
+import { ViewRowSection } from "./ViewRowSection";
+import { isViewRowKind } from "../../protocol/types";
 import { ProjectOverview } from "./ProjectOverview";
 import { Icon } from "../common/icons";
 
@@ -58,10 +60,12 @@ export default function Inspector() {
 
   return (
     <div className="inspector">
-      {track ? (
+      {track && isViewRowKind(track.kind) ? (
+        <ViewRowSection key={`v${track.id}`} track={track} project={project} />
+      ) : track ? (
         <TrackSection key={`t${track.id}`} track={track} project={project} />
       ) : null}
-      {track && track.kind !== "master" && track.kind !== "folder" ? (
+      {track && track.kind !== "master" && track.kind !== "folder" && !isViewRowKind(track.kind) ? (
         <TakesSection key={`tk${track.id}`} track={track} project={project} />
       ) : null}
       {clipHit ? (

@@ -131,6 +131,11 @@ public:
         bool liveAudioWhenRecording = false; // armed: input audible while recording
         int inputChannelOffset = 0;          // first capture channel
         bool liveMidi = false;               // merge live MIDI (armed/monitoring midi/instr)
+        // MIDI output channel (Track::midiOutChannel): 0 = as played (each event keeps the
+        // channel it was recorded/baked with), 1..16 = force every channel-voice message
+        // this track ORIGINATES onto that channel. Feeder-delivered events are exempt —
+        // each feeder already stamped its own channel, which is the point of the routing.
+        int midiOutChannel = 0;
     };
 
     explicit TrackNode(Config&& cfg);
@@ -230,6 +235,20 @@ private:
     void drainPendingOffsRt() noexcept;
     /// Ledger-track a live/injected/feeder event (note on/off + CC123/CC120 clears).
     void trackLiveNoteRt(const MidiEvent& e) noexcept;
+
+    /// cfg_.midiOutChannel applied to a source channel (0-based in, 0-based out).
+    int outChannelRt(int ch) const noexcept {
+        return cfg_.midiOutChannel > 0 ? cfg_.midiOutChannel - 1 : ch;
+    }
+    /// Re-stamp a channel-voice message onto cfg_.midiOutChannel (no-op when 0 = as
+    /// played, or for system messages). Applied to everything this track ORIGINATES —
+    /// baked clip events, live input, injected preview — before it reaches the scratch
+    /// buffer, so the note ledger and its releases already speak the forced channel.
+    void applyOutChannelRt(MidiEvent& e) const noexcept {
+        if (cfg_.midiOutChannel > 0 && e.data[0] >= 0x80 && e.data[0] < 0xF0)
+            e.data[0] = static_cast<uint8_t>((e.data[0] & 0xF0) |
+                                             static_cast<uint8_t>(cfg_.midiOutChannel - 1));
+    }
 
     Config cfg_;
 

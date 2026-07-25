@@ -14,6 +14,7 @@
 
 import React, { useMemo, useRef, useState } from "react";
 import type { Track } from "../../protocol/types";
+import { isViewRowKind } from "../../protocol/types";
 import { metersBus, useStore } from "../../store/store";
 import * as actions from "../../store/actions";
 import { useRafLoop } from "../../lib/canvas";
@@ -343,7 +344,8 @@ export default function RoomView() {
     if (!project_) return [];
     const regular = project_.tracks.filter(
       (t) =>
-        t.kind !== "folder" && t.kind !== "bus" && t.kind !== "master" && t.kind !== "midi",
+        t.kind !== "folder" && !isViewRowKind(t.kind) &&
+        t.kind !== "bus" && t.kind !== "master" && t.kind !== "midi",
     );
     const buses = project_.tracks.filter((t) => t.kind === "bus");
     return [...regular, ...buses];

@@ -190,9 +190,54 @@ json toJson(const Marker& m) {
         {"beat", m.beat},
         {"name", m.name},
     };
+    if (m.isCycle())
+        j["endBeat"] = m.endBeat; // cycle (range) marker; omitted for point markers
     if (!m.color.empty())
         j["color"] = m.color;
     return j;
+}
+
+json toJson(const ArrangerSection& s) {
+    json j = {
+        {"id", s.id},
+        {"name", s.name},
+        {"startBeat", s.startBeat},
+        {"endBeat", s.endBeat},
+    };
+    if (!s.color.empty())
+        j["color"] = s.color;
+    return j;
+}
+
+json toJson(const Arranger& a) {
+    json sections = json::array();
+    for (const ArrangerSection& s : a.sections)
+        sections.push_back(toJson(s));
+    json j = {
+        {"sections", std::move(sections)},
+        {"chain", a.chain},
+    };
+    if (a.activeChain)
+        j["activeChain"] = true;
+    return j;
+}
+
+json toJson(const ChordEvent& c) {
+    json j = {
+        {"id", c.id},
+        {"beat", c.beat},
+        {"root", c.root},
+        {"quality", c.quality},
+    };
+    if (!c.tensions.empty())
+        j["tensions"] = c.tensions;
+    if (c.bass >= 0)
+        j["bass"] = c.bass;
+    return j;
+}
+
+json toJson(const TransposeEvent& t) {
+    return json{{"id", t.id}, {"beat", t.beat}, {"semitones", t.semitones}};
 }
 
 json toJson(const Asset& a) {
@@ -344,6 +389,8 @@ json toJson(const Track& t) {
         j["frozenAssetId"] = t.frozenAssetId;
     if (t.midiTarget != 0)
         j["midiTarget"] = t.midiTarget; // kind==Midi only (SPEC §6); omitted when 0
+    if (t.midiOutChannel > 0)
+        j["midiOutChannel"] = t.midiOutChannel; // 1..16; omitted when 0 (= as played)
     if (t.vcaId != 0)
         j["vcaId"] = t.vcaId; // VCA-group membership; omitted when 0
     // track.eq: omit when there are no bands and EQ is not bypassed (SPEC §6).
@@ -412,6 +459,21 @@ json toJson(const Project& p) {
         {"midiMaps", std::move(midiMaps)},
         {"nextId", p.nextId},
     };
+    // View-row data (TRACK_TYPES_PLAN §3.6-3.8): omit-when-empty like takeFolders.
+    if (!p.arranger.empty())
+        j["arranger"] = toJson(p.arranger);
+    if (!p.chordEvents.empty()) {
+        json chords = json::array();
+        for (const ChordEvent& c : p.chordEvents)
+            chords.push_back(toJson(c));
+        j["chordEvents"] = std::move(chords);
+    }
+    if (!p.transposeEvents.empty()) {
+        json transposes = json::array();
+        for (const TransposeEvent& t : p.transposeEvents)
+            transposes.push_back(toJson(t));
+        j["transposeEvents"] = std::move(transposes);
+    }
     if (!p.ui.is_null() && !(p.ui.is_object() && p.ui.empty()))
         j["ui"] = p.ui; // opaque round-trip (SPEC §6)
     return j;
@@ -578,7 +640,77 @@ bool fromJson(const json& j, Marker& out, std::string* err) {
     out.id = getOr<uint64_t>(j, "id", 0);
     out.beat = getOr<double>(j, "beat", 0.0);
     out.name = getOr(j, "name", "");
+    out.endBeat = getOr<double>(j, "endBeat", 0.0); // 0/absent = point marker
     out.color = getOr(j, "color", "");
+    return true;
+}
+
+bool fromJson(const json& j, ArrangerSection& out, std::string* err) {
+    if (!j.is_object())
+        return failWith(err, "arrangerSection: not a JSON object");
+    out = ArrangerSection{};
+    out.id = getOr<uint64_t>(j, "id", 0);
+    out.name = getOr(j, "name", "");
+    out.startBeat = getOr<double>(j, "startBeat", 0.0);
+    out.endBeat = getOr<double>(j, "endBeat", 0.0);
+    out.color = getOr(j, "color", "");
+    return true;
+}
+
+bool fromJson(const json& j, Arranger& out, std::string* err) {
+    if (!j.is_object())
+        return failWith(err, "arranger: not a JSON object");
+    out = Arranger{};
+    if (hasKey(j, "sections") && j.find("sections")->is_array()) {
+        for (const json& sj : *j.find("sections")) {
+            ArrangerSection s;
+            if (fromJson(sj, s, nullptr) && s.endBeat > s.startBeat)
+                out.sections.push_back(std::move(s));
+        }
+    }
+    std::stable_sort(out.sections.begin(), out.sections.end(),
+                     [](const ArrangerSection& a, const ArrangerSection& b) {
+                         return a.startBeat < b.startBeat;
+                     });
+    if (hasKey(j, "chain") && j.find("chain")->is_array()) {
+        for (const json& cj : *j.find("chain"))
+            if (cj.is_number())
+                out.chain.push_back(cj.get<uint64_t>());
+    }
+    // Chain entries must reference existing sections (a load never keeps dead ids).
+    out.chain.erase(std::remove_if(out.chain.begin(), out.chain.end(),
+                                   [&](uint64_t id) {
+                                       for (const ArrangerSection& s : out.sections)
+                                           if (s.id == id)
+                                               return false;
+                                       return true;
+                                   }),
+                    out.chain.end());
+    out.activeChain = getOr<bool>(j, "activeChain", false) && !out.chain.empty();
+    return true;
+}
+
+bool fromJson(const json& j, ChordEvent& out, std::string* err) {
+    if (!j.is_object())
+        return failWith(err, "chordEvent: not a JSON object");
+    out = ChordEvent{};
+    out.id = getOr<uint64_t>(j, "id", 0);
+    out.beat = getOr<double>(j, "beat", 0.0);
+    out.root = std::clamp(getOr<int>(j, "root", 0), 0, 11);
+    out.quality = getOr(j, "quality", "maj");
+    out.tensions = getOr(j, "tensions", "");
+    const int bass = getOr<int>(j, "bass", -1);
+    out.bass = bass >= 0 && bass <= 11 ? bass : -1;
+    return true;
+}
+
+bool fromJson(const json& j, TransposeEvent& out, std::string* err) {
+    if (!j.is_object())
+        return failWith(err, "transposeEvent: not a JSON object");
+    out = TransposeEvent{};
+    out.id = getOr<uint64_t>(j, "id", 0);
+    out.beat = getOr<double>(j, "beat", 0.0);
+    out.semitones = std::clamp(getOr<int>(j, "semitones", 0), -24, 24);
     return true;
 }
 
@@ -674,6 +806,7 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.frozen = getOr<bool>(j, "frozen", false);
     out.frozenAssetId = getOr<uint64_t>(j, "frozenAssetId", 0);
     out.midiTarget = getOr<uint64_t>(j, "midiTarget", 0); // validated at Project level
+    out.midiOutChannel = std::clamp(getOr<int>(j, "midiOutChannel", 0), 0, 16);
     out.vcaId = getOr<uint64_t>(j, "vcaId", 0);
 
     if (hasKey(j, "inserts") && j.find("inserts")->is_array()) {
@@ -814,6 +947,28 @@ bool fromJson(const json& j, Project& out, std::string* err) {
             if (fromJson(mj, m, nullptr))
                 p.markers.push_back(std::move(m));
         }
+    }
+    if (hasKey(j, "arranger"))
+        fromJson(*j.find("arranger"), p.arranger, nullptr); // tolerant; empty on failure
+    if (hasKey(j, "chordEvents") && j.find("chordEvents")->is_array()) {
+        for (const json& cj : *j.find("chordEvents")) {
+            ChordEvent c;
+            if (fromJson(cj, c, nullptr))
+                p.chordEvents.push_back(std::move(c));
+        }
+        std::stable_sort(p.chordEvents.begin(), p.chordEvents.end(),
+                         [](const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    }
+    if (hasKey(j, "transposeEvents") && j.find("transposeEvents")->is_array()) {
+        for (const json& tj2 : *j.find("transposeEvents")) {
+            TransposeEvent t;
+            if (fromJson(tj2, t, nullptr))
+                p.transposeEvents.push_back(std::move(t));
+        }
+        std::stable_sort(p.transposeEvents.begin(), p.transposeEvents.end(),
+                         [](const TransposeEvent& a, const TransposeEvent& b) {
+                             return a.beat < b.beat;
+                         });
     }
     if (hasKey(j, "tracks")) {
         const json& tj = *j.find("tracks");

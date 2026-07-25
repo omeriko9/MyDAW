@@ -1963,6 +1963,13 @@ bool mapModel(const Project& p, WriterModel& wm, std::vector<std::string>& warni
                 continue;
             case TrackKind::Master:
                 continue; // never appears in p.tracks; defensive
+            case TrackKind::Marker:
+            case TrackKind::Arranger:
+            case TrackKind::Chord:
+            case TrackKind::Transpose:
+                warn("view-row track '" + t.name +
+                     "' skipped (marker/arranger/chord/transpose data is not exported)");
+                continue;
             case TrackKind::Audio:
             case TrackKind::Midi:
             case TrackKind::Instrument:

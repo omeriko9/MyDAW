@@ -680,6 +680,7 @@ void CommandProcessor::syncEngineFromModel() {
         ctx_.tempoMap->setMap(p.tempoMap, p.timeSigMap);
     if (ctx_.transport)
         ctx_.transport->setLoopBeats(p.loop.startBeat, p.loop.endBeat, p.loop.enabled);
+    syncArrangerToTransport(); // jump table follows the restored model + tempo
     pushEffectiveMutes();
     rebuildGraph();
 }
@@ -976,6 +977,17 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/marker.add")       return markerAdd(p, r);
     if (type == "cmd/marker.set")       return markerSet(p, r);
     if (type == "cmd/marker.remove")    return markerRemove(p, r);
+    if (type == "cmd/arranger.addSection")    return arrangerAddSection(p, r);
+    if (type == "cmd/arranger.setSection")    return arrangerSetSection(p, r);
+    if (type == "cmd/arranger.removeSection") return arrangerRemoveSection(p, r);
+    if (type == "cmd/arranger.setChain")      return arrangerSetChain(p, r);
+    if (type == "cmd/arranger.flatten")       return arrangerFlatten(p, r);
+    if (type == "cmd/chord.add")        return chordAdd(p, r);
+    if (type == "cmd/chord.set")        return chordSet(p, r);
+    if (type == "cmd/chord.remove")     return chordRemove(p, r);
+    if (type == "cmd/transpose.add")    return transposeAdd(p, r);
+    if (type == "cmd/transpose.set")    return transposeSet(p, r);
+    if (type == "cmd/transpose.remove") return transposeRemove(p, r);
     if (type == "cmd/tempo.set")        return tempoSet(p, r);
     if (type == "cmd/timesig.set")      return timesigSet(p, r);
     if (type == "cmd/tempoMap.set")     return tempoMapSet(p, r);
@@ -1016,13 +1028,23 @@ json CommandProcessor::trackAdd(const json& p, CmdResult& r) {
     if (!trackKindFromString(kindStr, kind) || kind == TrackKind::Master)
         return r.fail("bad_request", "invalid track kind: " + kindStr);
 
+    // View rows: at most ONE of each kind per project — the underlying data (markers,
+    // arranger, chords, transposes) is project-level, so a second lane would just be a
+    // duplicate view of the same thing (TRACK_TYPES_PLAN §3.5).
+    if (trackKindIsViewRow(kind))
+        for (const Track& x : m.project.tracks)
+            if (x.kind == kind)
+                return r.fail("bad_request", std::string("the project already has a ") +
+                                                 kindStr + " track");
+
     Track t;
     t.id = m.nextId();
     t.kind = kind;
     t.channels = getOr<int>(p, "channels", 2) == 1 ? 1 : 2;
     t.color = kTrackColors[m.project.tracks.size() % kNumTrackColors];
-    t.outputTarget =
-        kind == TrackKind::Folder ? OutputTarget::none() : OutputTarget::master();
+    t.outputTarget = kind == TrackKind::Folder || trackKindIsViewRow(kind)
+                         ? OutputTarget::none()
+                         : OutputTarget::master();
 
     std::string name = getOr(p, "name", "");
     if (name.empty()) {
@@ -1032,6 +1054,10 @@ json CommandProcessor::trackAdd(const json& p, CmdResult& r) {
             case TrackKind::Instrument: base = "Instrument"; break;
             case TrackKind::Folder:     base = "Folder"; break;
             case TrackKind::Bus:        base = "Bus"; break;
+            case TrackKind::Marker:     base = "Markers"; break;
+            case TrackKind::Arranger:   base = "Arranger"; break;
+            case TrackKind::Chord:      base = "Chords"; break;
+            case TrackKind::Transpose:  base = "Transpose"; break;
             default: break;
         }
         int count = 1;
@@ -1304,6 +1330,15 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         any = true;
         mixerOnly = false;
     }
+    if (hasKey(patch, "midiOutChannel")) {
+        const int ch = std::clamp(getOr<int>(patch, "midiOutChannel", t->midiOutChannel), 0, 16);
+        if (t->midiOutChannel != ch) {
+            t->midiOutChannel = ch;
+            r.structural = true; // the channel is stamped in the graph's baked events
+        }
+        any = true;
+        mixerOnly = false;
+    }
     if (hasTarget) {
         t->outputTarget = newTarget;
         any = true;
@@ -1427,7 +1462,7 @@ json CommandProcessor::trackAddSend(const json& p, CmdResult& r) {
     Track* t = m.trackById(id);
     if (!t)
         return r.fail("not_found", "unknown trackId");
-    if (t->kind == TrackKind::Master || t->kind == TrackKind::Folder)
+    if (t->kind == TrackKind::Master || t->kind == TrackKind::Folder || t->isViewRow())
         return r.fail("bad_request", "this track kind cannot have sends");
     if (!m.isValidSendDest(dest))
         return r.fail("bad_request", "send destination must be a bus track");
@@ -1590,6 +1625,9 @@ json CommandProcessor::trackDuplicate(const json& p, CmdResult& r) {
         return r.fail("bad_request", "master track cannot be duplicated");
     if (m.trackIndex(id) < 0)
         return r.fail("bad_request", "unknown trackId");
+    if (const Track* src0 = m.trackById(id); src0 && src0->isViewRow())
+        return r.fail("bad_request",
+                      "view-row tracks cannot be duplicated (max one per project)");
 
     // Source subtree = the track + all folder descendants, in model order. Fixed-point
     // membership scan so a child listed before its parent is still picked up.
@@ -2333,6 +2371,11 @@ json CommandProcessor::clipDuplicate(const json& p, CmdResult& r) {
     const std::vector<uint64_t> ids = idArray(p, "clipIds");
     if (ids.empty())
         return r.fail("bad_request", "clipIds is empty");
+    // atSource: copies land ON the originals (same startBeat) instead of right after
+    // them — the Alt+drag copy gesture duplicates first, then moves by the drag delta,
+    // which is measured from the ORIGINAL's position (Cubase semantics). Default stays
+    // "right after" (Ctrl+D).
+    const bool atSource = getOr<bool>(p, "atSource", false);
     const TempoMap& T = tm();
 
     json clipsOut = json::array();
@@ -2343,7 +2386,8 @@ json CommandProcessor::clipDuplicate(const json& p, CmdResult& r) {
             return r.fail("not_found", "unknown clipId");
         Clip copy = *ref.clip;
         const double len = clipLengthBeats(*ref.clip, T);
-        setClipStartBeat(copy, clipStartBeat(*ref.clip) + len); // right after original
+        if (!atSource)
+            setClipStartBeat(copy, clipStartBeat(*ref.clip) + len); // right after original
         uint64_t newId = m.nextId();
         if (AudioClip* a = asAudio(&copy)) {
             a->id = newId;
@@ -2916,6 +2960,9 @@ json CommandProcessor::markerAdd(const json& p, CmdResult& r) {
     Marker mk;
     mk.id = m.nextId();
     mk.beat = std::max(0.0, getOr<double>(p, "beat", 0.0));
+    mk.endBeat = getOr<double>(p, "endBeat", 0.0); // > beat = cycle marker (§3.5)
+    if (mk.endBeat <= mk.beat)
+        mk.endBeat = 0.0;
     mk.name = getOr(p, "name", "Marker");
     mk.color = getOr(p, "color", "");
     m.project.markers.push_back(mk);
@@ -2934,8 +2981,17 @@ json CommandProcessor::markerSet(const json& p, CmdResult& r) {
     if (!p.is_object() || !p.contains("patch") || !p["patch"].is_object())
         return r.fail("bad_request", "missing patch object");
     const json& patch = p["patch"];
-    if (hasKey(patch, "beat"))
+    if (hasKey(patch, "beat")) {
+        const double oldBeat = mk->beat;
         mk->beat = std::max(0.0, getOr<double>(patch, "beat", mk->beat));
+        if (mk->isCycle() || mk->endBeat > 0.0) // dragging a cycle marker moves its range
+            mk->endBeat = std::max(0.0, mk->endBeat + (mk->beat - oldBeat));
+    }
+    if (hasKey(patch, "endBeat")) {
+        mk->endBeat = getOr<double>(patch, "endBeat", mk->endBeat);
+        if (mk->endBeat <= mk->beat)
+            mk->endBeat = 0.0; // collapse to a point marker
+    }
     if (hasKey(patch, "name"))
         mk->name = getOr(patch, "name", mk->name.c_str());
     if (hasKey(patch, "color"))
@@ -2962,6 +3018,373 @@ json CommandProcessor::markerRemove(const json& p, CmdResult& r) {
     return r.fail("not_found", "unknown markerId");
 }
 
+// ---------------------------------------------------------------------------
+// §5.3 — arranger / chord / transpose (view-row track data, TRACK_TYPES_PLAN §3.6-3.8)
+// ---------------------------------------------------------------------------
+
+namespace {
+void sortArrangerSections(std::vector<ArrangerSection>& v) {
+    std::stable_sort(v.begin(), v.end(),
+                     [](const ArrangerSection& a, const ArrangerSection& b) {
+                         return a.startBeat < b.startBeat;
+                     });
+}
+} // namespace
+
+// Rebuild the Transport's arranger jump table from the model (beats -> samples via the
+// live tempo map). Called after every arranger edit, after tempo changes, and from
+// syncEngineFromModel (load/undo/redo restore whole projects).
+void CommandProcessor::syncArrangerToTransport() {
+    if (!ctx_.transport || !ctx_.tempoMap || !ctx_.model)
+        return;
+    const Arranger& a = ctx_.model->project.arranger;
+    std::vector<Transport::ArrangerStep> steps;
+    steps.reserve(a.chain.size());
+    for (size_t i = 0; i < a.chain.size(); ++i) {
+        const ArrangerSection* s = nullptr;
+        for (const ArrangerSection& x : a.sections)
+            if (x.id == a.chain[i]) { s = &x; break; }
+        if (!s)
+            continue; // dead id (shouldn't survive validation; skip defensively)
+        Transport::ArrangerStep st;
+        st.start = ctx_.tempoMap->beatsToSamples(s->startBeat);
+        st.end = ctx_.tempoMap->beatsToSamples(s->endBeat);
+        st.to = -1; // last chain entry plays on linearly; earlier ones patched below
+        steps.push_back(st);
+    }
+    for (size_t i = 0; i + 1 < steps.size(); ++i)
+        steps[i].to = steps[i + 1].start;
+    ctx_.transport->setArrangerSteps(steps.data(), static_cast<int>(steps.size()),
+                                     a.activeChain);
+}
+
+json CommandProcessor::arrangerAddSection(const json& p, CmdResult& r) {
+    Model& m = model();
+    ArrangerSection s;
+    s.id = m.nextId();
+    s.startBeat = std::max(0.0, getOr<double>(p, "startBeat", 0.0));
+    s.endBeat = getOr<double>(p, "endBeat", s.startBeat + 4.0);
+    if (s.endBeat <= s.startBeat)
+        return r.fail("bad_request", "endBeat must be greater than startBeat");
+    s.color = getOr(p, "color", "");
+    std::string name = getOr(p, "name", "");
+    if (name.empty())
+        name = std::string(1, static_cast<char>('A' + (m.project.arranger.sections.size() % 26)));
+    s.name = std::move(name);
+    m.project.arranger.sections.push_back(s);
+    sortArrangerSections(m.project.arranger.sections);
+    syncArrangerToTransport();
+    r.label = "Add Arranger Section";
+    r.fullEvent = true;
+    return json{{"section", toJson(s)}};
+}
+
+json CommandProcessor::arrangerSetSection(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "sectionId", 0);
+    ArrangerSection* s = nullptr;
+    for (ArrangerSection& x : m.project.arranger.sections)
+        if (x.id == id) { s = &x; break; }
+    if (!s)
+        return r.fail("not_found", "unknown sectionId");
+    if (!p.is_object() || !p.contains("patch") || !p["patch"].is_object())
+        return r.fail("bad_request", "missing patch object");
+    const json& patch = p["patch"];
+    double start = s->startBeat;
+    double end = s->endBeat;
+    if (hasKey(patch, "startBeat"))
+        start = std::max(0.0, getOr<double>(patch, "startBeat", start));
+    if (hasKey(patch, "endBeat"))
+        end = getOr<double>(patch, "endBeat", end);
+    if (end <= start)
+        return r.fail("bad_request", "endBeat must be greater than startBeat");
+    s->startBeat = start;
+    s->endBeat = end;
+    if (hasKey(patch, "name"))
+        s->name = getOr(patch, "name", s->name.c_str());
+    if (hasKey(patch, "color"))
+        s->color = getOr(patch, "color", s->color.c_str());
+    sortArrangerSections(m.project.arranger.sections);
+    syncArrangerToTransport();
+    r.label = "Edit Arranger Section";
+    r.fullEvent = true;
+    return json::object();
+}
+
+json CommandProcessor::arrangerRemoveSection(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "sectionId", 0);
+    auto& v = m.project.arranger.sections;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i].id == id) {
+            v.erase(v.begin() + static_cast<ptrdiff_t>(i));
+            auto& chain = m.project.arranger.chain;
+            chain.erase(std::remove(chain.begin(), chain.end(), id), chain.end());
+            if (chain.empty())
+                m.project.arranger.activeChain = false;
+            syncArrangerToTransport();
+            r.label = "Remove Arranger Section";
+            r.fullEvent = true;
+            return json::object();
+        }
+    }
+    return r.fail("not_found", "unknown sectionId");
+}
+
+json CommandProcessor::arrangerSetChain(const json& p, CmdResult& r) {
+    Model& m = model();
+    Arranger& a = m.project.arranger;
+    if (hasKey(p, "chain")) {
+        const json& cj = p["chain"];
+        if (!cj.is_array())
+            return r.fail("bad_request", "chain must be an array of section ids");
+        std::vector<uint64_t> chain;
+        for (const json& e : cj) {
+            if (!e.is_number())
+                return r.fail("bad_request", "chain entries must be numbers");
+            const uint64_t id = e.get<uint64_t>();
+            bool known = false;
+            for (const ArrangerSection& s : a.sections)
+                if (s.id == id) { known = true; break; }
+            if (!known)
+                return r.fail("not_found",
+                              "chain references unknown sectionId " + std::to_string(id));
+            chain.push_back(id);
+        }
+        a.chain = std::move(chain);
+    }
+    if (hasKey(p, "active"))
+        a.activeChain = getOr<bool>(p, "active", a.activeChain) && !a.chain.empty();
+    else if (a.chain.empty())
+        a.activeChain = false;
+    syncArrangerToTransport();
+    // Activating the chain re-enters it cleanly: locate to the first section's start.
+    if (getOr<bool>(p, "locateToStart", false) && a.activeChain && ctx_.transport) {
+        for (const ArrangerSection& s : a.sections)
+            if (s.id == a.chain.front()) {
+                ctx_.transport->locate(s.startBeat);
+                break;
+            }
+    }
+    r.label = "Edit Arranger Chain";
+    r.fullEvent = true;
+    return json::object();
+}
+
+// Bake the chain into a linear timeline: for each chain step, window-copy every clip
+// track's material inside the section onto a rebuilt timeline (same windowed-copy rules
+// as take.flatten / the comp renderer). The chain is then cleared and deactivated.
+json CommandProcessor::arrangerFlatten(const json& p, CmdResult& r) {
+    (void)p;
+    Model& m = model();
+    Arranger& a = m.project.arranger;
+    if (a.chain.empty())
+        return r.fail("bad_request", "arranger chain is empty — nothing to flatten");
+    const TempoMap& T = tm();
+
+    struct Seg { double s, e; };
+    std::vector<Seg> segs;
+    for (const uint64_t id : a.chain)
+        for (const ArrangerSection& s : a.sections)
+            if (s.id == id && s.endBeat > s.startBeat) {
+                segs.push_back({s.startBeat, s.endBeat});
+                break;
+            }
+    if (segs.empty())
+        return r.fail("bad_request", "arranger chain has no playable sections");
+
+    for (Track& t : m.project.tracks) {
+        if (!t.canHoldClips() || t.clips.empty())
+            continue;
+        std::vector<Clip> flat;
+        double outBeat = 0.0;
+        for (const Seg& sg : segs) {
+            for (const Clip& c : t.clips) {
+                if (const AudioClip* ac = asAudio(&c)) {
+                    const double cs = clipStartBeat(c), ce = clipEndBeat(c, T);
+                    const double ns = std::max(cs, sg.s), ne = std::min(ce, sg.e);
+                    if (ne <= ns)
+                        continue;
+                    const int64_t csS = T.beatsToSamples(cs);
+                    const int64_t nsS = T.beatsToSamples(ns), neS = T.beatsToSamples(ne);
+                    AudioClip nc = *ac;
+                    nc.id = m.nextId();
+                    nc.startBeat = outBeat + (ns - sg.s);
+                    nc.srcOffsetSamples = ac->srcOffsetSamples + (nsS - csS);
+                    nc.lengthSamples = neS - nsS;
+                    nc.fadeInSec = ns == cs ? ac->fadeInSec : 0.0;
+                    nc.fadeOutSec = ne == ce ? ac->fadeOutSec : 0.0;
+                    flat.emplace_back(std::move(nc));
+                } else if (const MidiClip* mc = asMidi(&c)) {
+                    const double cs = mc->startBeat, ce = mc->startBeat + mc->lengthBeats;
+                    const double ns = std::max(cs, sg.s), ne = std::min(ce, sg.e);
+                    if (ne <= ns)
+                        continue;
+                    MidiClip nc;
+                    nc.id = m.nextId();
+                    nc.name = mc->name;
+                    nc.color = mc->color;
+                    nc.startBeat = outBeat + (ns - sg.s);
+                    nc.lengthBeats = ne - ns;
+                    for (const Note& note : mc->notes) {
+                        const double onB = cs + note.startBeat;
+                        if (onB < ns || onB >= ne)
+                            continue;
+                        Note nn = note;
+                        nn.id = m.nextId();
+                        nn.startBeat = onB - ns;
+                        if (nn.startBeat + nn.lengthBeats > nc.lengthBeats)
+                            nn.lengthBeats = std::max(0.0, nc.lengthBeats - nn.startBeat);
+                        nc.notes.push_back(nn);
+                    }
+                    for (const MidiCc& pt : mc->cc) {
+                        const double atB = cs + pt.beat;
+                        if (atB < ns || atB >= ne)
+                            continue;
+                        MidiCc np = pt;
+                        np.beat = atB - ns;
+                        nc.cc.push_back(np);
+                    }
+                    flat.emplace_back(std::move(nc));
+                }
+            }
+            outBeat += sg.e - sg.s;
+        }
+        t.clips = std::move(flat);
+        sortClipsByStart(t);
+    }
+
+    a.chain.clear();
+    a.activeChain = false;
+    a.sections.clear(); // the sections described the OLD timeline; they no longer apply
+    syncArrangerToTransport();
+    r.label = "Flatten Arranger Chain";
+    r.structural = true;
+    r.fullEvent = true;
+    return json::object();
+}
+
+json CommandProcessor::chordAdd(const json& p, CmdResult& r) {
+    Model& m = model();
+    ChordEvent c;
+    c.id = m.nextId();
+    c.beat = std::max(0.0, getOr<double>(p, "beat", 0.0));
+    c.root = clampi(getOr<int>(p, "root", 0), 0, 11);
+    c.quality = getOr(p, "quality", "maj");
+    c.tensions = getOr(p, "tensions", "");
+    const int bass = getOr<int>(p, "bass", -1);
+    c.bass = bass >= 0 && bass <= 11 ? bass : -1;
+    m.project.chordEvents.push_back(c);
+    std::stable_sort(m.project.chordEvents.begin(), m.project.chordEvents.end(),
+                     [](const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    r.label = "Add Chord";
+    r.fullEvent = true;
+    return json{{"chord", toJson(c)}};
+}
+
+json CommandProcessor::chordSet(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "chordId", 0);
+    ChordEvent* c = nullptr;
+    for (ChordEvent& x : m.project.chordEvents)
+        if (x.id == id) { c = &x; break; }
+    if (!c)
+        return r.fail("not_found", "unknown chordId");
+    if (!p.is_object() || !p.contains("patch") || !p["patch"].is_object())
+        return r.fail("bad_request", "missing patch object");
+    const json& patch = p["patch"];
+    if (hasKey(patch, "beat"))
+        c->beat = std::max(0.0, getOr<double>(patch, "beat", c->beat));
+    if (hasKey(patch, "root"))
+        c->root = clampi(getOr<int>(patch, "root", c->root), 0, 11);
+    if (hasKey(patch, "quality"))
+        c->quality = getOr(patch, "quality", c->quality.c_str());
+    if (hasKey(patch, "tensions"))
+        c->tensions = getOr(patch, "tensions", c->tensions.c_str());
+    if (hasKey(patch, "bass")) {
+        const int bass = getOr<int>(patch, "bass", c->bass);
+        c->bass = bass >= 0 && bass <= 11 ? bass : -1;
+    }
+    std::stable_sort(m.project.chordEvents.begin(), m.project.chordEvents.end(),
+                     [](const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    r.label = "Edit Chord";
+    r.fullEvent = true;
+    return json::object();
+}
+
+json CommandProcessor::chordRemove(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "chordId", 0);
+    auto& v = m.project.chordEvents;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i].id == id) {
+            v.erase(v.begin() + static_cast<ptrdiff_t>(i));
+            r.label = "Remove Chord";
+            r.fullEvent = true;
+            return json::object();
+        }
+    }
+    return r.fail("not_found", "unknown chordId");
+}
+
+json CommandProcessor::transposeAdd(const json& p, CmdResult& r) {
+    Model& m = model();
+    TransposeEvent t;
+    t.id = m.nextId();
+    t.beat = std::max(0.0, getOr<double>(p, "beat", 0.0));
+    t.semitones = clampi(getOr<int>(p, "semitones", 0), -24, 24);
+    m.project.transposeEvents.push_back(t);
+    std::stable_sort(m.project.transposeEvents.begin(), m.project.transposeEvents.end(),
+                     [](const TransposeEvent& a, const TransposeEvent& b) {
+                         return a.beat < b.beat;
+                     });
+    r.label = "Add Transpose";
+    r.structural = true; // pitch offsets are baked into the render plan
+    r.fullEvent = true;
+    return json{{"event", toJson(t)}};
+}
+
+json CommandProcessor::transposeSet(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "eventId", 0);
+    TransposeEvent* t = nullptr;
+    for (TransposeEvent& x : m.project.transposeEvents)
+        if (x.id == id) { t = &x; break; }
+    if (!t)
+        return r.fail("not_found", "unknown eventId");
+    if (!p.is_object() || !p.contains("patch") || !p["patch"].is_object())
+        return r.fail("bad_request", "missing patch object");
+    const json& patch = p["patch"];
+    if (hasKey(patch, "beat"))
+        t->beat = std::max(0.0, getOr<double>(patch, "beat", t->beat));
+    if (hasKey(patch, "semitones"))
+        t->semitones = clampi(getOr<int>(patch, "semitones", t->semitones), -24, 24);
+    std::stable_sort(m.project.transposeEvents.begin(), m.project.transposeEvents.end(),
+                     [](const TransposeEvent& a, const TransposeEvent& b) {
+                         return a.beat < b.beat;
+                     });
+    r.label = "Edit Transpose";
+    r.structural = true;
+    r.fullEvent = true;
+    return json::object();
+}
+
+json CommandProcessor::transposeRemove(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "eventId", 0);
+    auto& v = m.project.transposeEvents;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i].id == id) {
+            v.erase(v.begin() + static_cast<ptrdiff_t>(i));
+            r.label = "Remove Transpose";
+            r.structural = true;
+            r.fullEvent = true;
+            return json::object();
+        }
+    }
+    return r.fail("not_found", "unknown eventId");
+}
+
 json CommandProcessor::tempoSet(const json& p, CmdResult& r) {
     Model& m = model();
     const double bpm = clampd(getOr<double>(p, "bpm", 120.0), 20.0, 400.0); // SPEC clamp
@@ -2975,6 +3398,7 @@ json CommandProcessor::tempoSet(const json& p, CmdResult& r) {
         ctx_.tempoMap->setMap(m.project.tempoMap, m.project.timeSigMap);
     if (ctx_.transport) // loop region is stored in beats; sample window must follow tempo
         ctx_.transport->rederiveLoop(m.project.loop.startBeat, m.project.loop.endBeat);
+    syncArrangerToTransport(); // arranger jump samples follow tempo too
     r.label = "Set Tempo";
     r.structural = true; // audio clip beat lengths shift; plan re-derives sample positions
     r.fullEvent = true;
@@ -3028,6 +3452,7 @@ json CommandProcessor::tempoMapSet(const json& p, CmdResult& r) {
         ctx_.tempoMap->setMap(m.project.tempoMap, m.project.timeSigMap);
     if (ctx_.transport) // loop region is stored in beats; sample window must follow tempo
         ctx_.transport->rederiveLoop(m.project.loop.startBeat, m.project.loop.endBeat);
+    syncArrangerToTransport(); // arranger jump samples follow tempo too
     r.label = "Set Tempo Map";
     r.structural = true; // sample positions of every beat-anchored object change
     r.fullEvent = true;
@@ -3158,8 +3583,8 @@ json CommandProcessor::pluginAdd(const json& p, CmdResult& r) {
     Track* t = m.trackById(trackId);
     if (!t)
         return r.fail("not_found", "unknown trackId");
-    if (t->kind == TrackKind::Folder)
-        return r.fail("bad_request", "folder tracks cannot have inserts");
+    if (t->kind == TrackKind::Folder || t->isViewRow())
+        return r.fail("bad_request", "this track kind cannot have inserts");
     if (t->kind == TrackKind::Midi)
         return r.fail("bad_request",
                       "MIDI tracks cannot host plugins — use an Instrument or Audio track");

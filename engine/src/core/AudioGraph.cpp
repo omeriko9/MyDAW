@@ -297,6 +297,20 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
     for (size_t i = 0; i < ordered.size(); ++i)
         posOf[ordered[i]->id] = static_cast<int>(i);
 
+    // Transpose track (TRACK_TYPES_PLAN §3.8): chromatic MIDI offset applied at BAKE
+    // time — the semitone value in effect at a note's absolute onset beat shifts its
+    // pitch (clips keep raw pitches; changes are structural rebuilds). Events sorted.
+    const auto transposeAt = [&p](double beat) -> int {
+        int semis = 0;
+        for (const TransposeEvent& te : p.transposeEvents) {
+            if (te.beat <= beat)
+                semis = te.semitones;
+            else
+                break;
+        }
+        return semis;
+    };
+
     // --- per-track configs + entries (nodes constructed after PDC) -----------------
     const size_t count = ordered.size();
     std::vector<TrackNode::Config> cfgs(count);
@@ -322,6 +336,10 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
         cfg.vcaGain = static_cast<float>(model.vcaGainFor(t.vcaId)); // VCA-group multiplier
         cfg.pan = static_cast<float>(t.pan);
         cfg.muted = t.mute || !soloAudible(solo, t.id);
+        // Forced MIDI output channel (Track::midiOutChannel) — MIDI/Instrument only, so a
+        // stale value on a converted track can't silently re-stamp anything.
+        if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
+            cfg.midiOutChannel = std::clamp(t.midiOutChannel, 0, 16);
 
         // ---- clip sources (audio + baked MIDI) ----------------------------------
         const bool frozen = !busLike && t.frozen && t.frozenAssetId != 0;
@@ -378,7 +396,8 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                             if (off <= on)
                                 off = on + 1;
                             TrackNode::NoteEvent ev;
-                            ev.pitch = static_cast<uint8_t>(std::clamp(note.pitch, 0, 127));
+                            ev.pitch = static_cast<uint8_t>(
+                                std::clamp(note.pitch + transposeAt(onB), 0, 127));
                             ev.channel =
                                 static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                             ev.sample = on;
@@ -499,7 +518,8 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                     if (off <= on)
                                         off = on + 1;
                                     TrackNode::NoteEvent ev;
-                                    ev.pitch = static_cast<uint8_t>(std::clamp(note.pitch, 0, 127));
+                                    ev.pitch = static_cast<uint8_t>(
+                                        std::clamp(note.pitch + transposeAt(onB), 0, 127));
                                     ev.channel =
                                         static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                                     ev.sample = on;

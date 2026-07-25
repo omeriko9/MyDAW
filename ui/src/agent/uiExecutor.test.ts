@@ -116,13 +116,17 @@ describe("executeUiOperation — validation and unsupported", () => {
     );
   });
 
-  it("reports unsupported operations honestly", () => {
+  it("reports unavailable state and unknown operations honestly", () => {
+    // midi.transform is implemented now — with no project it must say so, not fake it
     expect(() => executeUiOperation("ui/midi.transform", { transform: "reverse" })).toThrow(
-      /unsupported_operation|not available/,
+      /no project/,
     );
-    expect(() => executeUiOperation("ui/viewport.set", { pane: "timeline", fit: "content" })).toThrow(
-      UiOpError,
-    );
+    // viewport fit is implemented via zoomToFitPane; with no pane handlers registered
+    // (test env) it reports applied:false instead of throwing
+    expect(
+      executeUiOperation("ui/viewport.set", { pane: "timeline", fit: "content" }),
+    ).toMatchObject({ fit: true, applied: false });
+    expect(() => executeUiOperation("ui/edit.invoke", { action: "nope" })).toThrow(UiOpError);
     expect(() => executeUiOperation("ui/nope", {})).toThrow(/unknown UI operation/);
   });
 

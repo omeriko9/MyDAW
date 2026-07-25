@@ -38,6 +38,7 @@ import { useCanvas, useRafLoop } from "../../lib/canvas";
 import { followScrollX, shouldFollow } from "../../lib/followPlayhead";
 import { tempId } from "../../lib/ids";
 import { barToBeat, beatToBar, bpmAtBeat, formatBarsBeatsShort, timeSigAtBeat } from "../../lib/time";
+import { chordPitchClasses } from "../Timeline/viewRows";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
 import { NumberDrag } from "../common/NumberDrag";
@@ -95,6 +96,10 @@ interface MoveGesture {
   movedPx: number;
   /** plain click on an already-selected note collapses selection to it on release */
   collapseTo: number | null;
+  /** Shift+press on an UNSELECTED note: add it to the selection on release if the
+   *  gesture stayed a click (Shift is also the free-form/snap-off modifier, so it must
+   *  still be able to start a drag — same contract as the timeline). */
+  pendingAdd: number | null;
   prevSel: number[];
 }
 
@@ -445,6 +450,7 @@ interface EditorProps {
 
 function Editor({ track, clip }: EditorProps) {
   /* ---- store ---- */
+  const project = useStore((s) => s.project);
   const tool = useStore((s) => s.tool);
   const selectedNoteIds = useStore((s) => s.selection.noteIds);
   const transportState = useStore((s) => s.transport.state);
@@ -516,6 +522,24 @@ function Editor({ track, clip }: EditorProps) {
   );
   const scaleRef = useRef<{ pcs: Set<number> | null; snap: boolean }>({ pcs: null, snap: false });
   scaleRef.current = { pcs: scalePcs, snap: scaleSnap };
+  /** Chord-track tone highlight (TRACK_TYPES_PLAN §3.7): clip-relative regions from
+   *  project.chordEvents — each chord holds until the next. Auto-on when chords exist. */
+  const chordRegions = useMemo(() => {
+    const chords = project?.chordEvents;
+    if (!chords || chords.length === 0 || !clip) return null;
+    const clipStart = clip.startBeat;
+    const clipEnd = clip.startBeat + clip.lengthBeats;
+    const out: Array<{ startBeat: number; endBeat: number; pcs: ReadonlySet<number> }> = [];
+    for (let i = 0; i < chords.length; i++) {
+      const s = Math.max(chords[i].beat, clipStart);
+      const e = Math.min(i + 1 < chords.length ? chords[i + 1].beat : clipEnd, clipEnd);
+      if (e <= s) continue;
+      out.push({ startBeat: s - clipStart, endBeat: e - clipStart, pcs: chordPitchClasses(chords[i]) });
+    }
+    return out.length > 0 ? out : null;
+  }, [project?.chordEvents, clip]);
+  const chordRegionsRef = useRef<typeof chordRegions>(null);
+  chordRegionsRef.current = chordRegions;
   /** y → pitch honoring snap-to-scale (used by note creation paths). */
   const pitchAt = (y: number): number => {
     const p = M.yToPitch(y, viewRef.current);
@@ -568,6 +592,14 @@ function Editor({ track, clip }: EditorProps) {
     el.style.left = `${clientX + 14}px`;
     el.style.top = `${clientY - 18}px`;
     hudOnRef.current = true;
+  };
+  /**
+   * Snap-state suffix for drag HUDs: advertises Shift as the free-form (snap-off)
+   * modifier while the grid is on, and confirms it while Shift is held.
+   */
+  const snapHint = (shiftHeld: boolean): string => {
+    if (shiftHeld) return " · snap off";
+    return stepRef.current > 0 ? " · ⇧ free" : "";
   };
   /** "5.2" (+ ticks only when off-grid) — drag-readout position label. */
   const barsBeatsShort = (absBeat: number): string => {
@@ -774,6 +806,7 @@ function Editor({ track, clip }: EditorProps) {
         marquee,
         scaleRef.current.pcs,
         velColorsRef.current,
+        chordRegionsRef.current,
       );
     }
     const kEl = keysCv.canvasRef.current;
@@ -1192,7 +1225,7 @@ function Editor({ track, clip }: EditorProps) {
 
   /** One-shot note add (context menu) — same geometry/length/id rules as the create
    *  gesture (which also does not select the new note). */
-  const addNoteAt = (x: number, y: number) => {
+  const addNoteAt = (x: number, y: number, free = false) => {
     const v = viewRef.current;
     const c = clipRef.current;
     const step = stepRef.current;
@@ -1202,17 +1235,17 @@ function Editor({ track, clip }: EditorProps) {
           id: tempId(),
           pitch: pitchAt(y),
           velocity: lastVelRef.current,
-          startBeat: Math.max(0, M.snapFloor(M.xToBeat(x, v), step)),
+          startBeat: Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step)),
           lengthBeats: Math.max(M.MIN_NOTE_LEN, drawLenRef.current ?? step),
         },
       ],
     });
   };
 
-  const startCreate = (x: number, y: number) => {
+  const startCreate = (x: number, y: number, free = false) => {
     const v = viewRef.current;
     const step = stepRef.current;
-    const startBeat = Math.max(0, M.snapFloor(M.xToBeat(x, v), step));
+    const startBeat = Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step));
     const len = Math.max(M.MIN_NOTE_LEN, drawLenRef.current ?? step);
     const pitch = pitchAt(y);
     gestureRef.current = {
@@ -1258,9 +1291,17 @@ function Editor({ track, clip }: EditorProps) {
       return;
     }
     let ids: number[];
+    let pendingAdd: number | null = null;
     if (e.shiftKey) {
-      ids = isSelected ? sel : [...sel, hit.note.id];
-      setNoteSelection(ids);
+      // Shift = free-form (snap off) AND additive click. An already-selected note drags
+      // the whole selection; an unselected one drags ALONE and only joins the selection
+      // if the gesture turns out to be a click (deferred to release).
+      if (isSelected) {
+        ids = sel;
+      } else {
+        ids = [hit.note.id];
+        pendingAdd = hit.note.id;
+      }
     } else if (!isSelected) {
       ids = [hit.note.id];
       setNoteSelection(ids);
@@ -1283,6 +1324,7 @@ function Editor({ track, clip }: EditorProps) {
       dPitch: 0,
       movedPx: 0,
       collapseTo: !e.shiftKey && isSelected && sel.length > 1 ? hit.note.id : null,
+      pendingAdd,
       prevSel,
     };
     if (auditionRef.current) previewOn(hit.note.pitch, hit.note.velocity);
@@ -1313,7 +1355,7 @@ function Editor({ track, clip }: EditorProps) {
       return;
     }
     if (!hit && t === "draw") {
-      startCreate(x, y);
+      startCreate(x, y, e.shiftKey); // Shift = free-form placement (no grid)
       requestDraw();
       return;
     }
@@ -1330,7 +1372,7 @@ function Editor({ track, clip }: EditorProps) {
     if (lc && now - lc.t < 350 && Math.abs(x - lc.x) < 6 && Math.abs(y - lc.y) < 6) {
       // manual double-click: create + drag a new note (brief: dbl-click in select mode)
       lastClickRef.current = null;
-      startCreate(x, y);
+      startCreate(x, y, e.shiftKey);
       requestDraw();
       return;
     }
@@ -1415,7 +1457,8 @@ function Editor({ track, clip }: EditorProps) {
         break;
       }
       case "move": {
-        const step = stepRef.current;
+        // Shift = free-form: bypass the grid for this gesture (held before or during).
+        const step = e.shiftKey ? 0 : stepRef.current;
         const rawD = (x - g.startX) / v.zoomX;
         let dBeat = M.snapRound(g.anchorStart + rawD, step) - g.anchorStart;
         let dPitch = M.yToPitch(y, v) - g.startPitch;
@@ -1441,31 +1484,40 @@ function Editor({ track, clip }: EditorProps) {
           showDragHud(
             e.clientX,
             e.clientY,
-            `${M.pitchName(pitch)}${st}${pos ? ` · ${pos}` : ""}${g.copy ? " · copy" : ""}`,
+            `${M.pitchName(pitch)}${st}${pos ? ` · ${pos}` : ""}${g.copy ? " · copy" : ""}` +
+              snapHint(e.shiftKey),
           );
         }
         break;
       }
       case "resize": {
-        const step = stepRef.current;
+        const step = e.shiftKey ? 0 : stepRef.current;
         const rawD = (x - g.startX) / v.zoomX;
         const end0 = g.anchorStart + g.anchorLen;
         let dLen = M.snapRound(end0 + rawD, step) - end0;
         dLen = Math.max(dLen, M.MIN_NOTE_LEN - g.anchorLen);
         g.dLen = dLen;
-        showDragHud(e.clientX, e.clientY, M.lengthLabel(g.anchorLen + dLen));
+        showDragHud(
+          e.clientX,
+          e.clientY,
+          M.lengthLabel(g.anchorLen + dLen) + snapHint(e.shiftKey),
+        );
         break;
       }
       case "create": {
-        const step = stepRef.current;
+        const step = e.shiftKey ? 0 : stepRef.current;
         g.note.pitch = M.yToPitch(y, v);
-        const end = M.snapCeil(M.xToBeat(x, v), step);
-        g.note.lengthBeats = Math.max(step > 0 ? step : M.MIN_NOTE_LEN, end - g.note.startBeat);
+        const end = e.shiftKey ? M.xToBeat(x, v) : M.snapCeil(M.xToBeat(x, v), step);
+        g.note.lengthBeats = Math.max(
+          step > 0 ? step : M.MIN_NOTE_LEN,
+          end - g.note.startBeat,
+        );
         if (auditionRef.current) previewOn(g.note.pitch, g.note.velocity);
         showDragHud(
           e.clientX,
           e.clientY,
-          `${M.pitchName(g.note.pitch)} · ${M.lengthLabel(g.note.lengthBeats)}`,
+          `${M.pitchName(g.note.pitch)} · ${M.lengthLabel(g.note.lengthBeats)}` +
+            snapHint(e.shiftKey),
         );
         break;
       }
@@ -1487,9 +1539,21 @@ function Editor({ track, clip }: EditorProps) {
     switch (g.kind) {
       case "move": {
         if (g.dBeat === 0 && g.dPitch === 0) {
+          // Shift+click that never moved: the deferred additive selection fires now.
+          if (g.pendingAdd !== null && g.movedPx <= 3) {
+            const cur = useStore.getState().selection.noteIds;
+            setNoteSelection(
+              cur.includes(g.pendingAdd)
+                ? cur.filter((id) => id !== g.pendingAdd)
+                : [...cur, g.pendingAdd],
+            );
+            return;
+          }
           if (g.collapseTo !== null && g.movedPx <= 3) setNoteSelection([g.collapseTo]);
           return;
         }
+        // Shift+drag of an unselected note: it becomes the selection once it moves.
+        if (g.pendingAdd !== null) setNoteSelection([g.pendingAdd]);
         if (g.copy) {
           const add: NoteInput[] = [];
           for (const id of g.ids) {

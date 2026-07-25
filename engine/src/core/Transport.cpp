@@ -74,7 +74,35 @@ void Transport::locate(double beat) {
 }
 
 void Transport::locateSamples(int64_t samples) {
-    playhead_.store(std::max<int64_t>(0, samples), std::memory_order_release);
+    const int64_t pos = std::max<int64_t>(0, samples);
+    playhead_.store(pos, std::memory_order_release);
+    if (arrActive_.load(std::memory_order_acquire))
+        rederiveArrangerStep(pos); // a locate re-enters the chain at the landed section
+}
+
+void Transport::setArrangerSteps(const ArrangerStep* steps, int count, bool active) {
+    count = std::clamp(count, 0, kMaxArrangerSteps);
+    const int cur = arrBuf_.load(std::memory_order_acquire);
+    const int next = 1 - cur;
+    for (int i = 0; i < count; ++i)
+        arrSteps_[next][i] = steps[i];
+    arrCount_[next].store(count, std::memory_order_release);
+    arrBuf_.store(next, std::memory_order_release);
+    arrActive_.store(active && count > 0, std::memory_order_release);
+    rederiveArrangerStep(playhead_.load(std::memory_order_acquire));
+}
+
+void Transport::rederiveArrangerStep(int64_t pos) {
+    const int b = arrBuf_.load(std::memory_order_acquire);
+    const int n = arrCount_[b].load(std::memory_order_acquire);
+    int step = n; // past-the-end: no jump fires
+    for (int i = 0; i < n; ++i) {
+        if (pos >= arrSteps_[b][i].start && pos < arrSteps_[b][i].end) {
+            step = i;
+            break;
+        }
+    }
+    arrStep_.store(step, std::memory_order_release);
 }
 
 void Transport::setLoopBeats(double startBeat, double endBeat, bool enabled) {
@@ -143,6 +171,48 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
     }
 
     const int64_t pos = playhead_.load(std::memory_order_acquire);
+
+    // Arranger chain (TRACK_TYPES_PLAN §3.6): jump section-to-section at step
+    // boundaries — same split-span shape as the loop wrap (nodes re-chase on the
+    // discontinuity). While active it OVERRIDES the loop region; a step with to < 0
+    // (the last chain entry) plays on linearly and the chain is done.
+    if (arrActive_.load(std::memory_order_acquire)) {
+        const int b = arrBuf_.load(std::memory_order_acquire);
+        const int n = arrCount_[b].load(std::memory_order_acquire);
+        const int s = arrStep_.load(std::memory_order_acquire);
+        if (s < n) {
+            const ArrangerStep& st = arrSteps_[b][s];
+            if (st.to >= 0 && st.to != st.end) {
+                if (pos < st.end && pos + frames > st.end) {
+                    const int first = static_cast<int>(st.end - pos);
+                    const int rest = frames - first;
+                    out[0] = BlockSpan{pos, first, false};
+                    out[1] = BlockSpan{st.to, rest, true};
+                    playhead_.store(st.to + rest, std::memory_order_release);
+                    arrStep_.store(s + 1, std::memory_order_release);
+                    return 2;
+                }
+                if (pos >= st.end) {
+                    // Boundary landed EXACTLY on a block edge (bar-aligned sections at
+                    // integer tempos hit this every time) — jump at block start instead
+                    // of splitting; wrapped=true still triggers the nodes' re-chase.
+                    const int64_t to = st.to + (pos - st.end);
+                    out[0] = BlockSpan{to, frames, true};
+                    playhead_.store(to + frames, std::memory_order_release);
+                    arrStep_.store(s + 1, std::memory_order_release);
+                    return 1;
+                }
+            } else if (pos >= st.end) {
+                // Adjacent next section (to == end) or the final linear step: the step
+                // counter advances without a jump.
+                arrStep_.store(s + 1, std::memory_order_release);
+            }
+        }
+        out[0] = BlockSpan{pos, frames, false};
+        playhead_.store(pos + frames, std::memory_order_release);
+        return 1;
+    }
+
     const bool loop = loopEnabled_.load(std::memory_order_acquire);
     const int64_t ls = loopStart_.load(std::memory_order_acquire);
     const int64_t le = loopEnd_.load(std::memory_order_acquire);

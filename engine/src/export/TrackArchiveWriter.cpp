@@ -987,9 +987,18 @@ bool TrackArchiveWriter::write(const Model& model, HostProcessManager* host,
     // project.tracks is already the flat ordered list); master is not part of a Cubase
     // Track Archive.
     std::vector<const Track*> tracks;
-    for (const Track& t : p.tracks)
+    bool warnedViewRows = false;
+    for (const Track& t : p.tracks) {
+        if (t.isViewRow()) { // marker/arranger/chord/transpose lanes carry no archive shape
+            if (!warnedViewRows) {
+                warnedViewRows = true;
+                c.warn("view-row tracks (marker/arranger/chord/transpose) not exported");
+            }
+            continue;
+        }
         if (t.kind != TrackKind::Folder)
             tracks.push_back(&t);
+    }
     if (tracks.empty())
         c.warn("project has no exportable tracks — archive contains only project setup");
 

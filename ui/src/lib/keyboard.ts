@@ -341,9 +341,10 @@ export function projectEndBeat(project: Project): number {
 
 /**
  * "P" — set the loop (locators) to the selected clips' bounds and enable it.
- * No clip selection → no-op (keeps the current loop).
+ * No clip selection → no-op (keeps the current loop). Exported for the agent's
+ * ui/edit.invoke "locatorsToSelection" (uiExecutor) — same path as the key.
  */
-function loopToSelection(): void {
+export function loopToSelection(): void {
   const s = useStore.getState();
   const p = s.project;
   if (!p || s.selection.clipIds.length === 0) return;

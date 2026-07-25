@@ -25,7 +25,15 @@ namespace mydaw {
 // Enums
 // ---------------------------------------------------------------------------
 
-enum class TrackKind { Audio, Midi, Instrument, Folder, Bus, Master };
+// Audio/Midi/Instrument hold clips; Folder groups; Bus/Master mix. Marker/Arranger/
+// Chord/Transpose are VIEW ROWS (TRACK_TYPES_PLAN §3.5-3.8): at most one of each per
+// project, no clips/inserts/sends, invisible to the audio graph and the mixer — their
+// DATA lives at project level (markers[], arranger, chordEvents[], transposeEvents[]);
+// the track is only the timeline lane that shows and edits it.
+enum class TrackKind {
+    Audio, Midi, Instrument, Folder, Bus, Master,
+    Marker, Arranger, Chord, Transpose
+};
 enum class ClipType { Audio, Midi };
 
 inline const char* trackKindToString(TrackKind k) {
@@ -36,6 +44,10 @@ inline const char* trackKindToString(TrackKind k) {
         case TrackKind::Folder:     return "folder";
         case TrackKind::Bus:        return "bus";
         case TrackKind::Master:     return "master";
+        case TrackKind::Marker:     return "marker";
+        case TrackKind::Arranger:   return "arranger";
+        case TrackKind::Chord:      return "chord";
+        case TrackKind::Transpose:  return "transpose";
     }
     return "audio";
 }
@@ -47,7 +59,17 @@ inline bool trackKindFromString(const std::string& s, TrackKind& out) {
     if (s == "folder")     { out = TrackKind::Folder; return true; }
     if (s == "bus")        { out = TrackKind::Bus; return true; }
     if (s == "master")     { out = TrackKind::Master; return true; }
+    if (s == "marker")     { out = TrackKind::Marker; return true; }
+    if (s == "arranger")   { out = TrackKind::Arranger; return true; }
+    if (s == "chord")      { out = TrackKind::Chord; return true; }
+    if (s == "transpose")  { out = TrackKind::Transpose; return true; }
     return false;
+}
+
+// View-row kinds: a timeline lane over project-level data (max one of each per project).
+inline bool trackKindIsViewRow(TrackKind k) {
+    return k == TrackKind::Marker || k == TrackKind::Arranger || k == TrackKind::Chord ||
+           k == TrackKind::Transpose;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,8 +119,50 @@ struct Send {
 struct Marker {
     uint64_t id = 0;
     double beat = 0.0;
+    // Cycle (range) marker end: > beat = range, 0/<= beat = point marker (Cubase cycle
+    // markers, TRACK_TYPES_PLAN §3.5). Clicking a cycle marker sets the loop in the UI.
+    double endBeat = 0.0;
     std::string name;
     std::string color; // optional, "" = default
+    bool isCycle() const { return endBeat > beat; }
+};
+
+// Arranger (Cubase "Arranger track", TRACK_TYPES_PLAN §3.6): named timeline sections +
+// an ordered play chain. When the chain is ACTIVE, the transport jumps section-to-section
+// (Transport arranger jump table); flatten bakes the chain into a linear timeline.
+struct ArrangerSection {
+    uint64_t id = 0;
+    std::string name;
+    double startBeat = 0.0;
+    double endBeat = 0.0; // must be > startBeat
+    std::string color;    // optional, "" = default
+};
+
+struct Arranger {
+    std::vector<ArrangerSection> sections; // kept sorted by startBeat
+    std::vector<uint64_t> chain;           // ordered section ids (repeats allowed)
+    bool activeChain = false;              // chain drives the transport when true
+    bool empty() const { return sections.empty() && chain.empty() && !activeChain; }
+};
+
+// Chord track event (TRACK_TYPES_PLAN §3.7): symbol only — root pitch-class + quality
+// (+ optional tensions text + optional bass for slash chords). Voicings are out of scope.
+struct ChordEvent {
+    uint64_t id = 0;
+    double beat = 0.0;
+    int root = 0;         // 0..11 pitch class (0 = C)
+    std::string quality;  // "maj" "min" "dim" "aug" "maj7" "min7" "7" "sus2" "sus4" ...
+    std::string tensions; // optional display text, e.g. "9" "b13"; "" = none
+    int bass = -1;        // 0..11 slash-chord bass pitch class, -1 = root position
+};
+
+// Transpose track event (TRACK_TYPES_PLAN §3.8): from `beat` onward MIDI notes are
+// offset by `semitones` at graph-bake time (playback only — clips keep raw pitches,
+// export/midi stays untransposed; audio transpose is out of scope v1).
+struct TransposeEvent {
+    uint64_t id = 0;
+    double beat = 0.0;
+    int semitones = 0; // clamped to -24..24
 };
 
 struct Asset {
@@ -350,6 +414,12 @@ struct Track {
     // tracks never carry a midiTarget, so routing cycles are impossible by construction.
     uint64_t midiTarget = 0;
 
+    // MIDI output channel for kind==Midi/Instrument: 0 = as played (every event keeps
+    // the channel it was recorded/imported with), 1..16 = force this track's MIDI onto
+    // that channel. This is what lets several MIDI tracks drive ONE multitimbral
+    // instrument, each on its own channel (SPEC §6).
+    int midiOutChannel = 0;
+
     // VCA group membership (0 = none). The VCA's gain multiplies this track's fader.
     uint64_t vcaId = 0;
 
@@ -368,6 +438,9 @@ struct Track {
         return kind == TrackKind::Audio || kind == TrackKind::Midi ||
                kind == TrackKind::Instrument;
     }
+    // View rows (marker/arranger/chord/transpose lanes) carry no audio, clips, inserts,
+    // sends, or mixer strip — the graph and mixer skip them exactly like folders.
+    bool isViewRow() const { return trackKindIsViewRow(kind); }
 };
 
 // ---------------------------------------------------------------------------
@@ -396,6 +469,9 @@ struct Project {
     LoopRegion loop;
     GridSettings grid;
     std::vector<Marker> markers;
+    Arranger arranger;                          // sections + play chain (§3.6); omit-when-empty
+    std::vector<ChordEvent> chordEvents;        // sorted by beat (§3.7); omit-when-empty
+    std::vector<TransposeEvent> transposeEvents; // sorted by beat (§3.8); omit-when-empty
     std::vector<Track> tracks; // ordered; tree via parentId (folders)
     Track masterTrack;         // kind == Master
     std::vector<Asset> assets;
@@ -651,6 +727,10 @@ json toJson(const Send& s);
 json toJson(const AutomationLane& l);
 json toJson(const AutomationPoint& pt);
 json toJson(const Marker& m);
+json toJson(const ArrangerSection& s);
+json toJson(const Arranger& a);
+json toJson(const ChordEvent& c);
+json toJson(const TransposeEvent& t);
 json toJson(const Asset& a);
 json toJson(const TakeFolder& f);
 json toJson(const TrackVersion& v);
@@ -668,6 +748,10 @@ bool fromJson(const json& j, Send& out, std::string* err = nullptr);
 bool fromJson(const json& j, AutomationLane& out, std::string* err = nullptr);
 bool fromJson(const json& j, AutomationPoint& out, std::string* err = nullptr);
 bool fromJson(const json& j, Marker& out, std::string* err = nullptr);
+bool fromJson(const json& j, ArrangerSection& out, std::string* err = nullptr);
+bool fromJson(const json& j, Arranger& out, std::string* err = nullptr);
+bool fromJson(const json& j, ChordEvent& out, std::string* err = nullptr);
+bool fromJson(const json& j, TransposeEvent& out, std::string* err = nullptr);
 bool fromJson(const json& j, Asset& out, std::string* err = nullptr);
 bool fromJson(const json& j, TakeFolder& out, std::string* err = nullptr);
 bool fromJson(const json& j, TrackVersion& out, std::string* err = nullptr);

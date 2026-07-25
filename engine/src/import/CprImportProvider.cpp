@@ -595,9 +595,10 @@ struct CprCtx {
     struct MidiRoute {
         uint64_t trackId = 0; // imported MIDI track id
         std::string device;   // target rack-instrument name (output Device Name)
-        int channel = -1;     // decoded MIDI channel (0..15), -1 = undecoded.
-                              // Captured but UNUSED: 1:1 slot routing needs no channel
-                              // split (§7.7); kept for a future channel-filter feature.
+        int channel = -1;     // decoded MIDI channel (0..15), -1 = undecoded. Carried into
+                              // Track::midiOutChannel (channel + 1) on the feeder, so a
+                              // multitimbral rack instrument still hears each track on its
+                              // own channel (§7.7).
     };
     std::vector<MidiRoute> midiRoutes;
 
@@ -627,6 +628,16 @@ struct CprCtx {
     int eqTypeLogs = 0;                  // throttle for unverified-Type info logs
     int eqShapeWarns = 0;                // throttle for unverified Type->shape warnings
     int sendsSkipped = 0;                // honest count (sends not modeled in v1)
+    // Device-track promotion (TRACK_TYPES_PLAN P0): Group/FX channels -> bus tracks,
+    // VCA channels -> Vca records, sampler tracks -> instrument + empty builtin:sampler.
+    struct VcaSpan { size_t lo = 0, hi = 0; uint64_t vcaId = 0; };
+    std::vector<VcaSpan> vcaSpans;       // VCA device-track byte ranges (gain from channel tree)
+    int busChannelsImported = 0;         // group + FX channels promoted to bus tracks
+    int vcasImported = 0;
+    int samplerTracksImported = 0;
+    bool busRoutingWarned = false;       // source->group routing not recovered — warn once
+    // View-row tracks created (max one of each kind; later same-class tracks warn-skip).
+    std::set<std::string> viewRowsCreated;
     int pannerAsymWarns = 0;             // throttle for combined-panner approximations
     int inputBusPanWarns = 0;            // throttle for unmappable input-bus pans
     bool sxPanWarned = false;             // SX pan field not identified — warn once
@@ -1450,6 +1461,132 @@ void buildTracks(CprCtx& c, const std::vector<const Rec*>& trackRecs, size_t ran
 
         const CprTrackKind kind = classifyTrack(k->name);
         if (kind == CprTrackKind::Skip) {
+            // ---- promotions (TRACK_TYPES_PLAN P0/P1): types MyDAW now models ----
+
+            // Group / FX channels -> bus tracks; VCA faders -> Vca records. The strip
+            // (volume/pan/EQ/inserts) is applied by the modern channel-scan via the
+            // registered span, exactly like audio-track strips.
+            if (k->name == "MDeviceTrackEvent") {
+                const bool isVca = parentName == "VCA Tracks";
+                const bool isFx = parentName == "FX Channels" ||
+                                  (!name.empty() && name[0] == '#');
+                const bool isGroup = parentName == "Group Tracks";
+                if (isVca) {
+                    Vca v;
+                    v.id = c.model.nextId();
+                    v.name = !name.empty() ? name : "VCA";
+                    v.gain = 1.0;
+                    c.vcaSpans.push_back(CprCtx::VcaSpan{k->dataStart, k->dataEnd, v.id});
+                    c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0});
+                    c.model.project.vcas.push_back(std::move(v));
+                    ++c.vcasImported;
+                    if (c.ictx.warnings)
+                        c.ictx.warnings->push_back(
+                            "Imported VCA fader \"" + c.model.project.vcas.back().name +
+                            "\" — member assignment isn't decoded yet; reassign tracks "
+                            "to it in the Inspector");
+                    continue;
+                }
+                if (isGroup || isFx) {
+                    Track bt;
+                    bt.id = c.model.nextId();
+                    bt.kind = TrackKind::Bus;
+                    bt.parentId = parentId;
+                    bt.color = kTrackColors[c.colorIdx++ % kNumTrackColors];
+                    bt.name = !name.empty() ? name : (isFx ? "FX" : "Group");
+                    c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, bt.id});
+                    c.model.project.tracks.push_back(std::move(bt));
+                    ++c.busChannelsImported;
+                    ++c.tracksImported;
+                    if (!c.busRoutingWarned && c.ictx.warnings) {
+                        c.busRoutingWarned = true;
+                        c.ictx.warnings->push_back(
+                            "Group/FX channels were imported as bus tracks with their "
+                            "inserts and strip, but SOURCE ROUTING isn't decoded yet — "
+                            "re-point track outputs/sends at them as needed");
+                    }
+                    continue;
+                }
+                // fall through: generic device carriers stay log-only skips below
+            }
+
+            // Sampler track (phase A): instrument track hosting an EMPTY builtin
+            // sampler — the embedded sample blob isn't decoded yet (format unknown).
+            if (k->name == "MSamplerTrackEvent") {
+                Track st;
+                st.id = c.model.nextId();
+                st.kind = TrackKind::Instrument;
+                st.parentId = parentId;
+                st.color = kTrackColors[c.colorIdx++ % kNumTrackColors];
+                st.name = !name.empty() ? name : "Sampler";
+                PluginInstance pi;
+                pi.instanceId = c.model.nextId();
+                pi.uid = "builtin:sampler";
+                pi.format = "builtin";
+                pi.bitness = 64;
+                pi.name = "Sampler";
+                st.inserts.push_back(std::move(pi));
+                // MIDI parts on the sampler track drive the sampler like any instrument.
+                for (const Rec& r : c.recs)
+                    if (r.name == "MMidiPartEvent" && r.hdrOff > k->dataStart &&
+                        r.dataEnd <= k->dataEnd)
+                        importMidiPart(c, r, st);
+                std::stable_sort(st.clips.begin(), st.clips.end(),
+                                 [](const Clip& a, const Clip& b2) {
+                                     return clipStartBeat(a) < clipStartBeat(b2);
+                                 });
+                c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, st.id});
+                c.model.project.tracks.push_back(std::move(st));
+                ++c.samplerTracksImported;
+                ++c.tracksImported;
+                if (c.ictx.warnings)
+                    c.ictx.warnings->push_back(
+                        "Sampler track \"" + name +
+                        "\" imported with an EMPTY sampler — the embedded sample isn't "
+                        "recovered yet; load one in the sampler panel");
+                continue;
+            }
+
+            // View-row tracks (marker/arranger/chord/transpose): the LANE imports —
+            // its events don't (every available fixture stores them empty, so the
+            // event byte format is unevidenced). Max one of each kind per project.
+            {
+                const char* viewKind = nullptr;
+                if (k->name == "MMarkerTrackEvent") viewKind = "marker";
+                else if (k->name == "MPlayRangeTrackEvent" || k->name == "MArrangeTrackEvent")
+                    viewKind = "arranger";
+                else if (k->name == "MChordTrackEvent") viewKind = "chord";
+                else if (k->name == "MTransposeTrackEvent") viewKind = "transpose";
+                if (viewKind && c.viewRowsCreated.insert(viewKind).second) {
+                    Track vt;
+                    vt.id = c.model.nextId();
+                    trackKindFromString(viewKind, vt.kind);
+                    vt.parentId = parentId;
+                    vt.outputTarget = OutputTarget::none();
+                    vt.color = kTrackColors[c.colorIdx++ % kNumTrackColors];
+                    vt.name = !name.empty() ? name : viewKind;
+                    c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, vt.id});
+                    c.model.project.tracks.push_back(std::move(vt));
+                    ++c.tracksImported;
+                    if (c.ictx.warnings)
+                        c.ictx.warnings->push_back(
+                            std::string("Imported the ") + viewKind +
+                            " track \"" + (!name.empty() ? name : viewKind) +
+                            "\" as an empty lane — its events aren't decoded yet");
+                    continue;
+                }
+                if (viewKind) {
+                    // A second same-kind lane: the data is project-level in MyDAW.
+                    ++c.tracksSkipped;
+                    c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0});
+                    if (c.ictx.warnings)
+                        c.ictx.warnings->push_back(
+                            "Skipped a second " + std::string(viewKind) +
+                            " track — MyDAW keeps one per project");
+                    continue;
+                }
+            }
+
             ++c.tracksSkipped;
             c.trackSpans.push_back(TrackSpan{k->dataStart, k->dataEnd, 0});
             const std::string label = skippedTrackLabel(k->name, parentName, name);
@@ -2173,6 +2310,16 @@ void sxExtractVstiRack(CprCtx& c, size_t archOff, size_t archSize) {
                     if (!f)
                         continue;
                     f->midiTarget = curInstTrackId;
+                    // Keep the decoded SX MIDI channel: 1:1 slot routing doesn't need it,
+                    // but a multitimbral rack instrument does (undecoded = -1 stays 0 = as
+                    // played, which is what the pre-midiOutChannel import always did).
+                    for (const CprCtx::MidiRoute& mr : c.midiRoutes) {
+                        if (mr.trackId == midiId) {
+                            if (mr.channel >= 0 && mr.channel <= 15)
+                                f->midiOutChannel = mr.channel + 1;
+                            break;
+                        }
+                    }
                     ++c.routedMidiTracks;
                     Log::info("cpr import: MIDI track '%s' -> rack instrument '%s' "
                               "(midiTarget routing, shared instance)",
@@ -2818,9 +2965,28 @@ void modernExtractTracks(CprCtx& c, size_t arrOff, size_t arrEnd) {
             continue;
         }
         const size_t treeEnd = scan.endOff;
-        // Channel fader/pan apply to the OWNING track strip (not folders/buses-as-skip).
+        // VCA device-track channel: the fader IS the VCA group gain (no model track).
+        if (!t) {
+            for (const CprCtx::VcaSpan& vs : c.vcaSpans) {
+                if (s < vs.lo || s >= vs.hi)
+                    continue;
+                for (Vca& v : c.model.project.vcas) {
+                    if (v.id != vs.vcaId)
+                        continue;
+                    // Reuse the calibrated fader decode via a scratch strip.
+                    Track scratch;
+                    scratch.name = v.name;
+                    if (applyModernVolume(c, scratch, scan.hasVolumeDb, scan.volumeDb,
+                                          scan.hasVolumeValue, scan.volumeValue))
+                        v.gain = scratch.volume;
+                    break;
+                }
+                break;
+            }
+        }
+        // Channel fader/pan apply to the OWNING track strip (not folders/view rows).
         // Applies even when the channel has no inserts (a bare fader move).
-        if (t && t->kind != TrackKind::Folder) {
+        if (t && t->kind != TrackKind::Folder && !t->isViewRow()) {
             if (scan.hasVolumeDb || scan.hasVolumeValue)
                 applyModernVolume(c, *t, scan.hasVolumeDb, scan.volumeDb,
                                   scan.hasVolumeValue, scan.volumeValue);
@@ -2838,7 +3004,7 @@ void modernExtractTracks(CprCtx& c, size_t arrOff, size_t arrEnd) {
                 s = treeEnd - 1; // don't re-trigger on stray sentinel bytes inside blobs
             continue;
         }
-        if (!t || t->kind == TrackKind::Folder) {
+        if (!t || t->kind == TrackKind::Folder || t->isViewRow()) {
             c.insertsSkippedNonTrack += static_cast<int>(scan.plugins.size());
             if (treeEnd > s)
                 s = treeEnd - 1;

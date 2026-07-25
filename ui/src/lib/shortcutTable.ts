@@ -28,7 +28,7 @@ export const PANE_HINTS: Record<QuickHelpPane, { title: string; items: ShortcutB
     title: "Arrangement",
     items: [
       { keys: ["Drag edge"], what: "Trim clip · corner handles set fades (audio)" },
-      { keys: ["Alt+drag"], what: "Copy clips · Shift bypasses snap" },
+      { keys: ["Alt+drag"], what: "Copy clips · Shift = free-form (no grid), also when held first" },
       { keys: ["Ctrl+wheel", "Alt+wheel"], what: "Zoom time / track height (G, H keys too)" },
       { keys: ["Right-drag"], what: "Pan the grid (middle-drag too)" },
       { keys: ["Drag empty"], what: "Rubber-band select — Shift/Ctrl adds" },
@@ -42,7 +42,7 @@ export const PANE_HINTS: Record<QuickHelpPane, { title: string; items: ShortcutB
     title: "Piano Roll",
     items: [
       { keys: ["2×click"], what: "Add a note (select tool) · draw tool drags them out" },
-      { keys: ["Alt+drag"], what: "Copy notes · Shift bypasses snap" },
+      { keys: ["Alt+drag"], what: "Copy notes · Shift = free-form (no grid), also when held first" },
       { keys: ["Drag edge"], what: "Resize note (sets the next draw length)" },
       { keys: ["Ctrl+wheel", "Alt+wheel"], what: "Zoom time / row height (G, H keys too)" },
       { keys: ["↑", "↓", "←", "→"], what: "Transpose / nudge selection (Shift = octave / bar)" },
@@ -143,7 +143,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["Ctrl+click", "Alt+click"], what: "Ruler: set loop start / loop end" },
       { keys: ["Right-drag"], what: "Arrangement: pan the grid (middle-drag pans too)" },
       { keys: ["Drag"], what: "Draw tool (2): drag out MIDI clips / notes" },
-      { keys: ["Shift"], what: "Hold while dragging to bypass snap" },
+      { keys: ["Shift"], what: "Free-form (no snap) — hold before OR during any drag; the drag readout says ⇧ free" },
       { keys: ["Drag"], what: "Mixer insert: reorder in the channel · onto another channel: move" },
       { keys: ["Alt+drag"], what: "Mixer insert onto another channel: copy (with settings)" },
       { keys: ["Drag"], what: "Mixer insert dropped outside the strips: remove (Esc cancels)" },

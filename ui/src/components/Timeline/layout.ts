@@ -119,7 +119,17 @@ export interface RowsOptions {
   vScale: number;
 }
 
+/** View rows are FIXED height (no resize, no vScale): compact single-purpose lanes. */
+export const VIEW_ROW_H: Partial<Record<TrackKind, number>> = {
+  marker: 26,
+  arranger: 34,
+  chord: 26,
+  transpose: 34,
+};
+
 export function trackDisplayHeight(track: Track, vScale: number): number {
+  const fixed = VIEW_ROW_H[track.kind];
+  if (fixed !== undefined) return fixed;
   return clamp(Math.round((track.height ?? DEFAULT_TRACK_H) * vScale), MIN_TRACK_H, MAX_TRACK_H);
 }
 
@@ -523,6 +533,14 @@ export function trackKindIcon(kind: TrackKind): IconName {
       return "mixer";
     case "master":
       return "sliders";
+    case "marker":
+      return "marker";
+    case "arranger":
+      return "layers";
+    case "chord":
+      return "staff";
+    case "transpose":
+      return "chevronUp";
   }
 }
 

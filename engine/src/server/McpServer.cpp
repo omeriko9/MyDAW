@@ -254,7 +254,9 @@ json buildToolsList() {
         tools.push_back(toolDescriptor(
             "mydaw_query",
             "Read filtered, paginated project/runtime data by view (e.g. tracks, clips, notes, "
-            "plugin_instances, transport). Every response carries the engine revision.",
+            "plugin_instances, transport, markers, arranger, chord_events, transpose_events). "
+            "An unknown view errors with the full view list. Every response carries the "
+            "engine revision.",
             objectSchema(std::move(props), {"view"}), true, false, true, false));
     }
     {

@@ -37,6 +37,8 @@ export interface Palette {
   outside: string;
   velBg: string;
   noteText: string;
+  /** chord-track tone-row wash (translucent accent) */
+  chordTone: string;
 }
 
 const VAR_MAP: Array<[keyof Palette, string, string]> = [
@@ -62,6 +64,7 @@ const VAR_MAP: Array<[keyof Palette, string, string]> = [
   ["outside", "--pr-outside", "rgba(10,11,14,0.45)"],
   ["velBg", "--pr-vel-bg", "#191b21"],
   ["noteText", "--pr-note-text", "rgba(13,14,18,0.78)"],
+  ["chordTone", "--pr-chord-tone", "rgba(91,140,255,0.10)"],
 ];
 
 export function resolvePalette(el: HTMLElement): Palette {
@@ -318,6 +321,9 @@ export function drawNotesArea(
   scale: ReadonlySet<number> | null = null,
   /** Heat mode (§2.3B): tint notes blue→red by velocity instead of opacity. */
   velColors = false,
+  /** Chord-track tone highlight (TRACK_TYPES_PLAN §3.7): per CLIP-RELATIVE beat range,
+   *  tint the chord-tone rows — the region ends where the next chord begins. */
+  chordRegions: ReadonlyArray<{ startBeat: number; endBeat: number; pcs: ReadonlySet<number> }> | null = null,
 ): void {
   ctx.clearRect(0, 0, w, h);
 
@@ -330,6 +336,19 @@ export function drawNotesArea(
   for (let p = pBot; p <= pTop; p++) {
     const dark = scale ? !scale.has(((p % 12) + 12) % 12) : M.isBlackKey(p);
     if (dark) ctx.fillRect(0, M.pitchTop(p, v), w, v.rowH);
+  }
+  // chord-track tone highlight: accent wash on chord-tone rows per chord region
+  if (chordRegions) {
+    for (const cr of chordRegions) {
+      const x0 = Math.max(0, M.beatToX(cr.startBeat, v));
+      const x1 = Math.min(w, M.beatToX(cr.endBeat, v));
+      if (x1 <= x0) continue;
+      ctx.fillStyle = pal.chordTone;
+      for (let p = pBot; p <= pTop; p++) {
+        if (cr.pcs.has(((p % 12) + 12) % 12))
+          ctx.fillRect(x0, M.pitchTop(p, v), x1 - x0, v.rowH);
+      }
+    }
   }
   // hairline row separators when rows are tall enough
   if (v.rowH >= 10) {
