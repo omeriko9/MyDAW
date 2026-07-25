@@ -425,6 +425,7 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   std::string err;
   if (!s.shm.open(shmName, err)) {
     std::fprintf(stderr, "[host] %s\n", err.c_str());
+    mydaw::flushRegOverlay();  // also drops the volatile HKCU\Software\Classes keys we made
     return 2;
   }
   s.shm.start(); // answers req with silence until the adapter is set
@@ -432,6 +433,7 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   if (!s.pipe.connect(pipeName, 15000)) {
     std::fprintf(stderr, "[host] failed to connect control pipe \"%s\": %s\n",
                  pipeName.c_str(), s.pipe.errorString().c_str());
+    mydaw::flushRegOverlay();
     return 2;
   }
   s.rpc = std::make_unique<mydaw::JsonRpc>(s.pipe);
@@ -684,10 +686,12 @@ int main() {
   if (serve && !scan) {
     if (shmName.empty() || pipeName.empty() || pluginPath.empty() ||
         (format != "vst2" && format != "vst3")) {
+      mydaw::flushRegOverlay();  // the overlay armed above; do not leave temp classes behind
       return usage();
     }
     return runServe(pluginPath, format, shmName, pipeName, uid, parentPid);
   }
 
+  mydaw::flushRegOverlay();
   return usage();
 }

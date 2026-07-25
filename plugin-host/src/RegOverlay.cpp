@@ -31,6 +31,7 @@
 #include <ws2tcpip.h>
 #include <objbase.h>
 #include <oleauto.h>
+#include <shlobj.h>     // SHGetFolderPathW — host-side known folders for the profile aliases
 #include <winuser.h>
 
 #include <cstdint>
@@ -41,6 +42,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -262,11 +264,31 @@ std::map<HKEY, Key>& g_roots = *new std::map<HKEY, Key>();        // HKCR/HKCU/H
 std::unordered_set<void*>& g_handles = *new std::unordered_set<void*>();  // cookies we issued
 std::wstring g_regPath, g_localPath, g_bundleRoot, g_mirrorRoot, g_classesSidecar;
 bool g_dirty = false;
+void persistLocalNow();  // defined with the .local serializer; writes <reg>.local on every change
 bool g_regOverlayActive = false;
 bool g_fileOverlayActive = false;
 std::vector<std::wstring>& g_tempUserClassesLeaves = *new std::vector<std::wstring>();
 std::unordered_set<std::wstring>& g_allowedUserClassesPaths =
     *new std::unordered_set<std::wstring>();
+
+// --- capture diagnostics + profile aliasing ---------------------------------
+// A capture is authored on one machine and replayed on another, so the plugin's *own* idea of
+// where user data lives (SHGetFolderPath -> C:\Users\<me>\Documents on Win7+) rarely matches the
+// captured layout (C:\Documents and Settings\<them>\My Documents). g_pathAliases rewrites the
+// host's profile/known-folder roots onto the mirror's, and the warn tier reports every request
+// the mirror was expected to satisfy but could not — so a missing capture file shows up in the
+// host log instead of needing a Procmon session. All immortal, like the state above.
+int g_fileWarnLevel = 1;  // MYDAW_FILE_WARN: 0=off, 1=content misses (default), 2=+system probes
+std::mutex& g_warnMu = *new std::mutex();
+std::unordered_set<std::wstring>& g_warned = *new std::unordered_set<std::wstring>();
+// (lowercased host prefix -> absolute mirror prefix), longest host prefix first.
+std::vector<std::pair<std::wstring, std::wstring>>& g_pathAliases =
+    *new std::vector<std::pair<std::wstring, std::wstring>>();
+std::wstring g_systemRootLc;  // lowercased %SystemRoot%, e.g. "c:\windows"
+// Registry subtrees that must NOT fall through to the real machine registry (see loadSealedList).
+std::vector<std::pair<HKEY, std::vector<std::wstring>>>& g_sealed =
+    *new std::vector<std::pair<HKEY, std::vector<std::wstring>>>();
+std::wstring getEnvW(const wchar_t* key);  // defined with the bundle helpers below
 
 // Per-thread re-entrancy guard: while >0 we are inside our own overlay logic (or a
 // read-through trampoline call), so detours pass straight through to the real API.
@@ -306,9 +328,44 @@ HANDLE realFindFirstFileW(const std::wstring& pattern, WIN32_FIND_DATAW* data) {
   if (g_real.FindFirstFileW) return g_real.FindFirstFileW(pattern.c_str(), data);
   return FindFirstFileW(pattern.c_str(), data);
 }
-std::wstring mirrorCandidate(const std::wstring& p) {
-  if (g_mirrorRoot.empty() || !isDriveAbs(p)) return {};
-  return g_mirrorRoot + L"\\" + p[0] + p.substr(2);
+bool realIsDir(const std::wstring& p) {
+  Reenter re;
+  DWORD a = g_real.GetFileAttributesW ? g_real.GetFileAttributesW(p.c_str())
+                                      : GetFileAttributesW(p.c_str());
+  return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+// True when `pfx` is a path-component prefix of `p` (both lowercased), i.e. it ends exactly at a
+// separator or at the end of `p` — so "c:\users\om" never matches "c:\users\omer".
+bool isPathPrefix(const std::wstring& p, const std::wstring& pfx) {
+  if (pfx.empty() || p.size() < pfx.size() || p.compare(0, pfx.size(), pfx) != 0) return false;
+  return p.size() == pfx.size() || p[pfx.size()] == L'\\' || p[pfx.size()] == L'/';
+}
+// Warn once per distinct dedupe key. Locked: the file detours run without the registry mutex,
+// and a plugin that rescans its library re-walks the same tree on every refresh.
+void warnOnce(const std::wstring& dedupeKey, const char* channel, const char* tag,
+              const std::wstring& detail) {
+  {
+    std::lock_guard<std::mutex> lk(g_warnMu);
+    if (!g_warned.insert(lc(dedupeKey)).second) return;
+  }
+  std::fprintf(stderr, "[%s] %s %ls\n", channel, tag, detail.c_str());
+  std::fflush(stderr);
+}
+// Candidate mirror paths for a host path, best first: the plain drive rebase, then any
+// profile alias that applies. Empty when the path cannot live in the mirror at all.
+std::vector<std::wstring> mirrorCandidates(const std::wstring& p) {
+  std::vector<std::wstring> out;
+  if (g_mirrorRoot.empty() || !isDriveAbs(p)) return out;
+  out.push_back(g_mirrorRoot + L"\\" + p[0] + p.substr(2));
+  const std::wstring plc = lc(p);
+  for (const auto& [hostPfx, mirrorPfx] : g_pathAliases) {
+    if (!isPathPrefix(plc, hostPfx)) continue;
+    std::wstring rest = p.substr(hostPfx.size());
+    while (!rest.empty() && (rest[0] == L'\\' || rest[0] == L'/')) rest.erase(rest.begin());
+    std::wstring cand = rest.empty() ? mirrorPfx : mirrorPfx + L"\\" + rest;
+    if (std::find(out.begin(), out.end(), cand) == out.end()) out.push_back(cand);
+  }
+  return out;
 }
 bool resolveMirrorChild(const std::wstring& parent, const std::wstring& leaf,
                         std::wstring& resolvedLeaf) {
@@ -365,27 +422,75 @@ bool resolveMirrorPath(const std::wstring& candidate, bool allowMissingLeaf,
   resolved = cur;
   return true;
 }
+// A directory the capture DOES mirror but left empty is the single loudest "you forgot to copy
+// something" signal (e.g. Addictive Drums' Sound Data\Factory Sound Data\, whose 1.9 GB .xpak
+// holds every drum kit). Report it the first time the plugin enumerates it.
+void warnIfEmptyMirrorDir(const std::wstring& original, const std::wstring& dir) {
+  if (g_fileWarnLevel <= 0) return;
+  WIN32_FIND_DATAW data{};
+  HANDLE h = realFindFirstFileW(dir + L"\\*", &data);
+  if (h == INVALID_HANDLE_VALUE) return;
+  bool any = false;
+  do {
+    if (std::wcscmp(data.cFileName, L".") == 0 || std::wcscmp(data.cFileName, L"..") == 0)
+      continue;
+    any = true;
+    break;
+  } while (FindNextFileW(h, &data));
+  FindClose(h);
+  if (any) return;
+  warnOnce(L"empty:" + dir, "fileov", "EMPTY",
+           original + L"  (mirrored directory exists but is empty: " + dir + L")");
+}
+// The plugin asked for something inside a directory the capture mirrors, and it is not there.
+// System-DLL probes are normal (setupBundleDllSearch handles those), so they are tier 2.
+void warnMiss(const std::wstring& original, const std::wstring& resolvedParent) {
+  if (g_fileWarnLevel <= 0) return;
+  if (g_fileWarnLevel < 2 && !g_systemRootLc.empty() && isPathPrefix(lc(original), g_systemRootLc))
+    return;
+  warnOnce(L"miss:" + original, "fileov", "MISS",
+           original + L"  (not in capture; mirror has " + resolvedParent + L")");
+}
 bool redirectFilePathW(LPCWSTR path, std::wstring& out) {
   if (!path || !g_fileOverlayActive || g_mirrorRoot.empty()) return false;
   std::wstring original(path);
-  std::wstring cand = mirrorCandidate(original);
-  if (cand.empty()) return false;
+  std::vector<std::wstring> cands = mirrorCandidates(original);
+  if (cands.empty()) return false;
 
-  if (hasWildcard(cand)) {
-    std::wstring parent = parentOf(cand), resolvedParent;
-    if (!parent.empty() && resolveMirrorPath(parent, false, resolvedParent)) {
-      out = resolvedParent + L"\\" + cand.substr(parent.size() + 1);
+  // Best resolvable candidate wins; remember the deepest mirrored parent for the miss report.
+  std::wstring missParent;
+  for (size_t i = 0; i < cands.size(); ++i) {
+    const std::wstring& cand = cands[i];
+    const bool wild = hasWildcard(cand);
+    const std::wstring parent = wild ? parentOf(cand) : std::wstring();
+    std::wstring resolvedParent;
+
+    if (wild) {
+      if (!parent.empty() && resolveMirrorPath(parent, false, resolvedParent)) {
+        out = resolvedParent + L"\\" + cand.substr(parent.size() + 1);
+        if (i && g_fileWarnLevel > 0)
+          warnOnce(L"alias:" + original, "fileov", "ALIAS", original + L"  ->  " + out);
+        tracef("[fileov] redirect %ls -> %ls\n", original.c_str(), out.c_str());
+        warnIfEmptyMirrorDir(original, resolvedParent);
+        return true;
+      }
+    } else if (resolveMirrorPath(cand, false, out)) {
+      if (i && g_fileWarnLevel > 0)
+        warnOnce(L"alias:" + original, "fileov", "ALIAS", original + L"  ->  " + out);
       tracef("[fileov] redirect %ls -> %ls\n", original.c_str(), out.c_str());
       return true;
     }
-    return false;
+
+    // Unresolvable here — but if the mirror models this candidate's PARENT, the capture was
+    // supposed to contain the entry and does not. Keep the deepest such parent to report.
+    if (missParent.empty()) {
+      const std::wstring p = wild ? parent : parentOf(cand);
+      std::wstring rp;
+      if (!p.empty() && resolveMirrorPath(p, false, rp) && realIsDir(rp)) missParent = rp;
+    }
   }
 
-  if (resolveMirrorPath(cand, false, out)) {
-    tracef("[fileov] redirect %ls -> %ls\n", original.c_str(), out.c_str());
-    return true;
-  }
-
+  if (!missParent.empty()) warnMiss(original, missParent);
   return false;
 }
 bool redirectFilePathA(LPCSTR path, std::string& outA) {
@@ -914,6 +1019,17 @@ LSTATUS fillNameA(const std::wstring& nameW, LPSTR buf, LPDWORD pcch) {
 // ===========================================================================
 // Detours
 // ===========================================================================
+// A sealed subtree is served ONLY from the overlay: no real handle is opened for it, so neither
+// unlisted subkeys nor unlisted values can leak in from a copy of the same product installed on
+// this machine. Opt-in per bundle (install.reg.sealed / MYDAW_REG_SEALED) — see loadSealedList.
+bool isSealed(HKEY root, const std::vector<std::wstring>& pathLc) {
+  for (const auto& [r, pfx] : g_sealed) {
+    if (r != root || pfx.size() > pathLc.size()) continue;
+    if (std::equal(pfx.begin(), pfx.end(), pathLc.begin())) return true;
+  }
+  return false;
+}
+
 // open/create core (wide). create=true materializes the overlay node.
 LSTATUS openCore(HKEY h, const std::wstring& subW, REGSAM sam, DWORD opt, PHKEY out,
                  bool create, LPDWORD disp) {
@@ -934,16 +1050,24 @@ LSTATUS openCore(HKEY h, const std::wstring& subW, REGSAM sam, DWORD opt, PHKEY 
   bool overlayHas = node != nullptr;
 
   // Try to open the real counterpart for read-through (never create in the real registry).
+  // Sealed subtrees skip this entirely: with real==null the Ctx cannot read through for values
+  // or enumeration either, so the seal propagates to every child handle derived from it.
   HKEY realOut = nullptr;
-  if (b.real && g_real.RegOpenKeyExW) {
+  const bool sealed = isSealed(b.root, path);
+  if (b.real && g_real.RegOpenKeyExW && !sealed) {
     LSTATUS rr = g_real.RegOpenKeyExW(b.real, subW.empty() ? nullptr : subW.c_str(), opt,
                                       sam ? sam : KEY_READ, &realOut);
     if (rr != ERROR_SUCCESS) realOut = nullptr;
   }
+  if (sealed && !overlayHas && !create) {
+    const std::wstring full = std::wstring(traceRootName(b.root)) + L"\\" + joinComps(path);
+    warnOnce(L"sealed:" + full, "regov", "SEALED-MISS",
+             full + L"  (not in capture; real registry not consulted)");
+  }
 
   if (create && !overlayHas) {
     Key* nk = descend(b.root, path, true);
-    if (nk) { nk->local = true; nk->tombstone = false; g_dirty = true; }
+    if (nk) { nk->local = true; nk->tombstone = false; g_dirty = true; persistLocalNow(); }
     overlayHas = true;
     if (disp) *disp = realOut ? REG_OPENED_EXISTING_KEY : REG_CREATED_NEW_KEY;
   } else if (disp) {
@@ -1174,6 +1298,7 @@ void setOverlayValue(const Base& b, const std::wstring& nameW, DWORD type, const
   if (data && cb) v.data.assign(data, data + cb);
   k->values[lc(nameW)] = std::move(v);
   g_dirty = true;
+  persistLocalNow();
 }
 LSTATUS WINAPI Det_RegSetValueExW(HKEY h, LPCWSTR name, DWORD res, DWORD type, const BYTE* data,
                                   DWORD cb) {
@@ -2004,6 +2129,7 @@ LSTATUS WINAPI Det_RegDeleteValueW(HKEY h, LPCWSTR name) {
     v.tomb = true;
     v.local = true;
     g_dirty = true;
+    persistLocalNow();
   }
   return ERROR_SUCCESS;
 }
@@ -2019,7 +2145,7 @@ LSTATUS WINAPI Det_RegDeleteKeyW(HKEY h, LPCWSTR sub) {
   if (b.foreign) return ERROR_SUCCESS;
   std::vector<std::wstring> path = joinLower(b.path, sub ? sub : L"");
   Key* k = descend(b.root, path, true);
-  if (k) { k->tombstone = true; k->local = true; g_dirty = true; }
+  if (k) { k->tombstone = true; k->local = true; g_dirty = true; persistLocalNow(); }
   return ERROR_SUCCESS;
 }
 LSTATUS WINAPI Det_RegDeleteKeyA(HKEY h, LPCSTR sub) {
@@ -2046,7 +2172,7 @@ LSTATUS WINAPI Det_RegFlushKey(HKEY h) {
 // ===========================================================================
 // .local serialization (persist runtime writes)
 // ===========================================================================
-void serializeKey(std::wofstream& f, const std::wstring& fullPath, const Key& k) {
+void serializeKey(std::wostream& f, const std::wstring& fullPath, const Key& k) {
   bool anyLocalVal = false;
   for (const auto& [nlc, v] : k.values)
     if (v.local) { anyLocalVal = true; break; }
@@ -2097,6 +2223,50 @@ const wchar_t* rootName(HKEY r) {
 }
 constexpr wchar_t kClassesOwnerValue[] = L"MyDAW.CaptureOverlayOwner";
 
+// Persist the overlay's runtime writes to <reg>.local IMMEDIATELY, not at shutdown.
+//
+// A shutdown-only flush is fine for a host whose process exits when you close the editor, but
+// wrong for a long-lived one: MyDAW's engine gives its plugin host a 2 s grace and then
+// TerminateProcess()es it, the parent watcher _exit(2)s when the engine dies, and a plugin
+// crash _exit(3)s — none of which run any flush. Old plugins take exactly those paths, so an
+// authorization the user just typed would be captured in memory and then thrown away.
+// Writes are rare (a handful per session) and the file is tiny, so persisting on every write
+// costs nothing. Caller must hold g_mu and be inside a Reenter guard (all g_dirty sites are).
+std::wstring g_lastLocalText;  // last text actually written; skips redundant rewrites
+void persistLocalNow() {
+  if (!g_dirty || g_localPath.empty()) return;
+  std::wostringstream ss;
+  ss << L"\xFEFF" << L"Windows Registry Editor Version 5.00\r\n\r\n";
+  for (auto& [root, key] : g_roots) serializeKey(ss, rootName(root), key);
+  const std::wstring text = ss.str();
+  if (text == g_lastLocalText) { g_dirty = false; return; }
+
+  // Write-then-rename: a half-written or failed write can never leave a truncated (or 0-byte)
+  // .local in place of a good one — which is exactly how the old std::wofstream path failed.
+  const std::wstring tmp = g_localPath + L".tmp";
+  bool ok = false;
+  {
+    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+    if (f) {
+      f.write(reinterpret_cast<const char*>(text.data()),
+              static_cast<std::streamsize>(text.size() * sizeof(wchar_t)));
+      f.flush();
+      ok = static_cast<bool>(f);
+    }
+  }
+  if (ok && !MoveFileExW(tmp.c_str(), g_localPath.c_str(), MOVEFILE_REPLACE_EXISTING)) ok = false;
+  if (ok) {
+    g_dirty = false;
+    g_lastLocalText = text;
+    std::fprintf(stderr, "[regov] persisted runtime registry writes to \"%ls\"\n",
+                 g_localPath.c_str());
+  } else {
+    DeleteFileW(tmp.c_str());
+    std::fprintf(stderr, "[regov] FAILED to persist runtime registry writes to \"%ls\" (err=%lu)\n",
+                 g_localPath.c_str(), GetLastError());
+  }
+  std::fflush(stderr);
+}
 void materializeValueToRealKey(HKEY h, const Val& v) {
   if (v.tomb) return;
   // Ownership metadata is generated by MyDAW, never accepted from an imported
@@ -2429,6 +2599,149 @@ std::wstring getEnvW(const wchar_t* key) {
   v.resize(m);
   return v;
 }
+// ===========================================================================
+// Profile aliasing (capture layout <-> host layout)
+// ===========================================================================
+// The plugin never hard-codes a profile path: it asks SHGetFolderPath/known folders and gets
+// whatever THIS machine answers. On a Win7+ host that is C:\Users\<host>\..., which no XP-era
+// capture can contain, so the mirror silently misses and the plugin reads the host's real
+// profile instead. Map the host's roots onto the capture's (and vice-versa for a modern capture
+// replayed against XP-style requests) so the mirror gets first refusal, as intended.
+
+// The single human user directory inside a mirrored profile container, e.g.
+// files\C\Documents and Settings\Admin. Service/shared accounts are not candidates.
+std::wstring findMirrorUserDir(const std::wstring& container) {
+  if (!isDir(container)) return {};
+  static const wchar_t* kSkip[] = {L"all users",   L"default user", L"default",
+                                   L"public",      L"localservice", L"networkservice",
+                                   L"defaultuser0"};
+  WIN32_FIND_DATAW fd{};
+  HANDLE h = FindFirstFileW((container + L"\\*").c_str(), &fd);
+  if (h == INVALID_HANDLE_VALUE) return {};
+  std::wstring only;
+  int count = 0;
+  do {
+    if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+    if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
+    const std::wstring n = lc(fd.cFileName);
+    bool skip = false;
+    for (const wchar_t* s : kSkip) skip = skip || (n == s);
+    if (skip) continue;
+    only = fd.cFileName;
+    ++count;
+  } while (FindNextFileW(h, &fd));
+  FindClose(h);
+  return count == 1 ? container + L"\\" + only : std::wstring();  // ambiguous -> alias nothing
+}
+void addAlias(const std::wstring& hostPrefix, const std::wstring& mirrorPrefix) {
+  if (hostPrefix.empty() || mirrorPrefix.empty()) return;
+  std::wstring h = lc(hostPrefix);
+  while (h.size() > 3 && (h.back() == L'\\' || h.back() == L'/')) h.pop_back();
+  for (const auto& [existing, _] : g_pathAliases)
+    if (existing == h) return;
+  g_pathAliases.emplace_back(h, mirrorPrefix);
+}
+std::wstring knownFolderW(int csidl) {
+  wchar_t buf[MAX_PATH]{};
+  if (SUCCEEDED(SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf))) return buf;
+  return {};
+}
+void buildPathAliases() {
+  g_pathAliases.clear();
+  if (g_mirrorRoot.empty()) return;
+  g_systemRootLc = lc(getEnvW(L"SystemRoot"));
+
+  const std::wstring xpRoot = g_mirrorRoot + L"\\C\\Documents and Settings";
+  const std::wstring ntRoot = g_mirrorRoot + L"\\C\\Users";
+  const std::wstring xpUser = findMirrorUserDir(xpRoot);
+  const std::wstring ntUser = findMirrorUserDir(ntRoot);
+
+  const std::wstring hostProfile = getEnvW(L"USERPROFILE");
+  const std::wstring hostAppData = getEnvW(L"APPDATA");
+  const std::wstring hostLocal = getEnvW(L"LOCALAPPDATA");
+  const std::wstring hostDocs = knownFolderW(CSIDL_PERSONAL);  // honours a redirected Documents
+  const std::wstring hostPublic = getEnvW(L"PUBLIC");
+  const std::wstring hostProgData = getEnvW(L"ProgramData");
+
+  if (!xpUser.empty()) {
+    // XP-shaped capture, modern host: rewrite this machine's roots onto the captured profile.
+    if (!hostDocs.empty()) addAlias(hostDocs, xpUser + L"\\My Documents");
+    if (!hostProfile.empty()) addAlias(hostProfile + L"\\Documents", xpUser + L"\\My Documents");
+    if (!hostAppData.empty()) addAlias(hostAppData, xpUser + L"\\Application Data");
+    if (!hostLocal.empty()) {
+      addAlias(hostLocal + L"\\Temp", xpUser + L"\\Local Settings\\Temp");
+      addAlias(hostLocal, xpUser + L"\\Local Settings\\Application Data");
+    }
+    if (!hostProfile.empty()) addAlias(hostProfile, xpUser);
+    if (!hostProgData.empty())
+      addAlias(hostProgData, xpRoot + L"\\All Users\\Application Data");
+    if (!hostPublic.empty()) addAlias(hostPublic, xpRoot + L"\\All Users");
+  } else if (!ntUser.empty()) {
+    // Modern capture, but the plugin may still ask XP-style (hard-coded or via a mocked
+    // Shell Folders value). Map the captured XP names forward onto the mirror.
+    addAlias(L"C:\\Documents and Settings\\All Users\\Application Data",
+             g_mirrorRoot + L"\\C\\ProgramData");
+    addAlias(L"C:\\Documents and Settings\\All Users", g_mirrorRoot + L"\\C\\Users\\Public");
+    const std::wstring leaf = ntUser.substr(ntUser.find_last_of(L'\\') + 1);
+    const std::wstring xpMe = L"C:\\Documents and Settings\\" + leaf;
+    addAlias(xpMe + L"\\My Documents", ntUser + L"\\Documents");
+    addAlias(xpMe + L"\\Application Data", ntUser + L"\\AppData\\Roaming");
+    addAlias(xpMe + L"\\Local Settings\\Temp", ntUser + L"\\AppData\\Local\\Temp");
+    addAlias(xpMe + L"\\Local Settings\\Application Data", ntUser + L"\\AppData\\Local");
+    addAlias(xpMe, ntUser);
+  }
+
+  // Longest host prefix first, so \Documents wins over the bare profile root.
+  std::stable_sort(g_pathAliases.begin(), g_pathAliases.end(),
+                   [](const auto& a, const auto& b) { return a.first.size() > b.first.size(); });
+  for (const auto& [h, m] : g_pathAliases)
+    tracef("[fileov] alias %ls -> %ls\n", h.c_str(), m.c_str());
+}
+
+// ===========================================================================
+// Sealed registry subtrees (opt-in)
+// ===========================================================================
+// A capture replayed on a machine that ALSO has the real product installed will happily read
+// that product's live keys through the overlay's read-through — which is how Addictive Drums
+// picked up a genuine HKCU\...\Activation blob that install.reg never contained, making the
+// bundle silently machine-dependent. Listing a subtree here makes the capture authoritative for
+// it: unlisted keys/values resolve to "not found" instead of leaking in.
+// Sources: <reg>.sealed (one key path per line, # comments) and MYDAW_REG_SEALED (";"-separated).
+void addSealedPath(const std::wstring& spec) {
+  std::wstring s = trim(spec);
+  if (s.empty() || s[0] == L'#' || s[0] == L';') return;
+  auto comps = splitPath(s);
+  if (comps.empty()) return;
+  std::wstring up = comps[0];
+  for (wchar_t& c : up) c = (wchar_t)towupper(c);
+  HKEY root = rootFromName(up);
+  if (!root) return;
+  std::vector<std::wstring> path;
+  for (size_t i = 1; i < comps.size(); ++i) path.push_back(lc(comps[i]));
+  g_sealed.emplace_back(root, std::move(path));
+  std::fprintf(stderr, "[regov] sealed subtree: %ls\n", s.c_str());
+}
+void loadSealedList() {
+  g_sealed.clear();
+  if (!g_regPath.empty()) {
+    const std::wstring sidecar = g_regPath + L".sealed";
+    if (isFile(sidecar)) {
+      std::wstring text = readRegFileAsWide(sidecar), cur;
+      for (wchar_t c : text) {
+        if (c == L'\n') { addSealedPath(cur); cur.clear(); }
+        else if (c != L'\r') cur.push_back(c);
+      }
+      addSealedPath(cur);
+    }
+  }
+  std::wstring env = getEnvW(L"MYDAW_REG_SEALED"), cur;
+  for (wchar_t c : env) {
+    if (c == L';') { addSealedPath(cur); cur.clear(); }
+    else cur.push_back(c);
+  }
+  addSealedPath(cur);
+}
+
 void setupBundleDllSearch() {
   if (g_mirrorRoot.empty()) return;
   const std::wstring dirs[] = {
@@ -2501,6 +2814,16 @@ bool installRegOverlayIfPresent(const std::wstring& pluginPath) {
   g_classesSidecar = g_regOverlayActive ? g_regPath + L".classes" : std::wstring();
   tracef("[regov] bundle: reg=%ls\n         root=%ls\n         mirror=%ls\n", g_regPath.c_str(),
          g_bundleRoot.c_str(), g_mirrorRoot.empty() ? L"(none)" : g_mirrorRoot.c_str());
+
+  // Capture-diagnostic tier + the profile alias table (both are no-ops without a files mirror).
+  {
+    const std::wstring w = lc(getEnvW(L"MYDAW_FILE_WARN"));
+    if (w == L"0" || w == L"off" || w == L"none") g_fileWarnLevel = 0;
+    else if (w == L"2" || w == L"all") g_fileWarnLevel = 2;
+    else g_fileWarnLevel = 1;
+  }
+  buildPathAliases();
+  loadSealedList();
 
   if (g_regOverlayActive) {
     g_roots[HKEY_LOCAL_MACHINE];
@@ -2597,6 +2920,12 @@ bool installRegOverlayIfPresent(const std::wstring& pluginPath) {
     std::fprintf(stderr, "[regov] registry overlay armed from \"%ls\"\n", g_regPath.c_str());
   if (g_fileOverlayActive)
     std::fprintf(stderr, "[fileov] file overlay armed from \"%ls\"\n", g_mirrorRoot.c_str());
+    for (const auto& [h, m] : g_pathAliases)
+      std::fprintf(stderr, "[fileov] alias %ls -> %ls\n", h.c_str(), m.c_str());
+    if (g_fileWarnLevel > 0)
+      std::fprintf(stderr,
+                   "[fileov] capture warnings on (MISS/EMPTY/ALIAS); MYDAW_FILE_WARN=0 silences, "
+                   "=all includes %%SystemRoot%% probes\n");
   return true;
 }
 
@@ -2607,15 +2936,7 @@ RegOverlayStatus regOverlayStatus() {
 
 void flushRegOverlay() {
   std::lock_guard<std::recursive_mutex> lk(g_mu);
-  if (g_armed && g_dirty && !g_localPath.empty()) {
-    std::wofstream f(g_localPath, std::ios::binary | std::ios::trunc);
-    if (f) {
-      f << L"\xFEFF";  // UTF-16LE BOM (wofstream writes wchar_t units on Windows)
-      f << L"Windows Registry Editor Version 5.00\r\n\r\n";
-      for (auto& [root, key] : g_roots) serializeKey(f, rootName(root), key);
-      g_dirty = false;
-    }
-  }
+  if (g_armed) persistLocalNow();  // normally a no-op: every write already persisted itself
   cleanupTempUserClasses();
 }
 
