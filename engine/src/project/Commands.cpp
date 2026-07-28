@@ -31,6 +31,7 @@
 #include "project/ProjectIO.h"
 #include "project/UndoStack.h"
 #include "server/EventBus.h"
+#include "util/Base64.h"          // DOP chain: inline VST state chunks
 #include "util/Log.h"
 #include "util/Paths.h"
 #include "util/Strings.h"
@@ -3017,6 +3018,130 @@ static bool applyBuiltinFxOffline(std::vector<std::vector<float>>& seg, const st
     return true;
 }
 
+// Runs a REAL (out-of-process) plugin offline over `seg` in place — the VST leg of
+// the DOP chain (SPEC §6). Throwaway-instance route: create → restore the entry's
+// inline state chunk → apply the params overlay → block-pump → destroy. State lives
+// base64-encoded in pr.sparams["state"] (DECIDED 2026-07-28: inline in project.json —
+// self-contained projects, snapshot-borne undo); a fresh entry captures the plugin's
+// default chunk here on its first render so every later recompute replays identical
+// settings. Length-preserving contract: reported latency is compensated by feeding
+// `latency` extra silence and discarding the first `latency` output samples; any
+// tail beyond that is truncated (same policy as built-ins).
+bool CommandProcessor::applyVstFxOffline(std::vector<std::vector<float>>& seg,
+                                         ClipProcess& pr, std::string& err) {
+    Model& m = model();
+    const auto uidIt = pr.sparams.find("uid");
+    const std::string uid = uidIt != pr.sparams.end() ? uidIt->second : "";
+    if (!host_) {
+        err = "plugin hosting unavailable";
+        return false;
+    }
+    if (!ctx_.pluginRegistry) {
+        err = "plugin registry unavailable";
+        return false;
+    }
+    const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
+    if (!info) {
+        err = "uid not in plugin registry: " + uid;
+        return false;
+    }
+    if (info->isInstrument) {
+        err = "instruments cannot run as offline clip processes: " + info->name;
+        return false;
+    }
+    if (info->blacklisted) {
+        err = info->name + " is blacklisted";
+        return false;
+    }
+
+    constexpr int kBlock = 2048;
+    PluginInstance pi;
+    pi.instanceId = m.nextId();
+    pi.uid = info->uid;
+    pi.format = info->format;
+    pi.path = info->path;
+    pi.bitness = info->bitness;
+    pi.name = info->name;
+    if (!host_->create(pi, m.project.sampleRate, kBlock, err))
+        return false;
+    // Every exit below this point must tear the throwaway instance down.
+    const auto fail = [&](std::string msg) {
+        host_->destroy(pi.instanceId);
+        err = std::move(msg);
+        return false;
+    };
+
+    const auto stIt = pr.sparams.find("state");
+    if (stIt != pr.sparams.end() && !stIt->second.empty()) {
+        std::vector<uint8_t> chunk;
+        if (!base64Decode(stIt->second, chunk))
+            return fail(info->name + ": stored state is not valid base64");
+        // Recreate-grade timeout: soundbank loads inside setState blow past the
+        // regular 10 s op timeout. TimedOutAlive is a hard failure here — a
+        // throwaway instance has no "keep dormant and retry" to offer.
+        std::string stateErr;
+        if (host_->setStateForRecreate(pi.instanceId, chunk, stateErr) !=
+            SetStateResult::Ok)
+            return fail(stateErr.empty() ? info->name + ": state restore failed"
+                                         : info->name + ": " + stateErr);
+    } else {
+        std::vector<uint8_t> chunk;
+        if (host_->getState(pi.instanceId, chunk) && !chunk.empty()) {
+            if (chunk.size() > 1024 * 1024)
+                Log::warn("dop: %s default state is %zu KB — project.json and every "
+                          "undo snapshot now carry it",
+                          info->name.c_str(), chunk.size() / 1024);
+            pr.sparams["state"] = base64Encode(chunk);
+        }
+    }
+    for (const auto& [key, value] : pr.params) {
+        char* endp = nullptr;
+        const long paramId = std::strtol(key.c_str(), &endp, 10);
+        if (endp && *endp == '\0' && paramId >= 0)
+            host_->setParam(pi.instanceId, static_cast<uint32_t>(paramId),
+                            std::clamp(value, 0.0, 1.0));
+    }
+
+    PluginProxyNode* node = host_->node(pi.instanceId);
+    if (!node)
+        return fail(info->name + ": plugin node unavailable");
+    node->setOfflineMode(true); // stretch the done-wait; slow ≠ hung while offline
+    const int64_t latency = std::max(0, node->latencySamples());
+    const int nch = std::min<int>(2, static_cast<int>(seg.size()));
+    const int64_t frames = static_cast<int64_t>(seg[0].size());
+    const TempoMap& map = tm();
+    const MidiBuffer noMidi;
+    std::vector<float> scratch(2 * static_cast<size_t>(kBlock));
+    float* io[2] = {scratch.data(), scratch.data() + kBlock};
+    for (int64_t pos = 0; pos < frames + latency; pos += kBlock) {
+        const int nthis =
+            static_cast<int>(std::min<int64_t>(kBlock, frames + latency - pos));
+        for (int c = 0; c < nch; ++c)
+            for (int i = 0; i < nthis; ++i) {
+                const int64_t s = pos + i;
+                io[c][i] = s < frames ? seg[static_cast<size_t>(c)][s] : 0.f;
+            }
+        ProcessContext ctx;
+        ctx.frames = nthis;
+        ctx.playheadSamples = pos;
+        ctx.ppqPos = map.samplesToBeats(pos);
+        ctx.tempo = map.bpmAtBeat(ctx.ppqPos);
+        ctx.playing = true;
+        ctx.recording = false;
+        ctx.looping = false;
+        ctx.sampleRate = m.project.sampleRate;
+        node->processRt(ctx, io, nch, noMidi);
+        for (int c = 0; c < nch; ++c)
+            for (int i = 0; i < nthis; ++i) {
+                const int64_t dst = pos + i - latency;
+                if (dst >= 0 && dst < frames)
+                    seg[static_cast<size_t>(c)][dst] = io[c][i];
+            }
+    }
+    host_->destroy(pi.instanceId);
+    return true;
+}
+
 // Drops the chain + provenance, keeping the current (derived) render as the clip's
 // plain material — Cubase "Make Direct Offline Processing Permanent". Also called by
 // every length-CHANGING bake (resample/stretch) so trims keep meaning.
@@ -3054,7 +3179,9 @@ bool CommandProcessor::recomputeDop(AudioClip* ac, std::string& err) {
         seg[static_cast<size_t>(ch)].assign(pcm->planes[static_cast<size_t>(ch)].begin() + off,
                                             pcm->planes[static_cast<size_t>(ch)].begin() + off +
                                                 len);
-    for (const ClipProcess& pr : ac->processes) {
+    // Non-const: a fresh VST entry captures its default state chunk into sparams
+    // on the first render (applyVstFxOffline).
+    for (ClipProcess& pr : ac->processes) {
         if (!pr.enabled)
             continue;
         const auto num = [&pr](const char* k, double d) {
@@ -3066,9 +3193,13 @@ bool CommandProcessor::recomputeDop(AudioClip* ac, std::string& err) {
             return it != pr.sparams.end() ? it->second : std::string(d);
         };
         if (pr.op == "plugin") {
-            if (!applyBuiltinFxOffline(seg, str("uid", ""), pr.params, m.project.sampleRate,
-                                       err))
+            const std::string uid = str("uid", "");
+            if (isBuiltinUid(uid)) {
+                if (!applyBuiltinFxOffline(seg, uid, pr.params, m.project.sampleRate, err))
+                    return false;
+            } else if (!applyVstFxOffline(seg, pr, err)) {
                 return false;
+            }
         } else if (!applyClipDspOp(seg, pr.op, num, str, m.project.sampleRate, err)) {
             return false;
         }
@@ -3237,14 +3368,64 @@ json CommandProcessor::clipProcessChain(const json& p, CmdResult& r) {
     };
 
     if (action == "addPlugin") {
-        const std::string uid = getOr(p, "uid", "");
-        if (!isBuiltinUid(uid))
-            return r.fail("bad_request", "offline effects must be built-ins (builtin:*)");
-        ensureDopProvenance(*ac);
+        // Optional `copyFrom`: seed the entry's inline state from an existing insert
+        // instance (Cubase "apply this insert offline"); uid defaults to that insert's.
+        const uint64_t copyFrom = getOr<uint64_t>(p, "copyFrom", 0);
+        const PluginInstance* src = nullptr;
+        if (copyFrom != 0) {
+            src = m.pluginByInstanceId(copyFrom);
+            if (!src)
+                return r.fail("not_found", "unknown copyFrom instanceId");
+        }
+        const std::string uid = getOr(p, "uid", src ? src->uid : "");
         ClipProcess pr;
         pr.id = m.nextId();
         pr.op = "plugin";
         pr.sparams["uid"] = uid;
+        if (!isBuiltinUid(uid)) {
+            // VST/out-of-process effect: validated against the registry here so a
+            // typo fails fast instead of mid-recompute; state is captured inline
+            // (sparams["state"], base64) — from the source insert when copying,
+            // otherwise the fresh default chunk during the recompute below.
+            if (!ctx_.pluginRegistry)
+                return r.fail("plugin_load_failed", "plugin registry unavailable");
+            const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
+            if (!info)
+                return r.fail("unknown_plugin", "uid not in plugin registry: " + uid);
+            if (info->isInstrument)
+                return r.fail("bad_request",
+                              "instruments cannot run as offline clip processes");
+            if (info->blacklisted)
+                return r.fail("plugin_load_failed", info->name + " is blacklisted");
+            if (!host_)
+                return r.fail("plugin_load_failed", "plugin hosting unavailable");
+            pr.sparams["name"] = info->name; // display label; uid is opaque hex
+            if (src) {
+                if (src->format == "builtin")
+                    return r.fail("bad_request",
+                                  "copyFrom must reference a VST insert for a VST entry");
+                // Same chunk priority as plugin.add copyFrom: live host → session
+                // orphan store → saved plugin-states .bin.
+                std::vector<uint8_t> srcChunk;
+                if (!host_->getState(copyFrom, srcChunk) || srcChunk.empty()) {
+                    srcChunk.clear();
+                    if (orphanStates_) {
+                        const auto it = orphanStates_->find(copyFrom);
+                        if (it != orphanStates_->end())
+                            srcChunk = it->second;
+                    }
+                    if (srcChunk.empty() && !src->stateFile.empty() && projectIO_ &&
+                        projectIO_->hasPath())
+                        readBinaryFile(pathJoin(projectIO_->projectDir(), src->stateFile),
+                                       srcChunk);
+                }
+                if (srcChunk.empty())
+                    return r.fail("plugin_load_failed",
+                                  "could not capture state from copyFrom instance");
+                pr.sparams["state"] = base64Encode(srcChunk);
+            }
+        }
+        ensureDopProvenance(*ac);
         if (p.contains("params") && p["params"].is_object())
             for (auto it = p["params"].begin(); it != p["params"].end(); ++it)
                 if (it.value().is_number())

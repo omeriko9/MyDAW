@@ -150,7 +150,9 @@ function entryLabel(pr: ClipProcess): string {
   switch (pr.op) {
     case "plugin": {
       const uid = s.uid ?? "";
-      return BUILTIN_FX.find((f) => f.uid === uid)?.label ?? uid.replace("builtin:", "");
+      if (uid.startsWith("builtin:"))
+        return BUILTIN_FX.find((f) => f.uid === uid)?.label ?? uid.replace("builtin:", "");
+      return s.name ?? uid; // VST entry — the engine stamps the registry name
     }
     case "gain": return `Gain ${(p.gainDb ?? 0) > 0 ? "+" : ""}${p.gainDb ?? 0} dB`;
     case "normalize": return `Normalize ${s.mode ?? "peak"} → ${p.targetDb ?? -1} dB`;
@@ -247,6 +249,23 @@ function editFields(pr: ClipProcess): FieldSpec[] | null {
 function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) {
   // Subscribing to the whole project keeps the list current after every recompute.
   useStore((st) => st.project);
+  const registry = useStore((st) => st.registry);
+  const [vstUid, setVstUid] = React.useState("");
+  // Effect VSTs, deduped by uid (shells list one entry per sub-plugin variant; the
+  // engine's byUid lookup takes the first match anyway).
+  const vstFx = React.useMemo(() => {
+    const seen = new Set<string>();
+    return registry
+      .filter(
+        (p) =>
+          p.format !== "builtin" &&
+          !p.isInstrument &&
+          !p.blacklisted &&
+          !seen.has(p.uid) &&
+          !!seen.add(p.uid),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [registry]);
   const clip = findClip(clipId);
   if (!clip || openForClip !== clipId) {
     return null;
@@ -384,6 +403,42 @@ function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) 
             </button>
           ))}
         </div>
+        {vstFx.length > 0 && (
+          <>
+            <div className="dlg-subhead">
+              Add VST effect (its current default settings are captured into the chain)
+            </div>
+            <div className="le-row">
+              <select
+                className="grow"
+                value={vstUid}
+                onChange={(e) => setVstUid(e.target.value)}
+              >
+                <option value="">— choose a plugin —</option>
+                {vstFx.map((p) => (
+                  <option key={`${p.format}|${p.uid}|${p.bitness}|${p.path}`} value={p.uid}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn"
+                disabled={!vstUid}
+                onClick={() => {
+                  const p = vstFx.find((x) => x.uid === vstUid);
+                  showToast(`Applying ${p?.name ?? "plugin"} offline…`, "info");
+                  fire(
+                    processChain({ clipId, action: "addPlugin", uid: vstUid }),
+                    `Add ${p?.name ?? "VST"}`,
+                  );
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );

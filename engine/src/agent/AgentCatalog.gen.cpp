@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "aef0d0a331d004241d07fd6730ba4f54c56cd731c2f3a3d301d6c93799facf6a";
+const char kAgentCatalogSha256[] = "7cd431edc094090ae9e51a9b2d35bb7bd2bcdbca6a921a5ee4a96314aa6da542";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -5552,7 +5552,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "cmd/clip.processChain",
       "category": "clips",
-      "description": "Edit a clip's DOP chain: addPlugin (built-in fx), remove/toggle/reorder/setParams a process, clear, or makePermanent. Audible edits replay the chain.",
+      "description": "Edit a clip's DOP chain: addPlugin (builtin:* or registry VST uid), remove/toggle/reorder/setParams, clear, makePermanent. Audible edits replay the chain.",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -5586,6 +5586,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "clipId": {
             "type": "number"
           },
+          "copyFrom": {
+            "description": "addPlugin (VST): capture this existing insert instanceId's state into the entry; uid defaults to that insert's",
+            "type": "number"
+          },
           "index": {
             "description": "reorder: destination index",
             "type": "number"
@@ -5608,7 +5612,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "type": "object"
           },
           "uid": {
-            "description": "addPlugin: built-in effect uid (builtin:*)",
+            "description": "addPlugin: built-in (builtin:*) or registry VST effect uid; a VST entry stores its state chunk inline (sparams.state, base64)",
             "type": "string"
           }
         },

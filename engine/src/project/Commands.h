@@ -176,6 +176,11 @@ private:
     // bakes so trims keep meaning).
     bool recomputeDop(AudioClip* ac, std::string& err);
     static void collapseDop(AudioClip& ac);
+    // One VST/out-of-process chain entry, run offline over `seg` in place via a
+    // throwaway host instance. May write pr.sparams["state"] (first-render default
+    // capture) — see the impl for the inline-state contract.
+    bool applyVstFxOffline(std::vector<std::vector<float>>& seg, ClipProcess& pr,
+                           std::string& err);
     json clipDissolve(const json& p, CmdResult& r);
     json midiMergeLoop(const json& p, CmdResult& r);
     json trackRenderInPlace(const json& p, CmdResult& r);

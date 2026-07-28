@@ -242,9 +242,18 @@ Caveat: synchronous stretch stalls on long clips — acceptable v1 (bounce prece
 > collapse it), cmd/clip.processAudio now appends non-destructively, cmd/clip.processChain
 > (addPlugin/remove/toggle/reorder/setParams/clear/makePermanent — clear restores the original
 > without rendering), BUILT-IN effects as offline processes (block-pumped, tails truncated),
-> Offline Processes… dialog (live list, per-op param re-edit incl. plugin entries). Still open
-> from this swipe: VST/out-of-process plugins as offline processes (throwaway-instance route),
-> async recompute with progress for long clips. The derived-file leak is handled by
+> Offline Processes… dialog (live list, per-op param re-edit incl. plugin entries).
+> **VST plugins as offline processes SHIPPED 2026-07-29** per the Option A decision below:
+> `applyVstFxOffline` (Commands.cpp) runs the throwaway-instance route — registry lookup by
+> uid → `host_->create` → `setStateForRecreate` from the entry's inline chunk (or default
+> capture into `sparams["state"]` on first render) → params overlay → offline block pump with
+> latency compensation (feed `latency` extra silence, discard the first `latency` output
+> samples; tails truncated like built-ins) → destroy. `addPlugin` accepts registry VST uids
+> (+ optional `copyFrom` insert instanceId, chunk priority live→orphan→stateFile) and stamps
+> `sparams["name"]` for display; DopDialog gained a VST picker (registry, deduped by uid).
+> E2E: scripts/dop-vst-test.mjs (18 checks, real Waves MaxxBass VST3 incl. save/reload replay
+> + undo/redo). Still open from this swipe: async recompute with progress for long clips
+> (VST recompute is synchronous on the command thread, bounce precedent). The derived-file leak is handled by
 > **cmd/media.removeUnused** (Project ▸ Remove Unused Media…, shipped 2026-07-28): preview →
 > undoable record removal → optional file deletion (clears undo, saved projects only).
 >

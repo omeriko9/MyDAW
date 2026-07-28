@@ -298,11 +298,15 @@ struct ClipEnvPoint {
 // One entry in an audio clip's Direct-Offline-Processing chain (SPEC §6, DOP): a
 // LENGTH-PRESERVING process replayed from the clip's original material whenever the
 // chain changes. `op` is a clip.processAudio op (gain/normalize/fadeIn/fadeOut/
-// reverse/invert/silence/dcRemove/stereoFlip) or "plugin" (a built-in effect run
-// offline; `sparams["uid"]` = builtin uid, params = normalized 0..1 by param id).
-// Numeric params in `params`, enum/string params (mode/curve/flipMode/uid) in
-// `sparams`. Length-CHANGING ops (resample, stretch) stay destructive — they
-// collapse the chain first (makePermanent) so trims keep meaning.
+// reverse/invert/silence/dcRemove/stereoFlip) or "plugin" (an effect run offline;
+// `sparams["uid"]` = builtin OR registry VST uid, params = normalized 0..1 by param
+// id). VST entries additionally carry `sparams["name"]` (display label) and
+// `sparams["state"]` — the opaque plugin state chunk base64-encoded INLINE (decided
+// 2026-07-28: self-contained project.json, undo via ordinary snapshots; each
+// recompute replays it into a throwaway host instance). Numeric params in `params`,
+// enum/string params (mode/curve/flipMode/uid/name/state) in `sparams`.
+// Length-CHANGING ops (resample, stretch) stay destructive — they collapse the
+// chain first (makePermanent) so trims keep meaning.
 struct ClipProcess {
     uint64_t id = 0;
     std::string op;
