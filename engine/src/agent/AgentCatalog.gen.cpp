@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "208b06eacb7cd45b2ff6124fc2da91995a1259acfef0ba7bd7e939ac0813de51";
+const char kAgentCatalogSha256[] = "f9b8829eedb79eb5bc79dc2ae982521211af86dad6ff76f4523ecf0d84f9bc54";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2244,6 +2244,18 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "additionalProperties": false,
       "description": "Cubase-style MIDI Modifiers (playback-only): transpose + velocity shaping applied at bake time and to live thru — never written into clips or SMF exports.",
       "properties": {
+        "randomPitch": {
+          "description": "± semitones per note, 0..12 (bake-only)",
+          "maximum": 12,
+          "minimum": 0,
+          "type": "number"
+        },
+        "randomVelocity": {
+          "description": "± velocity per note, 0..63",
+          "maximum": 63,
+          "minimum": 0,
+          "type": "number"
+        },
         "transpose": {
           "description": "semitones, -24..24",
           "maximum": 24,
@@ -2260,6 +2272,17 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "description": "added to velocity after compression, -63..63",
           "maximum": 63,
           "minimum": -63,
+          "type": "number"
+        },
+        "velMax": {
+          "maximum": 127,
+          "minimum": 1,
+          "type": "number"
+        },
+        "velMin": {
+          "description": "velocity range clamp (applied after random)",
+          "maximum": 127,
+          "minimum": 1,
           "type": "number"
         }
       },
@@ -3968,9 +3991,29 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "additionalProperties": false,
           "description": "kind \"midi\"/\"instrument\" — partial MIDI-modifiers patch; absent fields keep their values.",
           "properties": {
+            "randomPitch": {
+              "maximum": 12,
+              "minimum": 0,
+              "type": "number"
+            },
+            "randomVelocity": {
+              "maximum": 63,
+              "minimum": 0,
+              "type": "number"
+            },
             "transpose": {
               "maximum": 24,
               "minimum": -24,
+              "type": "number"
+            },
+            "velMax": {
+              "maximum": 127,
+              "minimum": 1,
+              "type": "number"
+            },
+            "velMin": {
+              "maximum": 127,
+              "minimum": 1,
               "type": "number"
             },
             "velocityCompress": {

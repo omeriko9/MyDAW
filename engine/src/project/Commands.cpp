@@ -1365,9 +1365,23 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         if (hasKey(mm, "velocityCompress"))
             next.velocityCompress = std::clamp(
                 getOr<double>(mm, "velocityCompress", next.velocityCompress), 0.25, 4.0);
+        if (hasKey(mm, "randomPitch"))
+            next.randomPitch = std::clamp(getOr<int>(mm, "randomPitch", next.randomPitch), 0, 12);
+        if (hasKey(mm, "randomVelocity"))
+            next.randomVelocity =
+                std::clamp(getOr<int>(mm, "randomVelocity", next.randomVelocity), 0, 63);
+        if (hasKey(mm, "velMin"))
+            next.velMin = std::clamp(getOr<int>(mm, "velMin", next.velMin), 1, 127);
+        if (hasKey(mm, "velMax"))
+            next.velMax = std::clamp(getOr<int>(mm, "velMax", next.velMax), 1, 127);
+        if (next.velMin > next.velMax)
+            std::swap(next.velMin, next.velMax);
         if (next.transpose != t->midiMod.transpose ||
             next.velocityShift != t->midiMod.velocityShift ||
-            next.velocityCompress != t->midiMod.velocityCompress) {
+            next.velocityCompress != t->midiMod.velocityCompress ||
+            next.randomPitch != t->midiMod.randomPitch ||
+            next.randomVelocity != t->midiMod.randomVelocity ||
+            next.velMin != t->midiMod.velMin || next.velMax != t->midiMod.velMax) {
             t->midiMod = next;
             r.structural = true; // modifiers are baked into the graph's note events
         }

@@ -342,16 +342,38 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
             cfg.midiOutChannel = std::clamp(t.midiOutChannel, 0, 16);
         // MIDI Modifiers (playback-only, SPEC §6): folded into the baked note events
         // below and applied to live thru in TrackNode. MIDI/Instrument tracks only.
+        // Random offsets re-roll on every rebuild (Cubase re-rolls per playback); the
+        // note-off reuses the on's ev.pitch, so a random pitch stays note-consistent.
+        // Live thru gets random VELOCITY + the range clamp but NOT random pitch — a
+        // per-event pitch roll would desync the release from the ledger's note-on.
         const MidiModifiers mm = (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
                                      ? t.midiMod
                                      : MidiModifiers{};
         cfg.midiTranspose = mm.transpose;
         cfg.midiVelShift = mm.velocityShift;
         cfg.midiVelCompress = static_cast<float>(mm.velocityCompress);
-        const auto modVel = [&mm](int v) {
-            return static_cast<uint8_t>(std::clamp(
-                static_cast<int>(std::lround(v * mm.velocityCompress)) + mm.velocityShift, 1,
-                127));
+        cfg.midiRandVel = mm.randomVelocity;
+        cfg.midiVelMin = mm.velMin;
+        cfg.midiVelMax = mm.velMax;
+        static uint32_t mmRebuildSalt = 0x9E3779B9u; // varies the roll per rebuild
+        uint32_t mmSeed = (++mmRebuildSalt) ^ static_cast<uint32_t>(t.id * 2654435761u);
+        const auto mmRand = [&mmSeed]() { // xorshift32 → -1..1
+            mmSeed ^= mmSeed << 13;
+            mmSeed ^= mmSeed >> 17;
+            mmSeed ^= mmSeed << 5;
+            return static_cast<double>(mmSeed) / 2147483648.0 - 1.0;
+        };
+        const auto modVel = [&mm, &mmRand](int v) {
+            int out = static_cast<int>(std::lround(v * mm.velocityCompress)) + mm.velocityShift;
+            if (mm.randomVelocity > 0)
+                out += static_cast<int>(std::lround(mmRand() * mm.randomVelocity));
+            out = std::clamp(out, mm.velMin, mm.velMax);
+            return static_cast<uint8_t>(std::clamp(out, 1, 127));
+        };
+        const auto modPitch = [&mm, &mmRand](int p) {
+            if (mm.randomPitch > 0)
+                p += static_cast<int>(std::lround(mmRand() * mm.randomPitch));
+            return p;
         };
 
         // ---- clip sources (audio + baked MIDI) ----------------------------------
@@ -418,7 +440,8 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                 off = on + 1;
                             TrackNode::NoteEvent ev;
                             ev.pitch = static_cast<uint8_t>(std::clamp(
-                                note.pitch + transposeAt(onB) + mm.transpose, 0, 127));
+                                modPitch(note.pitch + transposeAt(onB) + mm.transpose), 0,
+                                127));
                             ev.channel =
                                 static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                             ev.sample = on;
@@ -551,7 +574,8 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                         off = on + 1;
                                     TrackNode::NoteEvent ev;
                                     ev.pitch = static_cast<uint8_t>(std::clamp(
-                                        note.pitch + transposeAt(onB) + mm.transpose, 0, 127));
+                                        modPitch(note.pitch + transposeAt(onB) + mm.transpose),
+                                        0, 127));
                                     ev.channel =
                                         static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                                     ev.sample = on;

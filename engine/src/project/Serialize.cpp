@@ -429,7 +429,11 @@ json toJson(const Track& t) {
     if (!t.midiMod.isDefault())
         j["midiMod"] = json{{"transpose", t.midiMod.transpose},
                             {"velocityShift", t.midiMod.velocityShift},
-                            {"velocityCompress", t.midiMod.velocityCompress}};
+                            {"velocityCompress", t.midiMod.velocityCompress},
+                            {"randomPitch", t.midiMod.randomPitch},
+                            {"randomVelocity", t.midiMod.randomVelocity},
+                            {"velMin", t.midiMod.velMin},
+                            {"velMax", t.midiMod.velMax}};
     if (t.vcaId != 0)
         j["vcaId"] = t.vcaId; // VCA-group membership; omitted when 0
     // track.eq: omit when there are no bands and EQ is not bypassed (SPEC §6).
@@ -891,6 +895,10 @@ bool fromJson(const json& j, Track& out, std::string* err) {
         out.midiMod.velocityShift = std::clamp(getOr<int>(mm, "velocityShift", 0), -63, 63);
         out.midiMod.velocityCompress =
             std::clamp(getOr<double>(mm, "velocityCompress", 1.0), 0.25, 4.0);
+        out.midiMod.randomPitch = std::clamp(getOr<int>(mm, "randomPitch", 0), 0, 12);
+        out.midiMod.randomVelocity = std::clamp(getOr<int>(mm, "randomVelocity", 0), 0, 63);
+        out.midiMod.velMin = std::clamp(getOr<int>(mm, "velMin", 1), 1, 127);
+        out.midiMod.velMax = std::clamp(getOr<int>(mm, "velMax", 127), 1, 127);
     }
     out.vcaId = getOr<uint64_t>(j, "vcaId", 0);
 

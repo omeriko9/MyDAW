@@ -111,12 +111,19 @@ struct AutomationLane {
 
 // Cubase-style MIDI Modifiers (playback-only, SPEC §6): applied at bake time and to
 // live thru on MIDI/Instrument tracks — never written into clips or SMF exports.
+// Random offsets re-roll on every graph rebuild (baked) / every event (live), like
+// Cubase's per-playback randomization. The velocity range clamps AFTER the random.
 struct MidiModifiers {
     int transpose = 0;             // semitones, clamped ±24
     int velocityShift = 0;         // added after compression, clamped ±63
     double velocityCompress = 1.0; // multiplier, clamped 0.25..4
+    int randomPitch = 0;           // ± semitones per note, 0..12
+    int randomVelocity = 0;        // ± per note, 0..63
+    int velMin = 1;                // range clamp, 1..127
+    int velMax = 127;
     bool isDefault() const {
-        return transpose == 0 && velocityShift == 0 && velocityCompress == 1.0;
+        return transpose == 0 && velocityShift == 0 && velocityCompress == 1.0 &&
+               randomPitch == 0 && randomVelocity == 0 && velMin == 1 && velMax == 127;
     }
 };
 

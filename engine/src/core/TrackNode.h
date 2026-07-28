@@ -144,9 +144,14 @@ public:
         // MIDI Modifiers (Track::midiMod, playback-only): the baked note events already
         // carry them; these apply the SAME transform to live/injected events at RT time
         // so thru matches playback. Feeder-delivered events are exempt (origin applies).
+        // Random PITCH is bake-only (a per-event roll would desync the ledger's release
+        // from its note-on); random velocity + the range clamp do apply live.
         int midiTranspose = 0;
         int midiVelShift = 0;
         float midiVelCompress = 1.0f;
+        int midiRandVel = 0;
+        int midiVelMin = 1;
+        int midiVelMax = 127;
     };
 
     explicit TrackNode(Config&& cfg);
@@ -263,19 +268,32 @@ private:
 
     /// MIDI Modifiers on live/injected events (baked events got them at bake time):
     /// transpose pitch on note-on AND note-off identically (so the ledger's release
-    /// matches), compress+shift velocity on note-ons only.
-    void applyMidiModRt(MidiEvent& e) const noexcept {
+    /// matches), compress+shift+random velocity and the range clamp on note-ons only.
+    /// Random pitch is deliberately NOT applied live (see Config).
+    void applyMidiModRt(MidiEvent& e) noexcept {
         if (cfg_.midiTranspose != 0 && (e.isNoteOn() || e.isNoteOff())) {
             const int p = e.data[1] + cfg_.midiTranspose;
             e.data[1] = static_cast<uint8_t>(p < 0 ? 0 : (p > 127 ? 127 : p));
         }
         if (e.isNoteOn() && e.data[2] > 0 &&
-            (cfg_.midiVelShift != 0 || cfg_.midiVelCompress != 1.0f)) {
-            const int v =
+            (cfg_.midiVelShift != 0 || cfg_.midiVelCompress != 1.0f ||
+             cfg_.midiRandVel > 0 || cfg_.midiVelMin > 1 || cfg_.midiVelMax < 127)) {
+            int v =
                 static_cast<int>(e.data[2] * cfg_.midiVelCompress + 0.5f) + cfg_.midiVelShift;
+            if (cfg_.midiRandVel > 0) {
+                // xorshift32 (RT-safe, single consumer) → symmetric ±randVel
+                mmRngRt_ ^= mmRngRt_ << 13;
+                mmRngRt_ ^= mmRngRt_ >> 17;
+                mmRngRt_ ^= mmRngRt_ << 5;
+                const float r = static_cast<float>(mmRngRt_) / 2147483648.0f - 1.0f;
+                v += static_cast<int>(r * static_cast<float>(cfg_.midiRandVel) + 0.5f);
+            }
+            if (v < cfg_.midiVelMin) v = cfg_.midiVelMin;
+            if (v > cfg_.midiVelMax) v = cfg_.midiVelMax;
             e.data[2] = static_cast<uint8_t>(v < 1 ? 1 : (v > 127 ? 127 : v));
         }
     }
+    uint32_t mmRngRt_ = 0x2545F491u; // applyMidiModRt's RT-thread-only xorshift state
 
     Config cfg_;
 

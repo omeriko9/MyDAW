@@ -131,7 +131,9 @@ export interface PluginInstance {
   sidechainSource?: number;
 }
 
-/** Cubase-style MIDI Modifiers (Track.midiMod, playback-only, SPEC §6). */
+/** Cubase-style MIDI Modifiers (Track.midiMod, playback-only, SPEC §6). Random
+ *  offsets re-roll per rebuild (baked) / per event (live velocity); random pitch is
+ *  bake-only. The velocity range clamps after the random. */
 export interface MidiModifiers {
   /** semitones, ±24 */
   transpose: number;
@@ -139,6 +141,13 @@ export interface MidiModifiers {
   velocityShift: number;
   /** multiplier 0.25..4 (1 = off) */
   velocityCompress: number;
+  /** ± semitones per note, 0..12 (0 = off; playback-bake only) */
+  randomPitch?: number;
+  /** ± per note, 0..63 (0 = off) */
+  randomVelocity?: number;
+  /** range clamp 1..127 (defaults 1/127 = off) */
+  velMin?: number;
+  velMax?: number;
 }
 
 export interface Note {

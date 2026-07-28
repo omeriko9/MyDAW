@@ -320,7 +320,11 @@ the entire drag.
   (`lane:-1` = silent gap); `cmd/take.flatten {trackId, folderId}` → `{clipIds:[]}` bounces the
   comp to plain clips and removes the folder. All three are structural (graph rebuild).
 - **MIDI Modifiers** (`Track.midiMod`, MIDI/Instrument tracks; Cubase-style, playback-only):
-  `{transpose ±24, velocityShift ±63, velocityCompress 0.25..4}` — applied at bake time to the
+  `{transpose ±24, velocityShift ±63, velocityCompress 0.25..4, randomPitch 0..12,
+  randomVelocity 0..63, velMin/velMax 1..127}` — random offsets re-roll on every graph rebuild
+  (baked) / per event (live velocity); random PITCH is bake-only (a per-event roll would desync
+  the note ledger's release from its note-on); the velocity range clamps after the random.
+  Applied at bake time to the
   graph's note events (after the Transpose track) AND to live/injected thru in TrackNode
   (`applyMidiModRt`: note-offs transpose identically so the ledger's releases match; audition
   sounds like playback). Never written into clips or SMF exports. Patch via

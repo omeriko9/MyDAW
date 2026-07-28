@@ -2236,6 +2236,18 @@
       "additionalProperties": false,
       "description": "Cubase-style MIDI Modifiers (playback-only): transpose + velocity shaping applied at bake time and to live thru — never written into clips or SMF exports.",
       "properties": {
+        "randomPitch": {
+          "description": "± semitones per note, 0..12 (bake-only)",
+          "maximum": 12,
+          "minimum": 0,
+          "type": "number"
+        },
+        "randomVelocity": {
+          "description": "± velocity per note, 0..63",
+          "maximum": 63,
+          "minimum": 0,
+          "type": "number"
+        },
         "transpose": {
           "description": "semitones, -24..24",
           "maximum": 24,
@@ -2252,6 +2264,17 @@
           "description": "added to velocity after compression, -63..63",
           "maximum": 63,
           "minimum": -63,
+          "type": "number"
+        },
+        "velMax": {
+          "maximum": 127,
+          "minimum": 1,
+          "type": "number"
+        },
+        "velMin": {
+          "description": "velocity range clamp (applied after random)",
+          "maximum": 127,
+          "minimum": 1,
           "type": "number"
         }
       },
@@ -3960,9 +3983,29 @@
           "additionalProperties": false,
           "description": "kind \"midi\"/\"instrument\" — partial MIDI-modifiers patch; absent fields keep their values.",
           "properties": {
+            "randomPitch": {
+              "maximum": 12,
+              "minimum": 0,
+              "type": "number"
+            },
+            "randomVelocity": {
+              "maximum": 63,
+              "minimum": 0,
+              "type": "number"
+            },
             "transpose": {
               "maximum": 24,
               "minimum": -24,
+              "type": "number"
+            },
+            "velMax": {
+              "maximum": 127,
+              "minimum": 1,
+              "type": "number"
+            },
+            "velMin": {
+              "maximum": 127,
+              "minimum": 1,
               "type": "number"
             },
             "velocityCompress": {

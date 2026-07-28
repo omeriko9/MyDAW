@@ -368,6 +368,61 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
         </div>
       )}
 
+      {(isMidi || isInstrument) && (
+        <div className="insp-row">
+          <span
+            className="insp-label"
+            title="Random re-rolls per playback rebuild (pitch: playback only); the velocity range clamps last"
+          >
+            Rnd/Range
+          </span>
+          <NumberDrag
+            value={track.midiMod?.randomPitch ?? 0}
+            min={0}
+            max={12}
+            step={1}
+            format={(v) => `±${Math.round(v)} st`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { randomPitch: Math.round(v) } })}
+            width={48}
+            title="Random pitch per note (0 = off; playback only, not live thru)"
+          />
+          <NumberDrag
+            value={track.midiMod?.randomVelocity ?? 0}
+            min={0}
+            max={63}
+            step={1}
+            format={(v) => `±${Math.round(v)} vel`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { randomVelocity: Math.round(v) } })}
+            width={52}
+            title="Random velocity per note (0 = off)"
+          />
+          <NumberDrag
+            value={track.midiMod?.velMin ?? 1}
+            min={1}
+            max={127}
+            step={1}
+            format={(v) => `≥${Math.round(v)}`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { velMin: Math.round(v) } })}
+            width={40}
+            title="Velocity floor (range clamp)"
+          />
+          <NumberDrag
+            value={track.midiMod?.velMax ?? 127}
+            min={1}
+            max={127}
+            step={1}
+            format={(v) => `≤${Math.round(v)}`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { velMax: Math.round(v) } })}
+            width={40}
+            title="Velocity ceiling (range clamp)"
+          />
+        </div>
+      )}
+
       {!isFolder && (
         <div className="insp-row">
           <span className="insp-label">VCA</span>

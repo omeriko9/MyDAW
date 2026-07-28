@@ -451,7 +451,7 @@ async function main() {
   // MIDI Modifiers: partial patch + clamps round-trip on a midi track, rejected on audio
   {
     await req("cmd/track.set", { trackId: midiT.id, patch: { midiMod: { transpose: 40, velocityShift: -10 } } });
-    await req("cmd/track.set", { trackId: midiT.id, patch: { midiMod: { velocityCompress: 0.5 } } });
+    await req("cmd/track.set", { trackId: midiT.id, patch: { midiMod: { velocityCompress: 0.5, randomVelocity: 100, velMin: 90, velMax: 40 } } });
     const proj = (await req("session/hello", { clientName: "smoke" })).project;
     const mm = proj.tracks.find((t) => t.id === midiT.id)?.midiMod;
     const audioErr = await req("cmd/track.set", { trackId: audioT.id, patch: { midiMod: { transpose: 5 } } })
@@ -460,6 +460,8 @@ async function main() {
       mm?.transpose === 24 && // clamped from 40
       mm?.velocityShift === -10 && // survived the second (partial) patch
       mm?.velocityCompress === 0.5 &&
+      mm?.randomVelocity === 63 && // clamped from 100
+      mm?.velMin === 40 && mm?.velMax === 90 && // swapped min>max normalized
       typeof audioErr === "string" && audioErr.includes("bad_request");
     await req("edit/undo", {});
     await req("edit/undo", {});
