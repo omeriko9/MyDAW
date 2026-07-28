@@ -242,11 +242,27 @@ Caveat: synchronous stretch stalls on long clips — acceptable v1 (bounce prece
 > collapse it), cmd/clip.processAudio now appends non-destructively, cmd/clip.processChain
 > (addPlugin/remove/toggle/reorder/setParams/clear/makePermanent — clear restores the original
 > without rendering), BUILT-IN effects as offline processes (block-pumped, tails truncated),
-> Offline Processes… dialog (live list, per-op param re-edit). Still open from this swipe:
-> VST/out-of-process plugins as offline processes (throwaway-instance route), async recompute
-> with progress for long clips, per-entry plugin param UI. The derived-file leak is handled by
+> Offline Processes… dialog (live list, per-op param re-edit incl. plugin entries). Still open
+> from this swipe: VST/out-of-process plugins as offline processes (throwaway-instance route),
+> async recompute with progress for long clips. The derived-file leak is handled by
 > **cmd/media.removeUnused** (Project ▸ Remove Unused Media…, shipped 2026-07-28): preview →
 > undoable record removal → optional file deletion (clears undo, saved projects only).
+>
+> **DECIDED (Omer, 2026-07-28) — VST DOP state storage: Option A, INLINE in project.json.**
+> A VST chain entry stores its opaque state chunk base64-encoded in the ClipProcess entry
+> itself (e.g. `sparams["state"]` or a dedicated field) — NOT as a plugin-states/ side file.
+> Rationale: self-contained projects (copy the folder / the JSON and everything travels), no
+> file lifecycle (no Save-As copying, no orphans, no missing-file handling), undo works with
+> zero extra machinery. Accepted cost: project.json and the full-project undo snapshots
+> (before+after per edit, 200-entry stack) grow by the chunk size for every VST chain entry —
+> large-state plugins (multi-MB convolution/sampler states) will make every edit's snapshot
+> copy noticeably heavier. Implementation notes for the next session: (1) capture the chunk
+> when the entry is created (from the source insert via host getState, or a fresh instance's
+> default state); (2) replay = create throwaway instance → setState(chunk) → setOfflineMode →
+> block-pump → destroy (plan §7 route A; synchronous like bounce, or worker + busy guard);
+> (3) consider a size warning/log when a chunk exceeds ~1 MB so the snapshot cost is visible;
+> (4) mind agent-catalog schemas — ClipProcess.sparams is already free-form string→string, so
+> base64 fits without a schema break.
 
 The real Cubase differentiator: per-event, ordered, re-editable, non-destructive process history.
 
