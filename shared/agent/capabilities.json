@@ -2493,6 +2493,15 @@
         "clipId": {
           "type": "number"
         },
+        "target": {
+          "description": "starts (default; only mode with swing) | ends (snap note end, start kept) | lengths (round duration to grid multiples)",
+          "enum": [
+            "starts",
+            "ends",
+            "lengths"
+          ],
+          "type": "string"
+        },
         "grid": {
           "description": "grid in beats",
           "type": "number"

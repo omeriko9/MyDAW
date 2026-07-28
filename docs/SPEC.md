@@ -331,7 +331,11 @@ the entire drag.
   `cmd/track.set {patch:{midiMod:{...}}}` (partial merge, midi/instrument only, structural).
   UI: Inspector ▸ Track ▸ Modifiers (transpose / vel shift / vel compress drags).
 - `cmd/notes.edit {clipId, add:[Note], remove:[noteIds], update:[{noteId,patch}], cc?}` — one undo entry; the optional `cc {add, remove, update}` block mirrors `cmd/cc.edit` in the SAME entry so mixed note+controller functions (e.g. Pedals to Note Length) revert atomically
-- `cmd/notes.quantize {clipId, noteIds?:[], grid:<beats>, strength:0..1, swing:0..1}`
+- `cmd/notes.quantize {clipId, noteIds?:[], grid:<beats>, strength:0..1, swing:0..1,
+  target?:"starts"|"ends"|"lengths"}` — `starts` (default) is the only mode with swing;
+  `ends` snaps each note's END to the grid keeping its start; `lengths` rounds durations to
+  grid multiples (Cubase Q-panel length quantize). UI: piano-roll Functions ▸ Quantize
+  Ends / Quantize Lengths (toolbar strength applies)
 - `cmd/automation.set {trackId, paramRef, add:[{t,v,curve?}], remove:[pointIds], update:[{pointId,patch}]}`
   `paramRef`: `"volume"|"pan"|"send:<index>"|"plugin:<instanceId>:<paramId>"`. A set that leaves
   the lane with zero points removes the lane — lanes never persist empty. `add` also accepts the

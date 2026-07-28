@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "f9b8829eedb79eb5bc79dc2ae982521211af86dad6ff76f4523ecf0d84f9bc54";
+const char kAgentCatalogSha256[] = "aef0d0a331d004241d07fd6730ba4f54c56cd731c2f3a3d301d6c93799facf6a";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2500,6 +2500,15 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "properties": {
         "clipId": {
           "type": "number"
+        },
+        "target": {
+          "description": "starts (default; only mode with swing) | ends (snap note end, start kept) | lengths (round duration to grid multiples)",
+          "enum": [
+            "starts",
+            "ends",
+            "lengths"
+          ],
+          "type": "string"
         },
         "grid": {
           "description": "grid in beats",

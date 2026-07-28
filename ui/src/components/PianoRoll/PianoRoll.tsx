@@ -1872,6 +1872,26 @@ function Editor({ track, clip }: EditorProps) {
         ],
       },
       {
+        label: "Quantize Ends",
+        title: "Snap each note's END to the grid (starts stay put; uses the toolbar strength)",
+        onClick: () => {
+          const c = clipRef.current;
+          const sel = useStore.getState().selection.noteIds;
+          void quantizeNotes(c.id, stepRef.current, strengthPct / 100, 0,
+            sel.length > 0 ? sel : undefined, "ends").catch(() => {});
+        },
+      },
+      {
+        label: "Quantize Lengths",
+        title: "Round each note's duration to grid multiples (uses the toolbar strength)",
+        onClick: () => {
+          const c = clipRef.current;
+          const sel = useStore.getState().selection.noteIds;
+          void quantizeNotes(c.id, stepRef.current, strengthPct / 100, 0,
+            sel.length > 0 ? sel : undefined, "lengths").catch(() => {});
+        },
+      },
+      {
         label: "Fixed Lengths",
         title: "Every note gets the same length",
         submenu: [

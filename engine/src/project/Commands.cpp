@@ -3872,17 +3872,34 @@ json CommandProcessor::notesQuantize(const json& p, CmdResult& r) {
     const double strength = clampd(getOr<double>(p, "strength", 1.0), 0.0, 1.0);
     const double swing = clampd(getOr<double>(p, "swing", 0.0), 0.0, 1.0);
     const std::vector<uint64_t> noteIds = idArray(p, "noteIds"); // empty = all
+    // target: starts (default; the only mode with swing) | ends (snap the note END,
+    // start kept) | lengths (round the duration to grid multiples) — Cubase Q panel.
+    const std::string target = getOr(p, "target", "starts");
+    if (target != "starts" && target != "ends" && target != "lengths")
+        return r.fail("bad_request", "target must be \"starts\", \"ends\" or \"lengths\"");
 
     bool any = false;
     for (Note& n : mc->notes) {
         if (!noteIds.empty() && !containsId(noteIds, n.id))
             continue;
-        const double pos = n.startBeat;
-        const long long slot = llround(pos / grid);
-        double target = static_cast<double>(slot) * grid;
-        if (slot % 2 != 0)
-            target += swing * grid * 0.5; // odd slots pushed later
-        n.startBeat = std::max(0.0, pos + (target - pos) * strength); // starts only
+        if (target == "starts") {
+            const double pos = n.startBeat;
+            const long long slot = llround(pos / grid);
+            double tgt = static_cast<double>(slot) * grid;
+            if (slot % 2 != 0)
+                tgt += swing * grid * 0.5; // odd slots pushed later
+            n.startBeat = std::max(0.0, pos + (tgt - pos) * strength);
+        } else if (target == "ends") {
+            const double end = n.startBeat + n.lengthBeats;
+            const double tgt = std::llround(end / grid) * grid;
+            const double newEnd = end + (tgt - end) * strength;
+            n.lengthBeats = std::max(kMinNoteBeats, newEnd - n.startBeat);
+        } else { // lengths
+            const double tgt =
+                std::max(grid, std::llround(n.lengthBeats / grid) * grid);
+            n.lengthBeats =
+                std::max(kMinNoteBeats, n.lengthBeats + (tgt - n.lengthBeats) * strength);
+        }
         any = true;
     }
     if (!any) {

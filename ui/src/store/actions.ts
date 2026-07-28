@@ -268,6 +268,7 @@ export const quantizeNotes = (
   strength: number,
   swing: number,
   noteIds?: number[],
+  target?: "starts" | "ends" | "lengths",
 ) =>
   ws.request("cmd/notes.quantize", {
     clipId,
@@ -275,6 +276,7 @@ export const quantizeNotes = (
     strength,
     swing,
     ...(noteIds !== undefined ? { noteIds } : {}),
+    ...(target !== undefined && target !== "starts" ? { target } : {}),
   });
 
 export const setAutomation = (

@@ -418,6 +418,29 @@ async function main() {
       `dissolve=${dvOk} (${dvTracks.length} tracks, srcMuted=${srcMuted}) merge=${mgOk} (${mt?.clips?.[0]?.notes?.length ?? 0} notes) smf=${emOk}`);
   }
 
+  // quantize ends/lengths (target modes)
+  {
+    const findMc = (p) => p.tracks.find((t) => t.id === midiT.id).clips.find((c) => c.id === mclip.id);
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const n0 = findMc(proj).notes.map((n) => ({ ...n }));
+    // ends: note at 0 len 1.1ish? our notes are exact; nudge one first
+    await req("cmd/notes.edit", { clipId: mclip.id, update: [{ noteId: n0[0].id, patch: { lengthBeats: 1.3 } }] });
+    await req("cmd/notes.quantize", { clipId: mclip.id, grid: 0.5, strength: 1, swing: 0, noteIds: [n0[0].id], target: "ends" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const endsLen = findMc(proj).notes.find((n) => n.id === n0[0].id).lengthBeats;
+    const endsOk = Math.abs(endsLen - 1.5) < 1e-9; // end 1.3 → snapped to 1.5
+    await req("cmd/notes.edit", { clipId: mclip.id, update: [{ noteId: n0[0].id, patch: { lengthBeats: 0.8 } }] });
+    await req("cmd/notes.quantize", { clipId: mclip.id, grid: 0.5, strength: 1, swing: 0, noteIds: [n0[0].id], target: "lengths" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const lenQ = findMc(proj).notes.find((n) => n.id === n0[0].id).lengthBeats;
+    const lensOk = Math.abs(lenQ - 1.0) < 1e-9; // 0.8 → nearest grid multiple 1.0
+    const badTarget = await req("cmd/notes.quantize", { clipId: mclip.id, grid: 0.5, strength: 1, swing: 0, target: "nope" })
+      .then(() => null).catch((e) => e.message);
+    for (let i = 0; i < 4; i++) await req("edit/undo", {}); // restore original lengths
+    report("notes.quantize target ends/lengths", endsOk && lensOk && typeof badTarget === "string",
+      `ends 1.3->${endsLen} lengths 0.8->${lenQ} badTarget=${badTarget ? "rejected" : "ACCEPTED?!"}`);
+  }
+
   // sizing modes: resizeStretch (MIDI scales content) + resize moveContents (audio)
   {
     let proj = (await req("session/hello", { clientName: "smoke" })).project;

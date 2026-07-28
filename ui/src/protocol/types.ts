@@ -1016,6 +1016,8 @@ export interface CcEditRequest {
 
 export interface NotesQuantizeRequest {
   clipId: number;
+  /** starts (default; only mode with swing) | ends | lengths */
+  target?: "starts" | "ends" | "lengths";
   noteIds?: number[];
   /** grid in beats */
   grid: number;

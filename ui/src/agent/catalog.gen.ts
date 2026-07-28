@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "f9b8829eedb79eb5bc79dc2ae982521211af86dad6ff76f4523ecf0d84f9bc54";
+export const AGENT_CATALOG_SHA256 = "aef0d0a331d004241d07fd6730ba4f54c56cd731c2f3a3d301d6c93799facf6a";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2520,6 +2520,15 @@ export const AGENT_CATALOG: AgentCatalog = {
       "properties": {
         "clipId": {
           "type": "number"
+        },
+        "target": {
+          "description": "starts (default; only mode with swing) | ends (snap note end, start kept) | lengths (round duration to grid multiples)",
+          "enum": [
+            "starts",
+            "ends",
+            "lengths"
+          ],
+          "type": "string"
         },
         "grid": {
           "description": "grid in beats",
