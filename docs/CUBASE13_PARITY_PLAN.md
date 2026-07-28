@@ -131,6 +131,14 @@ Deferred from this swipe: Dissolve Part / Merge-in-Loop / Export MIDI Loop (clip
 
 ### Swipe 2 — Fades done right: curves, crossfades, clip envelope 🌊 — **Cost: L (≈1.5w) · Value: ★★★★★ · ROI: very high (explicit pain point)**
 
+> **STATUS: SHIPPED 2026-07-28.** Fade curve shapes (5, incl. equal-power) on model + RT render +
+> timeline/ClipEditor drawing; fade dialog on handle double-click; curve selects in Inspector +
+> ClipEditor menu; `cmd/clip.crossfade` (X key + menu); non-destructive gain envelope with
+> ClipEditor edit mode (click add / drag / right-click delete) + split-rescaling. Deferred from
+> this swipe: the transient-fade-drag param-ring optimization (fade drags still rebuild the graph
+> per message — pre-existing behavior), and ClipEditor fade-length drag preview of curves during
+> the drag itself uses committed curve (cosmetic).
+
 Why together: all four items touch the same model fields (`AudioClip`), the same render hook (`TrackNode::renderClipsRt`), and the same drawing code (`clipRender.ts drawFades`).
 
 | Task | Cost | Notes |

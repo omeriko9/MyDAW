@@ -66,6 +66,16 @@ json toJson(const AudioClip& c) {
         {"fadeInSec", c.fadeInSec},
         {"fadeOutSec", c.fadeOutSec},
     };
+    if (c.fadeInCurve != FadeCurve::Linear)
+        j["fadeInCurve"] = fadeCurveName(c.fadeInCurve);
+    if (c.fadeOutCurve != FadeCurve::Linear)
+        j["fadeOutCurve"] = fadeCurveName(c.fadeOutCurve);
+    if (!c.env.empty()) {
+        json env = json::array();
+        for (const ClipEnvPoint& p : c.env)
+            env.push_back(json{{"pos", p.pos}, {"value", p.value}});
+        j["env"] = std::move(env);
+    }
     if (c.muted)
         j["muted"] = true;
     if (!c.color.empty())
@@ -747,6 +757,20 @@ bool fromJson(const json& j, Clip& out, std::string* err) {
         c.gain = getOr<double>(j, "gain", 1.0);
         c.fadeInSec = getOr<double>(j, "fadeInSec", 0.0);
         c.fadeOutSec = getOr<double>(j, "fadeOutSec", 0.0);
+        c.fadeInCurve = fadeCurveFromName(getOr(j, "fadeInCurve", "linear"));
+        c.fadeOutCurve = fadeCurveFromName(getOr(j, "fadeOutCurve", "linear"));
+        if (hasKey(j, "env") && j.find("env")->is_array()) { // optional, tolerant
+            for (const json& pj : *j.find("env")) {
+                if (!pj.is_object())
+                    continue;
+                ClipEnvPoint p;
+                p.pos = std::clamp(getOr<double>(pj, "pos", 0.0), 0.0, 1.0);
+                p.value = std::clamp(getOr<double>(pj, "value", 1.0), 0.0, 2.0);
+                c.env.push_back(p);
+            }
+            std::sort(c.env.begin(), c.env.end(),
+                      [](const ClipEnvPoint& a, const ClipEnvPoint& b) { return a.pos < b.pos; });
+        }
         c.muted = getOr<bool>(j, "muted", false);
         c.color = getOr(j, "color", "");
         out = std::move(c);

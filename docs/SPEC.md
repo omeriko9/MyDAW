@@ -224,7 +224,18 @@ the entire drag.
   Process (Fade In/Out, Gain ±1/3/6 dB, Normalize 0/−1/−3/−6 dBFS, Reverse, Invert Phase,
   Remove DC Offset, Silence).
 - `cmd/clip.delete {clipIds:[]}` ; `cmd/clip.duplicate {clipIds:[]}` → `{clips:[]}` ;
-  `cmd/clip.set {clipId, patch:{name?,color?,gain?,fadeInSec?,fadeOutSec?,muted?}}`
+  `cmd/clip.set {clipId, patch:{name?,color?,gain?,fadeInSec?,fadeOutSec?,fadeInCurve?,
+  fadeOutCurve?,env?,muted?}}` — fade curves are `linear|expo|log|sCurve|eqPower` (gain = f(t),
+  fade-outs evaluate f on the remaining fraction); `env` REPLACES the clip's non-destructive gain
+  envelope (`[{pos 0..1, value 0..2}]`, [] clears; unity when empty), applied per sample after
+  fades in `TrackNode::renderClipsRt` with linear interpolation. Splitting an audio clip rescales
+  each half's envelope and pins the boundary value so the material keeps its gain shape.
+- `cmd/clip.crossfade {clipIds:[a,b], curve?}` → `{overlapSec}` (audio, same track): symmetric
+  crossfade over the timeline overlap — earlier clip gets `fadeOutSec=overlap`, later gets
+  `fadeInSec=overlap`, both with `curve` (default `eqPower`, which sums to unity power). Fails
+  `bad_request` when the clips don't overlap. UI: X key / clip context menu with 2 clips selected;
+  fade dialog on fade-handle double-click; curves editable in Inspector + Clip Editor (which also
+  edits the envelope via its Envelope mode: click adds, drag moves, right-click deletes).
 - **Comping / take folders** (see §6 Comping): `cmd/take.create {trackId, clipIds:[], name?}` →
   `{folder}` moves the listed clips off the flat clip list into a new take folder (one lane per
   clip); `cmd/take.setComp {trackId, folderId, activeLane?|comp:[{startBeat,lane}]}` picks the
@@ -525,7 +536,8 @@ PluginInstance = {instanceId, uid, format, path, bitness, name, version?: string
   when none; wire name "source" in project/getUnresolvedPlugins*/, bypass: bool, wetDry: number,
   stateFile?: string /*plugin-states/<instanceId>.bin*/, paramValues?: {[paramId]: number}}
 AudioClip = {id, type:"audio", name, startBeat, assetId, srcOffsetSamples, lengthSamples,
-  gain: number /*linear*/, fadeInSec, fadeOutSec, muted?, color?}
+  gain: number /*linear*/, fadeInSec, fadeOutSec, fadeInCurve?, fadeOutCurve?,
+  env?: [{pos,value}], muted?, color?}
 MidiClip  = {id, type:"midi", name, startBeat, lengthBeats, muted?, color?,
   notes: [{id, pitch: 0..127, velocity: 1..127, startBeat /*rel to clip*/, lengthBeats, channel?:0}]}
 ```

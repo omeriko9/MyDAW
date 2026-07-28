@@ -269,6 +269,44 @@ async function main() {
   const gotAsset = up.ok && Array.isArray(upJson.assets ?? upJson.payload?.assets ?? null) !== false;
   report("upload wav -> asset+clip", up.ok, `http ${up.status} ${JSON.stringify(upJson).slice(0, 120)}`);
 
+  // crossfade (overlap → symmetric eqPower fades) + fade curves + gain envelope
+  {
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    let aud = proj.tracks.find((t) => t.id === audioT.id);
+    const srcClip = aud?.clips?.find((c) => c.type === "audio");
+    let ok = false;
+    let detail = "no audio clip from upload";
+    if (srcClip) {
+      const dup = (await req("cmd/clip.duplicate", { clipIds: [srcClip.id], atSource: true })).clips?.[0];
+      await req("cmd/clip.move", { clipIds: [dup.id], deltaBeats: 2 });
+      const xf = await req("cmd/clip.crossfade", { clipIds: [srcClip.id, dup.id] });
+      // non-overlap rejection: crossfading twice is fine (idempotent), but two far-apart
+      // clips must fail — move the dup away, expect bad_request, move it back
+      await req("cmd/clip.move", { clipIds: [dup.id], deltaBeats: 100 });
+      const farErr = await req("cmd/clip.crossfade", { clipIds: [srcClip.id, dup.id] })
+        .then(() => null).catch((e) => e.message);
+      await req("cmd/clip.set", { clipId: srcClip.id, patch: {
+        fadeInCurve: "sCurve",
+        env: [{ pos: 0, value: 1 }, { pos: 0.5, value: 0.25 }, { pos: 1, value: 1 }],
+      } });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      aud = proj.tracks.find((t) => t.id === audioT.id);
+      const c1 = aud.clips.find((c) => c.id === srcClip.id);
+      const c2 = aud.clips.find((c) => c.id === dup.id);
+      ok =
+        xf.overlapSec > 0 &&
+        Math.abs(c1.fadeOutSec - xf.overlapSec) < 1e-6 &&
+        Math.abs(c2.fadeInSec - xf.overlapSec) < 1e-6 &&
+        c1.fadeOutCurve === "eqPower" &&
+        c2.fadeInCurve === "eqPower" &&
+        typeof farErr === "string" && farErr.includes("bad_request") &&
+        c1.fadeInCurve === "sCurve" &&
+        (c1.env?.length ?? 0) === 3 && Math.abs(c1.env[1].value - 0.25) < 1e-9;
+      detail = `overlap=${xf.overlapSec?.toFixed(3)} out=${c1?.fadeOutSec?.toFixed(3)}/${c1?.fadeOutCurve} in=${c2?.fadeInSec?.toFixed(3)}/${c2?.fadeInCurve} farErr=${farErr} inCurve=${c1?.fadeInCurve} env=${c1?.env?.length ?? 0}`;
+    }
+    report("clip.crossfade + fade curves + env round-trip", ok, detail);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

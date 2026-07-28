@@ -378,6 +378,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                             static_cast<int64_t>(a->fadeInSec * sampleRate + 0.5);
                         rc.fadeOutSamples =
                             static_cast<int64_t>(a->fadeOutSec * sampleRate + 0.5);
+                        rc.fadeInCurve = static_cast<uint8_t>(a->fadeInCurve);
+                        rc.fadeOutCurve = static_cast<uint8_t>(a->fadeOutCurve);
+                        for (const ClipEnvPoint& p : a->env)
+                            rc.env.emplace_back(
+                                static_cast<int64_t>(p.pos * static_cast<double>(
+                                                                 a->lengthSamples) +
+                                                     0.5),
+                                static_cast<float>(p.value));
                         cfg.audioClips.push_back(rc);
                     } else if (const MidiClip* mc = asMidi(&c)) {
                         if (mc->muted)
@@ -498,6 +506,18 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                     ? static_cast<int64_t>(a->fadeInSec * sampleRate + 0.5) : 0;
                                 rc.fadeOutSamples = ne == ce
                                     ? static_cast<int64_t>(a->fadeOutSec * sampleRate + 0.5) : 0;
+                                rc.fadeInCurve = static_cast<uint8_t>(a->fadeInCurve);
+                                rc.fadeOutCurve = static_cast<uint8_t>(a->fadeOutCurve);
+                                // Envelope positions are normalized over the FULL clip; re-anchor
+                                // into the comp window's slice (points outside the window still
+                                // shape the interpolation across it).
+                                for (const ClipEnvPoint& p : a->env)
+                                    rc.env.emplace_back(
+                                        static_cast<int64_t>(p.pos * static_cast<double>(
+                                                                         a->lengthSamples) +
+                                                             0.5) -
+                                            (ns - cs),
+                                        static_cast<float>(p.value));
                                 cfg.audioClips.push_back(rc);
                             } else if (const MidiClip* mc = asMidi(&c)) {
                                 if (mc->muted)

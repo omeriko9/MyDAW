@@ -157,6 +157,16 @@ export interface MidiCc {
   value: number;
 }
 
+/** Fade shape: gain = f(progress); eqPower pairs sum to unity power (crossfade default). */
+export type FadeCurve = "linear" | "expo" | "log" | "sCurve" | "eqPower";
+
+/** Non-destructive clip gain envelope point: pos normalized 0..1 across the clip's
+ *  audible span, value linear gain 0..2 (1 = unity). */
+export interface ClipEnvPoint {
+  pos: number;
+  value: number;
+}
+
 export interface AudioClip {
   id: number;
   type: "audio";
@@ -169,6 +179,11 @@ export interface AudioClip {
   gain: number;
   fadeInSec: number;
   fadeOutSec: number;
+  /** default "linear" when absent */
+  fadeInCurve?: FadeCurve;
+  fadeOutCurve?: FadeCurve;
+  /** gain envelope points sorted by pos; absent/[] = none */
+  env?: ClipEnvPoint[];
   muted?: boolean;
   color?: string;
 }
@@ -865,7 +880,17 @@ export interface ClipPatch {
   gain?: number;
   fadeInSec?: number;
   fadeOutSec?: number;
+  fadeInCurve?: FadeCurve;
+  fadeOutCurve?: FadeCurve;
+  /** REPLACES the whole gain envelope; [] clears it. */
+  env?: ClipEnvPoint[];
   muted?: boolean;
+}
+
+/** Exactly two audio clips on one track; they must overlap on the timeline. */
+export interface ClipCrossfadeRequest {
+  clipIds: number[];
+  curve?: FadeCurve;
 }
 
 export interface ClipSetRequest {
@@ -1752,6 +1777,7 @@ export interface RequestMap {
   "cmd/clip.resize": { req: ClipResizeRequest; reply: EmptyObject };
   "cmd/clip.split": { req: ClipSplitRequest; reply: ClipSplitReply };
   "cmd/clip.join": { req: ClipJoinRequest; reply: ClipJoinReply };
+  "cmd/clip.crossfade": { req: ClipCrossfadeRequest; reply: { overlapSec: number } };
   "cmd/clip.delete": { req: ClipDeleteRequest; reply: EmptyObject };
   "cmd/clip.duplicate": { req: ClipDuplicateRequest; reply: ClipDuplicateReply };
   "cmd/clip.set": { req: ClipSetRequest; reply: EmptyObject };
@@ -1940,6 +1966,7 @@ export const ClipCmd = {
   resize: "cmd/clip.resize",
   split: "cmd/clip.split",
   join: "cmd/clip.join",
+  crossfade: "cmd/clip.crossfade",
   delete: "cmd/clip.delete",
   duplicate: "cmd/clip.duplicate",
   set: "cmd/clip.set",

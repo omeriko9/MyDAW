@@ -15,8 +15,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AudioClip, Asset, Project, Track } from "../../protocol/types";
+import type { AudioClip, Asset, ClipEnvPoint, FadeCurve, Project, Track } from "../../protocol/types";
 import { isAudioClip } from "../../protocol/types";
+import { FADE_CURVES, FADE_CURVE_LABELS, fadeGain } from "../../lib/fadeCurves";
 import { useStore } from "../../store/store";
 import { commitParam, resizeClip, setClip, splitClips, transientParam } from "../../store/actions";
 import { paneVisible, registerKeyContext, zoomPane, zoomToFitPane } from "../../lib/keyboard";
@@ -27,7 +28,7 @@ import { clamp, EDGE_HIT_PX, FADE_HIT_PX, themeVar, withAlpha } from "../Timelin
 import { peaksFailed, peaksFor } from "../Timeline/peaksCache";
 import { FloatingInput } from "../Timeline/bits";
 import { Icon } from "../common/icons";
-import { openContextMenu } from "../common/ContextMenu";
+import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { ZoomPill } from "../common/ZoomPill";
 import { GainDbDrag, SecondsDrag } from "../Inspector/fields";
@@ -56,6 +57,7 @@ interface CeColors {
   accent: string;
   playhead: string;
   danger: string;
+  warn: string;
 }
 
 function ceColors(): CeColors {
@@ -68,6 +70,7 @@ function ceColors(): CeColors {
     accent: themeVar("--accent"),
     playhead: themeVar("--playhead"),
     danger: themeVar("--danger"),
+    warn: themeVar("--warn"),
   };
 }
 
@@ -94,6 +97,7 @@ type Drag =
       moved: boolean;
     }
   | { kind: "fade"; which: "in" | "out"; sec: number; moved: boolean }
+  | { kind: "env"; idx: number; pts: ClipEnvPoint[]; moved: boolean }
   | { kind: "cursor" };
 
 interface Snap {
@@ -134,6 +138,8 @@ export default function ClipEditor() {
   const [lod0, setLod0] = useState<PeakLod | null>(null);
   /** Rename input opened from the context menu (screen coords). */
   const [renameAt, setRenameAt] = useState<{ x: number; y: number } | null>(null);
+  /** Envelope edit mode: clicks add/drag gain-envelope points instead of the cursor. */
+  const [envMode, setEnvMode] = useState(false);
 
   const viewRef = useRef<View | null>(null);
   const fitForRef = useRef<number | null>(null); // clip id the view was last fitted for
@@ -141,6 +147,9 @@ export default function ClipEditor() {
   /** in-gesture values so the waveform tracks toolbar/handle drags before the engine echo */
   const gainPreviewRef = useRef<number | null>(null);
   const fadePreviewRef = useRef<{ fadeIn?: number; fadeOut?: number }>({});
+  const envPreviewRef = useRef<ClipEnvPoint[] | null>(null);
+  const envModeRef = useRef(false);
+  envModeRef.current = envMode;
   const sizeRef = useRef({ width: 0, height: 0 });
 
   const stateRef = useRef<Snap>({ project: null, track: null, clip: null, asset: null, sr, cursorSmp: null });
@@ -177,6 +186,7 @@ export default function ClipEditor() {
     dragRef.current = null;
     gainPreviewRef.current = null;
     fadePreviewRef.current = {};
+    envPreviewRef.current = null;
   }, [clipId]);
 
   // engine echo landed → drop the matching local preview
@@ -192,6 +202,10 @@ export default function ClipEditor() {
     fadePreviewRef.current.fadeOut = undefined;
     schedule();
   }, [clip?.fadeOutSec, schedule]);
+  useEffect(() => {
+    envPreviewRef.current = null;
+    schedule();
+  }, [clip?.env, schedule]);
 
   /* ------------------------------------------------- lod-0 peaks (Normalize) */
 
@@ -371,36 +385,98 @@ export default function ClipEditor() {
       ctx.fill();
     }
 
-    // fade ramps + corner handles (same look as Timeline/clipRender.drawFades)
+    // fade curves + corner handles (same shapes as Timeline/clipRender.drawFades):
+    // y = h at gain 0 up to y = 0 at gain 1, sampled from the clip's curve shape
+    const SEGS = 32;
+    const fadeY = (curve: FadeCurve | undefined, t: number): number => h * (1 - fadeGain(curve, t));
     if (inPx > 0.5) {
       ctx.beginPath();
       ctx.moveTo(x0, 0);
       ctx.lineTo(x0 + inPx, 0);
-      ctx.lineTo(x0, h);
+      for (let k = SEGS; k >= 0; k--) {
+        const t = k / SEGS;
+        ctx.lineTo(x0 + inPx * t, fadeY(c.fadeInCurve, t));
+      }
       ctx.closePath();
       ctx.fillStyle = "rgba(0,0,0,0.30)";
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(x0, h);
-      ctx.lineTo(x0 + inPx, 0);
+      for (let k = 0; k <= SEGS; k++) {
+        const t = k / SEGS;
+        const px = x0 + inPx * t;
+        const py = fadeY(c.fadeInCurve, t);
+        if (k === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
       ctx.strokeStyle = withAlpha(colors.playhead, 0.7);
       ctx.lineWidth = 1;
       ctx.stroke();
     }
     if (outPx > 0.5) {
+      // t = remaining fraction: 1 at the fade start (left), 0 at the clip end (right)
       ctx.beginPath();
-      ctx.moveTo(x1, 0);
-      ctx.lineTo(x1 - outPx, 0);
-      ctx.lineTo(x1, h);
+      ctx.moveTo(x1 - outPx, 0);
+      ctx.lineTo(x1, 0);
+      for (let k = 0; k <= SEGS; k++) {
+        const t = k / SEGS;
+        ctx.lineTo(x1 - outPx * t, fadeY(c.fadeOutCurve, t));
+      }
       ctx.closePath();
       ctx.fillStyle = "rgba(0,0,0,0.30)";
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(x1 - outPx, 0);
-      ctx.lineTo(x1, h);
+      for (let k = SEGS; k >= 0; k--) {
+        const t = k / SEGS;
+        const px = x1 - outPx * t;
+        const py = fadeY(c.fadeOutCurve, t);
+        if (k === SEGS) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
       ctx.strokeStyle = withAlpha(colors.playhead, 0.7);
       ctx.lineWidth = 1;
       ctx.stroke();
+    }
+
+    // gain envelope — value 0..2 maps bottom..top (unity = mid); editable in envMode
+    {
+      const pts = envPreviewRef.current ?? c.env ?? [];
+      if (pts.length > 0 || envModeRef.current) {
+        const yFor = (val: number): number => h * (1 - clamp(val, 0, 2) / 2);
+        const xFor = (pos: number): number => x0 + clamp(pos, 0, 1) * (x1 - x0);
+        ctx.save();
+        if (envModeRef.current) {
+          // unity reference line while editing
+          ctx.strokeStyle = withAlpha(colors.textFaint, 0.5);
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(Math.max(0, x0), h / 2);
+          ctx.lineTo(Math.min(w, x1), h / 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        if (pts.length > 0) {
+          ctx.beginPath();
+          ctx.moveTo(Math.max(0, x0), yFor(pts[0].value));
+          for (const p of pts) ctx.lineTo(xFor(p.pos), yFor(p.value));
+          ctx.lineTo(Math.min(w, x1), yFor(pts[pts.length - 1].value));
+          ctx.strokeStyle = withAlpha(colors.warn, envModeRef.current ? 1 : 0.75);
+          ctx.lineWidth = envModeRef.current ? 1.6 : 1.2;
+          ctx.stroke();
+          const hr = envModeRef.current ? 4.5 : 3;
+          ctx.fillStyle = colors.warn;
+          ctx.strokeStyle = "rgba(0,0,0,0.6)";
+          ctx.lineWidth = 1;
+          for (const p of pts) {
+            const px = xFor(p.pos);
+            const py = yFor(p.value);
+            ctx.beginPath();
+            ctx.arc(px, py, hr, 0, Math.PI * 2);
+            ctx.fill();
+            if (envModeRef.current) ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
     }
     if (x1 - x0 >= 24) {
       const hs = 7;
@@ -490,6 +566,44 @@ export default function ClipEditor() {
     setCursorSmp(smp);
   };
 
+  /* -- envelope editing (envMode): value 0..2 maps bottom..top, pos 0..1 over clip -- */
+
+  const envPtsNow = (): ClipEnvPoint[] =>
+    envPreviewRef.current ?? stateRef.current.clip?.env ?? [];
+
+  const envHitIndex = (x: number, y: number): number => {
+    const g = geomNow();
+    if (!g) return -1;
+    const h = Math.max(1, sizeRef.current.height);
+    const pts = envPtsNow();
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const px = g.x0 + clamp(pts[i].pos, 0, 1) * (g.x1 - g.x0);
+      const py = h * (1 - clamp(pts[i].value, 0, 2) / 2);
+      if (Math.abs(x - px) <= 6 && Math.abs(y - py) <= 6) return i;
+    }
+    return -1;
+  };
+
+  const envPointFromXY = (x: number, y: number): ClipEnvPoint | null => {
+    const g = geomNow();
+    if (!g || g.x1 <= g.x0) return null;
+    const h = Math.max(1, sizeRef.current.height);
+    return {
+      pos: clamp((x - g.x0) / (g.x1 - g.x0), 0, 1),
+      value: clamp(2 * (1 - y / h), 0, 2),
+    };
+  };
+
+  const commitEnv = (pts: ClipEnvPoint[]): void => {
+    const c = stateRef.current.clip;
+    if (!c) return;
+    const rounded = pts.map((p) => ({
+      pos: Math.round(p.pos * 10000) / 10000,
+      value: Math.round(p.value * 1000) / 1000,
+    }));
+    fire(setClip(c.id, { env: rounded }));
+  };
+
   /** Smallest allowed clip length in samples (mirrors the timeline's 1/16-beat floor). */
   const minLenSamples = (c: AudioClip, proj: Project): number => {
     const secPerBeat = 60 / Math.max(1e-6, bpmAtBeat(c.startBeat, proj.tempoMap));
@@ -505,6 +619,23 @@ export default function ClipEditor() {
     const y = localY(e);
     const zone = zoneAt(x, y);
 
+    if (envModeRef.current && zone !== "fadeIn" && zone !== "fadeOut") {
+      // Envelope mode: drag an existing point, or add one where clicked and drag it.
+      const hitIdx = envHitIndex(x, y);
+      if (hitIdx >= 0) {
+        dragRef.current = { kind: "env", idx: hitIdx, pts: [...envPtsNow()], moved: false };
+      } else {
+        const np = envPointFromXY(x, y);
+        if (np) {
+          const pts = [...envPtsNow(), np].sort((p, q) => p.pos - q.pos);
+          dragRef.current = { kind: "env", idx: pts.indexOf(np), pts, moved: true };
+          envPreviewRef.current = pts;
+        }
+      }
+      e.currentTarget.setPointerCapture(e.pointerId);
+      schedule();
+      return;
+    }
     if (zone === "fadeIn" || zone === "fadeOut") {
       const which = zone === "fadeIn" ? "in" : "out";
       const sec =
@@ -551,6 +682,20 @@ export default function ClipEditor() {
     switch (d.kind) {
       case "cursor": {
         setCursorFromX(x);
+        schedule();
+        return;
+      }
+      case "env": {
+        d.moved = true;
+        const np = envPointFromXY(x, y);
+        if (!np) return;
+        const pts = [...d.pts];
+        // keep order: clamp the dragged point's pos between its neighbors
+        const lo = d.idx > 0 ? pts[d.idx - 1].pos : 0;
+        const hi = d.idx < pts.length - 1 ? pts[d.idx + 1].pos : 1;
+        pts[d.idx] = { pos: clamp(np.pos, lo, hi), value: np.value };
+        d.pts = pts;
+        envPreviewRef.current = pts;
         schedule();
         return;
       }
@@ -608,6 +753,11 @@ export default function ClipEditor() {
       return;
     }
 
+    if (d.kind === "env") {
+      if (d.moved) commitEnv(d.pts);
+      schedule();
+      return;
+    }
     if (d.kind === "fade") {
       if (d.moved) {
         fire(
@@ -760,8 +910,41 @@ export default function ClipEditor() {
     e.preventDefault();
     const c = stateRef.current.clip;
     if (!c) return;
+    // envelope mode: right-click a point deletes it outright
+    if (envModeRef.current) {
+      const idx = envHitIndex(localX(e), localY(e));
+      if (idx >= 0) {
+        const pts = envPtsNow().filter((_, i) => i !== idx);
+        envPreviewRef.current = pts;
+        commitEnv(pts);
+        schedule();
+        return;
+      }
+    }
+    const curveSub = (which: "in" | "out"): MenuEntry[] =>
+      FADE_CURVES.map((cv) => ({
+        label: FADE_CURVE_LABELS[cv],
+        checked: ((which === "in" ? c.fadeInCurve : c.fadeOutCurve) ?? "linear") === cv,
+        onClick: () =>
+          fire(setClip(c.id, which === "in" ? { fadeInCurve: cv } : { fadeOutCurve: cv })),
+      }));
     const noFades = c.fadeInSec <= 0 && c.fadeOutSec <= 0;
     openContextMenu(e.clientX, e.clientY, [
+      {
+        label: "Edit Envelope",
+        checked: envModeRef.current,
+        title: "Click adds gain-envelope points; drag moves them; right-click deletes",
+        onClick: () => setEnvMode(!envModeRef.current),
+      },
+      {
+        label: "Clear Envelope",
+        disabled: (c.env?.length ?? 0) === 0,
+        title: (c.env?.length ?? 0) === 0 ? "No envelope points" : "Remove all gain-envelope points",
+        onClick: () => fire(setClip(c.id, { env: [] })),
+      },
+      { label: "Fade-In Curve", submenu: curveSub("in") },
+      { label: "Fade-Out Curve", submenu: curveSub("out") },
+      "separator",
       {
         label: "Split at Cursor",
         icon: "split",
@@ -904,6 +1087,18 @@ export default function ClipEditor() {
         />
 
         <span className="ce-sep" />
+        <button
+          type="button"
+          className={"btn" + (envMode ? " primary" : "")}
+          title={
+            envMode
+              ? "Envelope mode ON — click adds points, drag moves, right-click deletes"
+              : "Edit the clip's non-destructive gain envelope"
+          }
+          onClick={() => setEnvMode((v) => !v)}
+        >
+          Envelope
+        </button>
         <button
           type="button"
           className="btn"

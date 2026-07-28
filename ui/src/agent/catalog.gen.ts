@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "20b159e9415d16c9446bfc73f8638c28d074dcdddce17cc86f24df1d5bea8850";
+export const AGENT_CATALOG_SHA256 = "bc7c5c2c0360952ee106bc855c86eefc9b51a93a39011d03ee24383af89ce28c";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -258,8 +258,21 @@ export const AGENT_CATALOG: AgentCatalog = {
         "color": {
           "type": "string"
         },
+        "env": {
+          "description": "non-destructive gain envelope: pos normalized 0..1 over the clip, value linear gain 0..2 (1 = unity); [] / absent = none",
+          "items": {
+            "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "fadeInCurve": {
+          "$ref": "#/schemas/FadeCurve"
+        },
         "fadeInSec": {
           "type": "number"
+        },
+        "fadeOutCurve": {
+          "$ref": "#/schemas/FadeCurve"
         },
         "fadeOutSec": {
           "type": "number"
@@ -1048,14 +1061,82 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "ClipCrossfadeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "overlapSec": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "overlapSec"
+      ],
+      "type": "object"
+    },
+    "ClipCrossfadeRequest": {
+      "additionalProperties": false,
+      "description": "exactly two audio clips on one track; they must overlap on the timeline",
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "curve": {
+          "$ref": "#/schemas/FadeCurve"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipEnvPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "normalized position 0..1 across the clip's audible span",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "value": {
+          "description": "linear gain 0..2 (1 = unity)",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "pos",
+        "value"
+      ],
+      "type": "object"
+    },
     "ClipPatch": {
       "additionalProperties": false,
       "properties": {
         "color": {
           "type": "string"
         },
+        "env": {
+          "description": "REPLACES the whole gain envelope; [] clears it",
+          "items": {
+            "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "fadeInCurve": {
+          "$ref": "#/schemas/FadeCurve"
+        },
         "fadeInSec": {
           "type": "number"
+        },
+        "fadeOutCurve": {
+          "$ref": "#/schemas/FadeCurve"
         },
         "fadeOutSec": {
           "type": "number"
@@ -1465,6 +1546,17 @@ export const AGENT_CATALOG: AgentCatalog = {
         "format"
       ],
       "type": "object"
+    },
+    "FadeCurve": {
+      "description": "fade shape: gain = f(progress). eqPower pairs sum to unity power (crossfade default).",
+      "enum": [
+        "linear",
+        "expo",
+        "log",
+        "sCurve",
+        "eqPower"
+      ],
+      "type": "string"
     },
     "GetDevicesReply": {
       "additionalProperties": false,
@@ -4881,6 +4973,43 @@ export const AGENT_CATALOG: AgentCatalog = {
                 "lengthBeats": 1,
                 "velocity": 100
               }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.crossfade",
+      "category": "clips",
+      "description": "Crossfade two overlapping audio clips on one track: fade-out on the earlier, fade-in on the later, spanning the overlap (equal-power default).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipCrossfadeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipCrossfadeReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
             ]
           }
         }
@@ -9559,6 +9688,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/chord.set",
   "cmd/clip.addAudio",
   "cmd/clip.addMidi",
+  "cmd/clip.crossfade",
   "cmd/clip.delete",
   "cmd/clip.duplicate",
   "cmd/clip.join",
@@ -9694,6 +9824,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/chord.set",
   "cmd/clip.addAudio",
   "cmd/clip.addMidi",
+  "cmd/clip.crossfade",
   "cmd/clip.delete",
   "cmd/clip.duplicate",
   "cmd/clip.join",
@@ -9883,6 +10014,10 @@ export const REQUEST_COVERAGE = {
   "cmd/clip.join": {
     "kind": "operation",
     "operation": "cmd/clip.join"
+  },
+  "cmd/clip.crossfade": {
+    "kind": "operation",
+    "operation": "cmd/clip.crossfade"
   },
   "cmd/clip.delete": {
     "kind": "operation",
@@ -10420,6 +10555,14 @@ export const ENGINE_OPERATION_EXAMPLES = {
           "lengthBeats": 1,
           "velocity": 100
         }
+      ]
+    }
+  ],
+  "cmd/clip.crossfade": [
+    {
+      "clipIds": [
+        21,
+        22
       ]
     }
   ],

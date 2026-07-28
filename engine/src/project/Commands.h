@@ -159,6 +159,7 @@ private:
     json clipProcessAudio(const json& p, CmdResult& r);
     json clipSplit(const json& p, CmdResult& r);
     json clipJoin(const json& p, CmdResult& r);
+    json clipCrossfade(const json& p, CmdResult& r);
     json clipDelete(const json& p, CmdResult& r);
     json clipDuplicate(const json& p, CmdResult& r);
     json clipSet(const json& p, CmdResult& r);

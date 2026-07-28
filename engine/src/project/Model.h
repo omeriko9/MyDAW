@@ -240,6 +240,43 @@ struct PluginInstance {
 // Clips
 // ---------------------------------------------------------------------------
 
+// Fade curve shapes (SPEC §6): gain = f(t), t = progress 0..1 into the fade
+// (fade-outs evaluate f on the REMAINING fraction so the same shape mirrors).
+// eqPower fades sum to unity power with their mirror — the crossfade default.
+enum class FadeCurve : uint8_t {
+    Linear = 0,  // t
+    Expo = 1,    // t*t            (slow start)
+    Log = 2,     // 1-(1-t)^2      (fast start)
+    SCurve = 3,  // t*t*(3-2t)
+    EqPower = 4, // sin(t*pi/2)
+};
+
+inline const char* fadeCurveName(FadeCurve c) {
+    switch (c) {
+        case FadeCurve::Expo: return "expo";
+        case FadeCurve::Log: return "log";
+        case FadeCurve::SCurve: return "sCurve";
+        case FadeCurve::EqPower: return "eqPower";
+        default: return "linear";
+    }
+}
+
+inline FadeCurve fadeCurveFromName(const std::string& s) {
+    if (s == "expo") return FadeCurve::Expo;
+    if (s == "log") return FadeCurve::Log;
+    if (s == "sCurve") return FadeCurve::SCurve;
+    if (s == "eqPower") return FadeCurve::EqPower;
+    return FadeCurve::Linear;
+}
+
+// Non-destructive per-clip gain envelope point: pos is NORMALIZED 0..1 across the
+// clip's audible span (survives trims/stretches), value is linear gain 0..2
+// (1 = unity). Points kept sorted by pos; empty vector = no envelope.
+struct ClipEnvPoint {
+    double pos = 0.0;
+    double value = 1.0;
+};
+
 struct AudioClip {
     uint64_t id = 0;
     // type: "audio" (implied by alternative)
@@ -251,6 +288,9 @@ struct AudioClip {
     double gain = 1.0; // linear
     double fadeInSec = 0.0;
     double fadeOutSec = 0.0;
+    FadeCurve fadeInCurve = FadeCurve::Linear;   // optional in JSON ("linear" default)
+    FadeCurve fadeOutCurve = FadeCurve::Linear;  // optional in JSON
+    std::vector<ClipEnvPoint> env; // optional in JSON ([] default)
     bool muted = false;  // optional in JSON
     std::string color;   // optional, "" = inherit track color
 };

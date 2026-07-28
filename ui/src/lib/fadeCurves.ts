@@ -1,0 +1,54 @@
+/**
+ * Fade curve shapes — the UI mirror of the engine's FadeCurve enum (SPEC §6,
+ * TrackNode.cpp fadeShapeRt). gain = shape(t) for progress t 0..1 into the fade;
+ * fade-outs evaluate the shape on the REMAINING fraction so one shape mirrors.
+ * eqPower fades sum to unity power with their mirror — the crossfade default.
+ */
+
+import type { FadeCurve } from "../protocol/types";
+
+export const FADE_CURVES: FadeCurve[] = ["linear", "expo", "log", "sCurve", "eqPower"];
+
+export const FADE_CURVE_LABELS: Record<FadeCurve, string> = {
+  linear: "Linear",
+  expo: "Exponential (slow start)",
+  log: "Logarithmic (fast start)",
+  sCurve: "S-Curve",
+  eqPower: "Equal Power",
+};
+
+/** Gain multiplier for progress t (clamped to 0..1) under the given shape. */
+export function fadeGain(curve: FadeCurve | undefined, t: number): number {
+  const x = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  switch (curve) {
+    case "expo":
+      return x * x;
+    case "log":
+      return 1 - (1 - x) * (1 - x);
+    case "sCurve":
+      return x * x * (3 - 2 * x);
+    case "eqPower":
+      return Math.sin((x * Math.PI) / 2);
+    default:
+      return x;
+  }
+}
+
+/** Evaluate a clip gain envelope (sorted points, pos 0..1) at pos; 1 when empty. */
+export function envGainAt(
+  env: ReadonlyArray<{ pos: number; value: number }> | undefined,
+  pos: number,
+): number {
+  if (!env || env.length === 0) return 1;
+  if (pos <= env[0].pos) return env[0].value;
+  const last = env[env.length - 1];
+  if (pos >= last.pos) return last.value;
+  for (let i = 0; i + 1 < env.length; i++) {
+    if (pos <= env[i + 1].pos) {
+      const span = env[i + 1].pos - env[i].pos;
+      const t = span > 0 ? (pos - env[i].pos) / span : 1;
+      return env[i].value + (env[i + 1].value - env[i].value) * t;
+    }
+  }
+  return last.value;
+}

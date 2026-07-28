@@ -4,11 +4,13 @@
  */
 
 import React from "react";
-import type { Clip, Project, Track } from "../../protocol/types";
+import type { Clip, FadeCurve, Project, Track } from "../../protocol/types";
 import { isAudioClip, isMidiClip } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import { moveClips, resizeClip, setClip } from "../../store/actions";
 import { transientParam, commitParam } from "../../store/actions";
+import { FADE_CURVES, FADE_CURVE_LABELS } from "../../lib/fadeCurves";
+import { Select } from "../common/Select";
 import {
   beatsToSeconds,
   formatBarsBeats,
@@ -187,6 +189,24 @@ export function ClipSection({
               }
               width={56}
               title="Fade-out (seconds)"
+            />
+          </div>
+          <div className="insp-row">
+            <span className="insp-label">Curves</span>
+            <Select
+              value={clip.fadeInCurve ?? "linear"}
+              onChange={(v) => void setClip(id, { fadeInCurve: v as FadeCurve })}
+              options={FADE_CURVES.map((c) => ({ value: c, label: FADE_CURVE_LABELS[c] }))}
+              title="Fade-in curve shape"
+              width={92}
+            />
+            <span className="grow" />
+            <Select
+              value={clip.fadeOutCurve ?? "linear"}
+              onChange={(v) => void setClip(id, { fadeOutCurve: v as FadeCurve })}
+              options={FADE_CURVES.map((c) => ({ value: c, label: FADE_CURVE_LABELS[c] }))}
+              title="Fade-out curve shape"
+              width={92}
             />
           </div>
           <div className="insp-row">

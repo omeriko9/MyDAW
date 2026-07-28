@@ -230,8 +230,21 @@
         "color": {
           "type": "string"
         },
+        "env": {
+          "description": "non-destructive gain envelope: pos normalized 0..1 over the clip, value linear gain 0..2 (1 = unity); [] / absent = none",
+          "items": {
+            "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "fadeInCurve": {
+          "$ref": "#/schemas/FadeCurve"
+        },
         "fadeInSec": {
           "type": "number"
+        },
+        "fadeOutCurve": {
+          "$ref": "#/schemas/FadeCurve"
         },
         "fadeOutSec": {
           "type": "number"
@@ -1020,14 +1033,82 @@
       ],
       "type": "object"
     },
+    "ClipCrossfadeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "overlapSec": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "overlapSec"
+      ],
+      "type": "object"
+    },
+    "ClipCrossfadeRequest": {
+      "additionalProperties": false,
+      "description": "exactly two audio clips on one track; they must overlap on the timeline",
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "curve": {
+          "$ref": "#/schemas/FadeCurve"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipEnvPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "normalized position 0..1 across the clip's audible span",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "value": {
+          "description": "linear gain 0..2 (1 = unity)",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "pos",
+        "value"
+      ],
+      "type": "object"
+    },
     "ClipPatch": {
       "additionalProperties": false,
       "properties": {
         "color": {
           "type": "string"
         },
+        "env": {
+          "description": "REPLACES the whole gain envelope; [] clears it",
+          "items": {
+            "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "fadeInCurve": {
+          "$ref": "#/schemas/FadeCurve"
+        },
         "fadeInSec": {
           "type": "number"
+        },
+        "fadeOutCurve": {
+          "$ref": "#/schemas/FadeCurve"
         },
         "fadeOutSec": {
           "type": "number"
@@ -1437,6 +1518,17 @@
         "format"
       ],
       "type": "object"
+    },
+    "FadeCurve": {
+      "description": "fade shape: gain = f(progress). eqPower pairs sum to unity power (crossfade default).",
+      "enum": [
+        "linear",
+        "expo",
+        "log",
+        "sCurve",
+        "eqPower"
+      ],
+      "type": "string"
     },
     "GetDevicesReply": {
       "additionalProperties": false,
@@ -4853,6 +4945,43 @@
                 "lengthBeats": 1,
                 "velocity": 100
               }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.crossfade",
+      "category": "clips",
+      "description": "Crossfade two overlapping audio clips on one track: fade-out on the earlier, fade-in on the later, spanning the overlap (equal-power default).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/ClipCrossfadeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/ClipCrossfadeReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
             ]
           }
         }

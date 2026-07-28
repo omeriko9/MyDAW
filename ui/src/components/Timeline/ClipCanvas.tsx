@@ -30,6 +30,7 @@ import {
   addTrack,
   addTranspose,
   commitParam,
+  crossfadeClips,
   deleteClips,
   duplicateClips,
   joinClips,
@@ -86,6 +87,8 @@ import { hasAssetDrag, hasInsertDrag, hasPluginDrag, readAssetDrag, readPluginDr
 import { extensionOf, projectOnlyExtensions } from "../Transport/projectFlows";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { confirmDialog } from "../Dialogs/confirm";
+import { fieldsDialog } from "../Dialogs/fields";
+import { FADE_CURVES, FADE_CURVE_LABELS } from "../../lib/fadeCurves";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
 import { addTrackMenuItems } from "./TrackHeaders";
@@ -128,7 +131,7 @@ import {
   type Row,
   type TrackRowL,
 } from "./layout";
-import type { AutomationPoint, Clip, ClipEdge, Project, Track } from "../../protocol/types";
+import type { AudioClip, AutomationPoint, Clip, ClipEdge, FadeCurve, Project, Track } from "../../protocol/types";
 
 const MIN_CLIP_BEATS = 1 / 16;
 const MOVE_THRESHOLD_PX = 3;
@@ -1777,11 +1780,60 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
   /* ------------------------------------------------------------ dbl click */
 
+  // Double-click a fade corner handle → Cubase-style fade dialog (length + curve).
+  const openFadeDialog = (clip: AudioClip, which: "in" | "out"): void => {
+    const isIn = which === "in";
+    const curSec = isIn ? clip.fadeInSec : clip.fadeOutSec;
+    const curCurve = (isIn ? clip.fadeInCurve : clip.fadeOutCurve) ?? "linear";
+    void fieldsDialog({
+      title: isIn ? "Fade In" : "Fade Out",
+      fields: [
+        {
+          key: "sec",
+          label: "Length (seconds)",
+          kind: "number",
+          value: Math.round(curSec * 1000) / 1000,
+          min: 0,
+          max: 600,
+          step: 0.05,
+        },
+        {
+          key: "curve",
+          label: "Curve",
+          kind: "select",
+          value: curCurve,
+          options: FADE_CURVES.map((c) => ({ value: c, label: FADE_CURVE_LABELS[c] })),
+        },
+      ],
+    }).then((v) => {
+      if (!v) return;
+      fire(
+        setClip(
+          clip.id,
+          isIn
+            ? { fadeInSec: v.sec as number, fadeInCurve: v.curve as FadeCurve }
+            : { fadeOutSec: v.sec as number, fadeOutCurve: v.curve as FadeCurve },
+        ),
+      );
+    });
+  };
+
   const onDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>): void => {
     const { vx, cy } = localPoint(e.clientX, e.clientY);
     const st = stateRef.current;
     const proj = st.project;
     const row = rowAtY(st.rows, cy);
+    {
+      const fadeHit = hitTest(vx, cy);
+      if (
+        fadeHit &&
+        fadeHit.clip.type === "audio" &&
+        (fadeHit.zone === "fadeIn" || fadeHit.zone === "fadeOut")
+      ) {
+        openFadeDialog(fadeHit.clip, fadeHit.zone === "fadeIn" ? "in" : "out");
+        return;
+      }
+    }
     // view rows: double-click creates on empty space, edits on an item
     if (proj && row && row.kind === "track" && isViewRowKind(row.track.kind)) {
       const vKind = row.track.kind as "marker" | "arranger" | "chord" | "transpose";
@@ -2245,6 +2297,32 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       },
       ...(clip.type === "audio"
         ? ([
+            {
+              label: "Fade In…",
+              title: "Length + curve shape (also: double-click the fade handle)",
+              onClick: () => openFadeDialog(clip, "in"),
+            },
+            {
+              label: "Fade Out…",
+              title: "Length + curve shape (also: double-click the fade handle)",
+              onClick: () => openFadeDialog(clip, "out"),
+            },
+            {
+              label: "Crossfade",
+              shortcut: "X",
+              title:
+                ids.length === 2
+                  ? "Equal-power crossfade over the overlap of the two selected clips"
+                  : "Select exactly two overlapping audio clips on one track",
+              disabled: ids.length !== 2,
+              onClick: () =>
+                void crossfadeClips(ids).catch(() =>
+                  showToast(
+                    "Crossfade failed — the two clips must overlap on one track",
+                    "info",
+                  ),
+                ),
+            },
             {
               label: "Process",
               icon: "audioWave",

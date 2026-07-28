@@ -68,6 +68,7 @@ import {
   duplicateClips,
   locate,
   play,
+  crossfadeClips,
   quantizeNotes,
   record,
   redo,
@@ -680,6 +681,24 @@ function onKeyDown(e: KeyboardEvent): void {
       if (e.repeat) return;
       const { clipIds } = useStore.getState().selection;
       if (clipIds.length > 0) fire(splitClips(clipIds, playheadBeat()));
+      return;
+    }
+    case "x": {
+      consume();
+      if (e.repeat) return;
+      const { clipIds } = useStore.getState().selection;
+      if (clipIds.length === 2) {
+        void crossfadeClips(clipIds).catch((err) =>
+          showToast(
+            err instanceof Error && err.message.includes("overlap")
+              ? "Crossfade needs two overlapping audio clips — drag one over the other first"
+              : "Crossfade failed — select two overlapping audio clips on one track",
+            "info",
+          ),
+        );
+      } else {
+        showToast("Crossfade: select exactly two overlapping audio clips (X)", "info");
+      }
       return;
     }
     case "q":

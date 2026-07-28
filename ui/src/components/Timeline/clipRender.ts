@@ -4,9 +4,10 @@
  * interaction layer lives in ClipCanvas.tsx.
  */
 
-import type { AudioClip, LoopRegion, MidiClip, Project, TimeSigEntry } from "../../protocol/types";
+import type { AudioClip, FadeCurve, LoopRegion, MidiClip, Project, TimeSigEntry } from "../../protocol/types";
 import { beatToPx, bpmAtBeat, pxToBeat, type HViewport } from "../../lib/time";
 import { lineV, roundRect } from "../../lib/canvas";
+import { fadeGain } from "../../lib/fadeCurves";
 import { pickLod } from "../../lib/peaks";
 import { peaksFor } from "./peaksCache";
 import {
@@ -188,8 +189,11 @@ export function drawClip(ctx: CanvasRenderingContext2D, o: ClipDrawOpts): void {
     else drawMidiContent(ctx, o, clip, areaY, areaH);
   }
 
-  // fades (audio only)
-  if (clip.type === "audio") drawFades(ctx, o, clip, bodyTop, bodyH, w);
+  // fades + gain envelope (audio only)
+  if (clip.type === "audio") {
+    drawFades(ctx, o, clip, bodyTop, bodyH, w);
+    drawClipEnv(ctx, o, clip, bodyTop, bodyH, w);
+  }
 
   // border
   roundRect(ctx, x + 0.5, bodyTop + 0.5, w - 1, bodyH - 1, r);
@@ -378,33 +382,56 @@ function drawFades(
   const x0 = o.x;
   const x1 = o.x + w;
 
+  // Gain curve for progress t 0..1: y position between yBot (gain 0) and yTop (gain 1).
+  const gainY = (curve: FadeCurve | undefined, t: number): number =>
+    yBot - (yBot - yTop) * fadeGain(curve, t);
+  const SEGS = 24;
+
   ctx.save();
   if (inPx > 0.5) {
+    // darkened region ABOVE the curve (the attenuated part), then the curve itself
     ctx.beginPath();
     ctx.moveTo(x0, yTop);
     ctx.lineTo(x0 + inPx, yTop);
-    ctx.lineTo(x0, yBot);
+    for (let k = SEGS; k >= 0; k--) {
+      const t = k / SEGS;
+      ctx.lineTo(x0 + inPx * t, gainY(clip.fadeInCurve, t));
+    }
     ctx.closePath();
     ctx.fillStyle = "rgba(0,0,0,0.30)";
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(x0, yBot);
-    ctx.lineTo(x0 + inPx, yTop);
+    for (let k = 0; k <= SEGS; k++) {
+      const t = k / SEGS;
+      const px = x0 + inPx * t;
+      const py = gainY(clip.fadeInCurve, t);
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
     ctx.strokeStyle = withAlpha(o.colors.playhead, 0.7);
     ctx.lineWidth = 1;
     ctx.stroke();
   }
   if (outPx > 0.5) {
+    // t = REMAINING fraction: 1 at the fade start (left), 0 at the clip end (right)
     ctx.beginPath();
-    ctx.moveTo(x1, yTop);
-    ctx.lineTo(x1 - outPx, yTop);
-    ctx.lineTo(x1, yBot);
+    ctx.moveTo(x1 - outPx, yTop);
+    ctx.lineTo(x1, yTop);
+    for (let k = 0; k <= SEGS; k++) {
+      const t = k / SEGS;
+      ctx.lineTo(x1 - outPx * t, gainY(clip.fadeOutCurve, t));
+    }
     ctx.closePath();
     ctx.fillStyle = "rgba(0,0,0,0.30)";
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(x1 - outPx, yTop);
-    ctx.lineTo(x1, yBot);
+    for (let k = SEGS; k >= 0; k--) {
+      const t = k / SEGS;
+      const px = x1 - outPx * t;
+      const py = gainY(clip.fadeOutCurve, t);
+      if (k === SEGS) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
     ctx.strokeStyle = withAlpha(o.colors.playhead, 0.7);
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -420,6 +447,50 @@ function drawFades(
       ctx.rect(hx - hs / 2, yTop + 1.5, hs, hs);
       ctx.fill();
       ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * Non-destructive clip gain envelope overlay: value 0..2 maps bottom..top (unity =
+ * mid-height), linear segments between points, small diamonds at breakpoints.
+ * Read-only on the timeline — editing lives in the Clip Editor.
+ */
+function drawClipEnv(
+  ctx: CanvasRenderingContext2D,
+  o: ClipDrawOpts,
+  clip: AudioClip,
+  bodyTop: number,
+  bodyH: number,
+  w: number,
+): void {
+  const env = clip.env;
+  if (!env || env.length === 0 || w < 8 || bodyH < 12) return;
+  const yTop = bodyTop + 1;
+  const yBot = bodyTop + bodyH - 1;
+  const yFor = (v: number): number => yBot - (clamp(v, 0, 2) / 2) * (yBot - yTop);
+  const xFor = (pos: number): number => o.x + clamp(pos, 0, 1) * w;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(o.x, yFor(env[0].value));
+  for (const p of env) ctx.lineTo(xFor(p.pos), yFor(p.value));
+  ctx.lineTo(o.x + w, yFor(env[env.length - 1].value));
+  ctx.strokeStyle = withAlpha(o.colors.warn, 0.9);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  if (w >= 24) {
+    ctx.fillStyle = o.colors.warn;
+    for (const p of env) {
+      const px = xFor(p.pos);
+      const py = yFor(p.value);
+      ctx.beginPath();
+      ctx.moveTo(px, py - 3);
+      ctx.lineTo(px + 3, py);
+      ctx.lineTo(px, py + 3);
+      ctx.lineTo(px - 3, py);
+      ctx.closePath();
+      ctx.fill();
     }
   }
   ctx.restore();

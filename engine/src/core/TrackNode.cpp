@@ -363,6 +363,18 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
     lastEndSample_ = s1;
 }
 
+// Fade shape (SPEC §6, FadeCurve enum): gain multiplier for progress t in 0..1.
+// Kept branch-cheap — called per sample inside fade regions only.
+static inline float fadeShapeRt(uint8_t curve, float t) noexcept {
+    switch (curve) {
+        case 1: return t * t;                          // expo (slow start)
+        case 2: { const float u = 1.0f - t; return 1.0f - u * u; } // log (fast start)
+        case 3: return t * t * (3.0f - 2.0f * t);      // S-curve
+        case 4: return std::sin(t * 1.5707963f);       // equal power
+        default: return t;                             // linear
+    }
+}
+
 void TrackNode::renderClipsRt(const ProcessContext& ctx, float* wl, float* wr) noexcept {
     const int64_t s0 = ctx.playheadSamples;
     const int64_t s1 = s0 + ctx.frames;
@@ -379,6 +391,15 @@ void TrackNode::renderClipsRt(const ProcessContext& ctx, float* wl, float* wr) n
         const float* srcR =
             c.pcm->channels >= 2 ? c.pcm->planes[1].data() : srcL;
         const int64_t pcmFrames = c.pcm->frames;
+        // Envelope segment cursor: advance monotonically as pos moves through the
+        // block (points are sorted by sample; found once per clip per block).
+        const size_t envN = c.env.size();
+        size_t envIdx = 0;
+        if (envN > 0) {
+            const int64_t startInClip = ovS - cs;
+            while (envIdx + 1 < envN && c.env[envIdx + 1].first <= startInClip)
+                ++envIdx;
+        }
         for (int64_t pos = ovS; pos < ovE; ++pos) {
             const int64_t inClip = pos - cs;
             const int64_t src = c.srcOffsetSamples + inClip;
@@ -386,9 +407,30 @@ void TrackNode::renderClipsRt(const ProcessContext& ctx, float* wl, float* wr) n
                 continue;
             float g = c.gain;
             if (c.fadeInSamples > 0 && inClip < c.fadeInSamples)
-                g *= static_cast<float>(inClip + 1) / static_cast<float>(c.fadeInSamples);
+                g *= fadeShapeRt(c.fadeInCurve,
+                                 static_cast<float>(inClip + 1) /
+                                     static_cast<float>(c.fadeInSamples));
             if (c.fadeOutSamples > 0 && (ce - pos) <= c.fadeOutSamples)
-                g *= static_cast<float>(ce - pos) / static_cast<float>(c.fadeOutSamples);
+                g *= fadeShapeRt(c.fadeOutCurve,
+                                 static_cast<float>(ce - pos) /
+                                     static_cast<float>(c.fadeOutSamples));
+            if (envN > 0) {
+                while (envIdx + 1 < envN && c.env[envIdx + 1].first <= inClip)
+                    ++envIdx;
+                const auto& p0 = c.env[envIdx];
+                float ev;
+                if (inClip <= p0.first || envIdx + 1 >= envN) {
+                    ev = p0.second;
+                } else {
+                    const auto& p1 = c.env[envIdx + 1];
+                    const float span = static_cast<float>(p1.first - p0.first);
+                    const float t = span > 0.0f
+                                        ? static_cast<float>(inClip - p0.first) / span
+                                        : 1.0f;
+                    ev = p0.second + (p1.second - p0.second) * t;
+                }
+                g *= ev;
+            }
             const int i = static_cast<int>(pos - s0);
             wl[i] += srcL[src] * g;
             wr[i] += srcR[src] * g;

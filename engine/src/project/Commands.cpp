@@ -965,6 +965,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.processAudio") return clipProcessAudio(p, r);
     if (type == "cmd/clip.split")       return clipSplit(p, r);
     if (type == "cmd/clip.join")        return clipJoin(p, r);
+    if (type == "cmd/clip.crossfade")   return clipCrossfade(p, r);
     if (type == "cmd/clip.delete")      return clipDelete(p, r);
     if (type == "cmd/clip.duplicate")   return clipDuplicate(p, r);
     if (type == "cmd/clip.set")         return clipSet(p, r);
@@ -2194,6 +2195,40 @@ json CommandProcessor::clipSplit(const json& p, CmdResult& r) {
             right.srcOffsetSamples = a->srcOffsetSamples + leftLen;
             right.lengthSamples = a->lengthSamples - leftLen;
             right.fadeInSec = 0.0;
+            // Envelope positions are normalized per clip: rescale each half so the
+            // material keeps its gain shape across the cut (boundary value pinned).
+            if (!a->env.empty()) {
+                const double frac =
+                    static_cast<double>(leftLen) / static_cast<double>(a->lengthSamples);
+                const auto evalAt = [&](double pos) {
+                    const std::vector<ClipEnvPoint>& e = a->env;
+                    if (pos <= e.front().pos)
+                        return e.front().value;
+                    if (pos >= e.back().pos)
+                        return e.back().value;
+                    for (size_t i = 0; i + 1 < e.size(); ++i) {
+                        if (pos <= e[i + 1].pos) {
+                            const double span = e[i + 1].pos - e[i].pos;
+                            const double t = span > 0.0 ? (pos - e[i].pos) / span : 1.0;
+                            return e[i].value + (e[i + 1].value - e[i].value) * t;
+                        }
+                    }
+                    return e.back().value;
+                };
+                const double cutVal = evalAt(frac);
+                std::vector<ClipEnvPoint> leftEnv, rightEnv;
+                for (const ClipEnvPoint& pt : a->env) {
+                    if (pt.pos < frac)
+                        leftEnv.push_back({frac > 0.0 ? pt.pos / frac : 0.0, pt.value});
+                    else
+                        rightEnv.push_back(
+                            {frac < 1.0 ? (pt.pos - frac) / (1.0 - frac) : 1.0, pt.value});
+                }
+                leftEnv.push_back({1.0, cutVal});
+                rightEnv.insert(rightEnv.begin(), {0.0, cutVal});
+                a->env = std::move(leftEnv);
+                right.env = std::move(rightEnv);
+            }
             a->lengthSamples = leftLen;
             a->fadeOutSec = 0.0;
             newIds.push_back(right.id);
@@ -2455,6 +2490,35 @@ json CommandProcessor::clipSet(const json& p, CmdResult& r) {
             any = true;
             audible = true;
         }
+        if (hasKey(patch, "fadeInCurve")) {
+            a->fadeInCurve = fadeCurveFromName(getOr(patch, "fadeInCurve", "linear"));
+            any = true;
+            audible = true;
+        }
+        if (hasKey(patch, "fadeOutCurve")) {
+            a->fadeOutCurve = fadeCurveFromName(getOr(patch, "fadeOutCurve", "linear"));
+            any = true;
+            audible = true;
+        }
+        // env (when present) REPLACES the whole envelope — [] clears it (EQ-bands
+        // convention). Points clamp to pos 0..1, value 0..2 and are kept sorted.
+        if (hasKey(patch, "env") && patch["env"].is_array()) {
+            a->env.clear();
+            for (const json& pj : patch["env"]) {
+                if (!pj.is_object())
+                    continue;
+                ClipEnvPoint pt;
+                pt.pos = clampd(getOr<double>(pj, "pos", 0.0), 0.0, 1.0);
+                pt.value = clampd(getOr<double>(pj, "value", 1.0), 0.0, 2.0);
+                a->env.push_back(pt);
+            }
+            std::sort(a->env.begin(), a->env.end(),
+                      [](const ClipEnvPoint& x, const ClipEnvPoint& y) {
+                          return x.pos < y.pos;
+                      });
+            any = true;
+            audible = true;
+        }
     }
     if (!any) {
         r.mutated = false;
@@ -2465,6 +2529,48 @@ json CommandProcessor::clipSet(const json& p, CmdResult& r) {
     r.scope = "clip";
     r.eventClips.emplace_back(ref.track->id, id);
     return json::object();
+}
+
+// cmd/clip.crossfade {clipIds:[a,b], curve?} — symmetric crossfade over the overlap
+// of two audio clips on one track: earlier gets a fade-out, later a fade-in, both
+// spanning the overlap with an equal-power curve by default. Fails when the clips
+// don't overlap on the timeline (v1: no auto-extension of clip edges).
+json CommandProcessor::clipCrossfade(const json& p, CmdResult& r) {
+    Model& m = model();
+    std::vector<uint64_t> ids = idArray(p, "clipIds");
+    if (ids.size() != 2)
+        return r.fail("bad_request", "clip.crossfade needs exactly two clipIds");
+    const ClipRef refA = m.clipById(ids[0]);
+    const ClipRef refB = m.clipById(ids[1]);
+    if (!refA || !refB)
+        return r.fail("not_found", "unknown clipId");
+    if (refA.track != refB.track)
+        return r.fail("bad_request", "clips must be on the same track");
+    AudioClip* a = asAudio(refA.clip);
+    AudioClip* b = asAudio(refB.clip);
+    if (!a || !b)
+        return r.fail("bad_request", "clip.crossfade requires audio clips");
+    if (b->startBeat < a->startBeat)
+        std::swap(a, b); // a = earlier clip
+    const TempoMap& T = tm();
+    const double sr = static_cast<double>(sampleRate_);
+    const int64_t aStart = llround(T.beatsToSamplesF(a->startBeat));
+    const int64_t bStart = llround(T.beatsToSamplesF(b->startBeat));
+    const int64_t overlap = (aStart + a->lengthSamples) - bStart;
+    if (overlap <= 0)
+        return r.fail("bad_request", "clips do not overlap — drag one over the other first");
+    const double overlapSec = static_cast<double>(overlap) / sr;
+    const FadeCurve curve = fadeCurveFromName(getOr(p, "curve", "eqPower"));
+    a->fadeOutSec = overlapSec;
+    a->fadeOutCurve = curve;
+    b->fadeInSec = overlapSec;
+    b->fadeInCurve = curve;
+    r.label = "Crossfade";
+    r.structural = true;
+    r.scope = "clip";
+    r.eventClips.emplace_back(refA.track->id, a->id);
+    r.eventClips.emplace_back(refB.track->id, b->id);
+    return json{{"overlapSec", overlapSec}};
 }
 
 // ---------------------------------------------------------------------------

@@ -61,6 +61,11 @@ public:
         float gain = 1.0f;
         int64_t fadeInSamples = 0;
         int64_t fadeOutSamples = 0;
+        uint8_t fadeInCurve = 0;  // FadeCurve enum value (0 = linear)
+        uint8_t fadeOutCurve = 0;
+        // Gain envelope resolved to (sample-in-clip, linear gain) breakpoints, sorted.
+        // Empty = unity. Evaluated with linear interpolation between breakpoints.
+        std::vector<std::pair<int64_t, float>> env;
     };
 
     // Baked MIDI event (clip notes flattened to absolute timeline samples). Sorted by
