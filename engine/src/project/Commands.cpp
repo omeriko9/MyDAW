@@ -962,6 +962,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.addAudio")    return clipAddAudio(p, r);
     if (type == "cmd/clip.move")        return clipMove(p, r);
     if (type == "cmd/clip.resize")      return clipResize(p, r);
+    if (type == "cmd/clip.resizeStretch") return clipResizeStretch(p, r);
     if (type == "cmd/clip.stretch")     return clipStretch(p, r);
     if (type == "cmd/clip.processAudio") return clipProcessAudio(p, r);
     if (type == "cmd/clip.split")       return clipSplit(p, r);
@@ -2342,14 +2343,40 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
     const std::string edge = getOr(p, "edge", "");
     if (edge != "l" && edge != "r")
         return r.fail("bad_request", "edge must be \"l\" or \"r\"");
+    // Cubase "Sizing Moves Contents": the material rides along with the dragged edge
+    // instead of staying anchored to the timeline.
+    const bool moveContents = getOr<bool>(p, "moveContents", false);
     const TempoMap& T = tm();
 
     if (MidiClip* mc = asMidi(ref.clip)) {
         if (edge == "r") {
             if (!hasKey(p, "newLengthBeats"))
                 return r.fail("bad_request", "newLengthBeats required for edge \"r\"");
-            mc->lengthBeats =
+            const double nl =
                 std::max(kMinClipBeats, getOr<double>(p, "newLengthBeats", mc->lengthBeats));
+            if (moveContents) {
+                // content anchored to the RIGHT edge: shift by the length change
+                const double shift = nl - mc->lengthBeats;
+                for (auto it = mc->notes.begin(); it != mc->notes.end();) {
+                    it->startBeat += shift;
+                    if (it->startBeat < 0.0) {
+                        it->lengthBeats += it->startBeat;
+                        it->startBeat = 0.0;
+                    }
+                    if (it->lengthBeats < kMinNoteBeats)
+                        it = mc->notes.erase(it);
+                    else
+                        ++it;
+                }
+                for (auto it = mc->cc.begin(); it != mc->cc.end();) {
+                    it->beat += shift;
+                    if (it->beat < 0.0)
+                        it = mc->cc.erase(it);
+                    else
+                        ++it;
+                }
+            }
+            mc->lengthBeats = nl;
         } else {
             if (!hasKey(p, "newStartBeat"))
                 return r.fail("bad_request", "newStartBeat required for edge \"l\"");
@@ -2358,25 +2385,27 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
             delta = std::min(delta, mc->lengthBeats - kMinClipBeats);
             mc->startBeat += delta;
             mc->lengthBeats -= delta;
-            // Left-edge resize shifts note content so it stays at absolute position.
-            for (auto it = mc->notes.begin(); it != mc->notes.end();) {
-                it->startBeat -= delta;
-                if (it->startBeat < 0.0) {
-                    it->lengthBeats += it->startBeat;
-                    it->startBeat = 0.0;
+            if (!moveContents) {
+                // Left-edge resize shifts note content so it stays at absolute position.
+                for (auto it = mc->notes.begin(); it != mc->notes.end();) {
+                    it->startBeat -= delta;
+                    if (it->startBeat < 0.0) {
+                        it->lengthBeats += it->startBeat;
+                        it->startBeat = 0.0;
+                    }
+                    if (it->lengthBeats < kMinNoteBeats)
+                        it = mc->notes.erase(it);
+                    else
+                        ++it;
                 }
-                if (it->lengthBeats < kMinNoteBeats)
-                    it = mc->notes.erase(it);
-                else
-                    ++it;
-            }
-            for (auto it = mc->cc.begin(); it != mc->cc.end();) {
-                it->beat -= delta;
-                if (it->beat < 0.0)
-                    it = mc->cc.erase(it); // cc trimmed off the clip start is dropped
-                else
-                    ++it;
-            }
+                for (auto it = mc->cc.begin(); it != mc->cc.end();) {
+                    it->beat -= delta;
+                    if (it->beat < 0.0)
+                        it = mc->cc.erase(it); // cc trimmed off the clip start is dropped
+                    else
+                        ++it;
+                }
+            } // moveContents: clip-relative offsets already ride with the start
         }
     } else {
         AudioClip* a = asAudio(ref.clip);
@@ -2388,11 +2417,18 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
             const int64_t oldStartSample = llround(T.beatsToSamplesF(a->startBeat));
             const int64_t newStartSample = llround(T.beatsToSamplesF(ns));
             int64_t delta = newStartSample - oldStartSample;
-            delta = std::max(delta, -a->srcOffsetSamples);  // no material before start
-            delta = std::min(delta, a->lengthSamples - 1);  // keep >= 1 sample
-            a->srcOffsetSamples += delta;
-            a->lengthSamples -= delta;
-            a->startBeat = T.samplesToBeats(oldStartSample + delta);
+            if (moveContents) {
+                // content rides with the edge: srcOffset stays, only start/length move
+                delta = std::min(delta, a->lengthSamples - 1);
+                a->lengthSamples -= delta;
+                a->startBeat = T.samplesToBeats(oldStartSample + delta);
+            } else {
+                delta = std::max(delta, -a->srcOffsetSamples);  // no material before start
+                delta = std::min(delta, a->lengthSamples - 1);  // keep >= 1 sample
+                a->srcOffsetSamples += delta;
+                a->lengthSamples -= delta;
+                a->startBeat = T.samplesToBeats(oldStartSample + delta);
+            }
         } else {
             if (!hasKey(p, "newLengthBeats"))
                 return r.fail("bad_request", "newLengthBeats required for edge \"r\"");
@@ -2400,9 +2436,22 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
             const int64_t startSample = llround(T.beatsToSamplesF(a->startBeat));
             const int64_t endSample = llround(T.beatsToSamplesF(a->startBeat + nl));
             int64_t newLen = endSample - startSample;
-            if (asset && asset->lengthSamples > 0) // trim only — never stretch (v1)
-                newLen = std::min(newLen, asset->lengthSamples - a->srcOffsetSamples);
-            a->lengthSamples = std::max<int64_t>(1, newLen);
+            if (moveContents) {
+                // content anchored to the RIGHT edge: srcOffset absorbs the change
+                newLen = std::max<int64_t>(1, newLen);
+                if (asset && asset->lengthSamples > 0)
+                    newLen = std::min(newLen, asset->lengthSamples);
+                int64_t newOff = a->srcOffsetSamples + (a->lengthSamples - newLen);
+                newOff = std::max<int64_t>(0, newOff);
+                if (asset && asset->lengthSamples > 0)
+                    newOff = std::min(newOff, asset->lengthSamples - 1);
+                a->srcOffsetSamples = newOff;
+                a->lengthSamples = newLen;
+            } else {
+                if (asset && asset->lengthSamples > 0) // trim only — never stretch (v1)
+                    newLen = std::min(newLen, asset->lengthSamples - a->srcOffsetSamples);
+                a->lengthSamples = std::max<int64_t>(1, newLen);
+            }
         }
     }
     sortClipsByStart(*ref.track);
@@ -2412,6 +2461,120 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
     r.scope = "clip";
     r.eventClips.emplace_back(ref.track->id, id);
     return json::object();
+}
+
+// cmd/clip.resizeStretch {clipId, edge, newStartBeat?, newLengthBeats?} — the
+// "Sizing Applies Time Stretch" tool mode: resize the clip AND stretch its content to
+// the new duration in one undo entry. Audio renders a spectral-stretch derivative
+// (ratio clamped 0.25..4); MIDI scales note/CC times. Left-edge drags anchor the
+// clip's END (content compresses/expands toward it).
+json CommandProcessor::clipResizeStretch(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(id);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    const std::string edge = getOr(p, "edge", "");
+    if (edge != "l" && edge != "r")
+        return r.fail("bad_request", "edge must be \"l\" or \"r\"");
+    const TempoMap& T = tm();
+
+    if (MidiClip* mc = asMidi(ref.clip)) {
+        double newStart = mc->startBeat;
+        double newLen;
+        if (edge == "r") {
+            if (!hasKey(p, "newLengthBeats"))
+                return r.fail("bad_request", "newLengthBeats required for edge \"r\"");
+            newLen = std::max(kMinClipBeats, getOr<double>(p, "newLengthBeats", mc->lengthBeats));
+        } else {
+            if (!hasKey(p, "newStartBeat"))
+                return r.fail("bad_request", "newStartBeat required for edge \"l\"");
+            newStart = std::max(0.0, getOr<double>(p, "newStartBeat", mc->startBeat));
+            newLen = std::max(kMinClipBeats, mc->startBeat + mc->lengthBeats - newStart);
+            newStart = mc->startBeat + mc->lengthBeats - newLen; // re-derive after clamp
+        }
+        const double ratio = std::clamp(newLen / std::max(kMinClipBeats, mc->lengthBeats),
+                                        0.25, 4.0);
+        for (Note& n : mc->notes) {
+            n.startBeat *= ratio;
+            n.lengthBeats = std::max(kMinNoteBeats, n.lengthBeats * ratio);
+        }
+        for (MidiCc& c : mc->cc)
+            c.beat *= ratio;
+        const double oldEnd = mc->startBeat + mc->lengthBeats;
+        mc->lengthBeats = mc->lengthBeats * ratio;
+        if (edge == "l") // END anchored: the start lands so the right edge stays put
+            mc->startBeat = oldEnd - mc->lengthBeats;
+        sortClipsByStart(*ref.track);
+        r.label = "Stretch Clip";
+        r.structural = true;
+        r.scope = "clip";
+        r.eventClips.emplace_back(ref.track->id, id);
+        return json{{"lengthBeats", mc->lengthBeats}};
+    }
+
+    AudioClip* ac = asAudio(ref.clip);
+    if (!ctx_.assetStore || !pcmToAssetHook)
+        return r.fail("not_supported", "time-stretch is not wired");
+    const int64_t oldStartSample = llround(T.beatsToSamplesF(ac->startBeat));
+    int64_t newStartSample = oldStartSample;
+    int64_t newLenSamples;
+    if (edge == "r") {
+        if (!hasKey(p, "newLengthBeats"))
+            return r.fail("bad_request", "newLengthBeats required for edge \"r\"");
+        const double nl = std::max(0.0, getOr<double>(p, "newLengthBeats", 0.0));
+        newLenSamples =
+            llround(T.beatsToSamplesF(ac->startBeat + nl)) - oldStartSample;
+    } else {
+        if (!hasKey(p, "newStartBeat"))
+            return r.fail("bad_request", "newStartBeat required for edge \"l\"");
+        const double ns = std::max(0.0, getOr<double>(p, "newStartBeat", ac->startBeat));
+        newStartSample = llround(T.beatsToSamplesF(ns));
+        newLenSamples = oldStartSample + ac->lengthSamples - newStartSample;
+    }
+    if (newLenSamples < 16)
+        return r.fail("bad_request", "stretched clip would be too short");
+    const double wantRatio =
+        static_cast<double>(newLenSamples) / static_cast<double>(ac->lengthSamples);
+    const double ratio = std::clamp(wantRatio, 0.25, 4.0);
+    const PcmData* pcm = ctx_.assetStore->pcm(ac->assetId);
+    if (!pcm || pcm->planes.empty())
+        return r.fail("bad_request", "clip audio not loaded");
+    const int nch = static_cast<int>(pcm->planes.size());
+    const int64_t total = pcm->frames;
+    const int64_t off = std::clamp<int64_t>(ac->srcOffsetSamples, 0, total);
+    const int64_t len = std::clamp<int64_t>(ac->lengthSamples, 0, total - off);
+    if (len < 8)
+        return r.fail("bad_request", "clip is too short to stretch");
+    std::vector<std::vector<float>> seg(static_cast<size_t>(nch));
+    for (int ch = 0; ch < nch; ++ch)
+        seg[static_cast<size_t>(ch)].assign(pcm->planes[static_cast<size_t>(ch)].begin() + off,
+                                            pcm->planes[static_cast<size_t>(ch)].begin() + off +
+                                                len);
+    auto outPcm = spectralStretch(seg, len, ratio, 0.0, m.project.sampleRate);
+    const int64_t outLen = static_cast<int64_t>(outPcm.empty() ? 0 : outPcm[0].size());
+
+    Asset a;
+    std::string err;
+    if (!pcmToAssetHook(outPcm, ac->name.empty() ? std::string("stretch") : ac->name, a, err))
+        return r.fail("render_failed", err.empty() ? "stretch write failed" : err);
+    a.id = m.nextId();
+    a.missing = false;
+    m.project.assets.push_back(a);
+    ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+    ctx_.assetStore->ensurePeaks(a);
+
+    ac->assetId = a.id;
+    ac->srcOffsetSamples = 0;
+    ac->lengthSamples = outLen;
+    if (edge == "l") // END anchored: place the start so the right edge stays put
+        ac->startBeat = T.samplesToBeats(oldStartSample + len - outLen);
+    sortClipsByStart(*ref.track);
+
+    r.label = "Stretch Clip";
+    r.structural = true;
+    r.fullEvent = true; // asset list changed
+    return json{{"assetId", a.id}, {"lengthSamples", outLen}};
 }
 
 json CommandProcessor::clipStretch(const json& p, CmdResult& r) {

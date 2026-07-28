@@ -45,6 +45,7 @@ import {
   removeMarker,
   removeTranspose,
   resizeClip,
+  resizeStretchClip,
   addArrangerSection,
   setArrangerChain,
   setArrangerSection,
@@ -1235,10 +1236,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         const len = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
         // Cubase-style left trim: the content stays anchored on the timeline, so the
         // edge can only travel left while there is source material before the clip.
+        // In moveContents/timeStretch sizing modes the material clamp doesn't apply
+        // (content rides with the edge / stretches to fit).
         const spb =
           (proj.sampleRate * 60) / Math.max(1e-6, bpmAtBeat(clip.startBeat, proj.tempoMap));
+        const mode = useStore.getState().sizingMode;
         const minStart =
-          clip.type === "audio"
+          clip.type === "audio" && mode === "normal"
             ? Math.max(0, clip.startBeat - clip.srcOffsetSamples / spb)
             : 0;
         dragRef.current = {
@@ -1432,6 +1436,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           d.start = d.origStart;
           d.len = ne - d.origStart;
         }
+        const sizing = useStore.getState().sizingMode;
         showDragHud(
           e.clientX,
           e.clientY,
@@ -1439,6 +1444,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             ? `from ${formatBarsBeatsShort(d.start, proj.timeSigMap)}`
             : `to ${formatBarsBeatsShort(d.start + d.len, proj.timeSigMap)}`) +
             ` · ${trimNum(d.len)}b` +
+            (sizing === "timeStretch" && d.origLen > 0
+              ? ` · stretch ${Math.round((d.len / d.origLen) * 100)}%`
+              : sizing === "moveContents"
+                ? " · contents follow"
+                : "") +
             snapHint(e.shiftKey),
         );
         draw();
@@ -1694,8 +1704,18 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
       case "resize": {
         if (d.moved) {
-          if (d.edge === "l") fire(resizeClip(d.clipId, "l", { newStartBeat: d.start }));
-          else fire(resizeClip(d.clipId, "r", { newLengthBeats: d.len }));
+          const mode = useStore.getState().sizingMode;
+          const opts = d.edge === "l" ? { newStartBeat: d.start } : { newLengthBeats: d.len };
+          if (mode === "timeStretch") {
+            void resizeStretchClip(d.clipId, d.edge, opts).catch(() =>
+              showToast(
+                "Stretch failed — the new length must be between ¼× and 4× the current one",
+                "info",
+              ),
+            );
+          } else {
+            fire(resizeClip(d.clipId, d.edge, opts, mode === "moveContents"));
+          }
         }
         break;
       }

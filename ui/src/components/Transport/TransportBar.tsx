@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { metersBus, useStore } from "../../store/store";
-import type { Tool } from "../../store/store";
+import type { SizingMode, Tool } from "../../store/store";
 import {
   commitParam,
   pause,
@@ -478,6 +478,12 @@ const TOOLS: Array<{ tool: Tool; icon: IconName; tip: string }> = [
   { tool: "split", icon: "scissors", tip: "Split (4)" },
 ];
 
+const SIZING_MODES: Array<{ mode: SizingMode; label: string; title: string }> = [
+  { mode: "normal", label: "Normal Sizing", title: "Edge drags trim — content stays anchored to the timeline" },
+  { mode: "moveContents", label: "Sizing Moves Contents", title: "Content rides along with the dragged edge" },
+  { mode: "timeStretch", label: "Sizing Applies Time Stretch", title: "Content stretches to the new duration (audio renders a spectral stretch)" },
+];
+
 export default function TransportBar() {
   const transport = useStore((s) => s.transport);
   const project = useStore((s) => s.project);
@@ -486,6 +492,8 @@ export default function TransportBar() {
   const exportProgress = useStore((s) => s.exportProgress);
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
+  const sizingMode = useStore((s) => s.sizingMode);
+  const setSizingMode = useStore((s) => s.setSizingMode);
   const panels = useStore((s) => s.panels);
   const setPanels = useStore((s) => s.setPanels);
 
@@ -509,6 +517,23 @@ export default function TransportBar() {
               onClick={() => setTool(t.tool)}
             />
           ))}
+          <IconButton
+            icon="dragHandle"
+            active={sizingMode !== "normal"}
+            tooltip={`Sizing: ${SIZING_MODES.find((m) => m.mode === sizingMode)?.label ?? "Normal"} — click to change`}
+            onClick={(e) =>
+              openContextMenu(
+                e.clientX,
+                e.clientY,
+                SIZING_MODES.map((m) => ({
+                  label: m.label,
+                  title: m.title,
+                  checked: sizingMode === m.mode,
+                  onClick: () => setSizingMode(m.mode),
+                })),
+              )
+            }
+          />
         </div>
         <div className="tb-sep" />
         {/* undo / redo */}

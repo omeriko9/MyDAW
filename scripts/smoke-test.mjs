@@ -418,6 +418,36 @@ async function main() {
       `dissolve=${dvOk} (${dvTracks.length} tracks, srcMuted=${srcMuted}) merge=${mgOk} (${mt?.clips?.[0]?.notes?.length ?? 0} notes) smf=${emOk}`);
   }
 
+  // sizing modes: resizeStretch (MIDI scales content) + resize moveContents (audio)
+  {
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const mcNow = proj.tracks.find((t) => t.id === midiT.id).clips.find((c) => c.id === mclip.id);
+    const firstNote = mcNow.notes[0];
+    // double the midi clip via stretch-resize: length 8 -> 16, note times x2
+    await req("cmd/clip.resizeStretch", { clipId: mclip.id, edge: "r", newLengthBeats: mcNow.lengthBeats * 2 });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const mcAfter = proj.tracks.find((t) => t.id === midiT.id).clips.find((c) => c.id === mclip.id);
+    const nAfter = mcAfter.notes.find((n) => n.pitch === firstNote.pitch);
+    const midiOk =
+      Math.abs(mcAfter.lengthBeats - mcNow.lengthBeats * 2) < 1e-6 &&
+      Math.abs(nAfter.lengthBeats - firstNote.lengthBeats * 2) < 1e-6;
+    await req("edit/undo", {});
+
+    // audio moveContents left-trim: srcOffset stays put while start/length change
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const ac = proj.tracks.find((t) => t.id === audioT.id).clips.find((c) => c.type === "audio");
+    await req("cmd/clip.resize", { clipId: ac.id, edge: "l", newStartBeat: ac.startBeat + 0.5, moveContents: true });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const acAfter = proj.tracks.find((t) => t.id === audioT.id).clips.find((c) => c.id === ac.id);
+    const audioOk =
+      acAfter.srcOffsetSamples === ac.srcOffsetSamples &&
+      acAfter.lengthSamples < ac.lengthSamples &&
+      acAfter.startBeat > ac.startBeat;
+    await req("edit/undo", {});
+    report("clip.resizeStretch (MIDI x2) + resize moveContents (audio)", midiOk && audioOk,
+      `midi len ${mcNow.lengthBeats}->${mcAfter.lengthBeats} note ${firstNote.lengthBeats}->${nAfter?.lengthBeats}; audio off ${ac.srcOffsetSamples}->${acAfter.srcOffsetSamples} len ${ac.lengthSamples}->${acAfter.lengthSamples}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

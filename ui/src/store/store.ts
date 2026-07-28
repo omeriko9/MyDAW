@@ -109,6 +109,10 @@ export const recordingBus: Bus<RecordingNotesEvent> = makeBus<RecordingNotesEven
 /** Timeline tools: select(1) / draw(2) / erase(3) / split(4) (SPEC §9). */
 export type Tool = "select" | "draw" | "erase" | "split";
 
+/** Clip-edge resize behavior (Cubase sizing modes): normal trim, contents ride with
+ *  the dragged edge, or the content time-stretches to the new duration. */
+export type SizingMode = "normal" | "moveContents" | "timeStretch";
+
 export type BottomTab = "mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer" | null;
 
 /** Pane focus for keyboard routing — set by pointerdown (capture) on each pane root. */
@@ -229,6 +233,7 @@ export interface DawState {
   /* ui state */
   selection: Selection;
   tool: Tool;
+  sizingMode: SizingMode;
   viewport: Viewport;
   /** pane under the last pointerdown — keyboard shortcuts (G/H zoom, edit actions) route here first */
   focusedPane: FocusedPane;
@@ -248,6 +253,7 @@ export interface DawState {
   setSelection(patch: Partial<Selection>): void;
   clearSelection(): void;
   setTool(tool: Tool): void;
+  setSizingMode(mode: SizingMode): void;
   setViewport(patch: Partial<Viewport>): void;
   setFocusedPane(pane: FocusedPane): void;
   setFollowPlayhead(on: boolean): void;
@@ -385,6 +391,11 @@ const prefPanels: PanelsState = {
   poppedOut: {},
 };
 const prefTool = loadPref<Tool>("ui.tool", "select", oneOf("select", "draw", "erase", "split"));
+const prefSizingMode = loadPref<SizingMode>(
+  "ui.sizingMode",
+  "normal",
+  oneOf("normal", "moveContents", "timeStretch"),
+);
 const prefFollowPlayhead = loadBoolPref("ui.followPlayhead", false);
 
 const MAX_LOG_LINES = 200;
@@ -424,6 +435,7 @@ export const useStore = create<DawState>((set) => ({
 
   selection: { trackIds: [], clipIds: [], noteIds: [] },
   tool: prefTool,
+  sizingMode: prefSizingMode,
   viewport: prefViewport,
   focusedPane: "timeline",
   followPlayhead: prefFollowPlayhead,
@@ -440,6 +452,7 @@ export const useStore = create<DawState>((set) => ({
   setSelection: (patch) => set((s) => ({ selection: { ...s.selection, ...patch } })),
   clearSelection: () => set({ selection: { trackIds: [], clipIds: [], noteIds: [] } }),
   setTool: (tool) => set({ tool }),
+  setSizingMode: (sizingMode) => set({ sizingMode }),
   setViewport: (patch) => set((s) => ({ viewport: { ...s.viewport, ...patch } })),
   // fired on EVERY pointerdown in a pane — return the same state when unchanged so
   // zustand skips the notify (no re-render per click)
@@ -501,6 +514,7 @@ useStore.subscribe((s, prev) => {
     savePrefDebounced("ui.panels.bigClock", bigClock);
   }
   if (s.tool !== prev.tool) savePref("ui.tool", s.tool);
+  if (s.sizingMode !== prev.sizingMode) savePref("ui.sizingMode", s.sizingMode);
   if (s.followPlayhead !== prev.followPlayhead) savePref("ui.followPlayhead", s.followPlayhead);
 });
 

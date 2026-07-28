@@ -218,6 +218,12 @@ Why together: all are engine clip-model surgery + arrangement context-menu entri
 
 ### Swipe 6 — Sizing tool modes (time-stretch on resize) 🤏 — **Cost: M (≈3d) · Value: ★★★ · ROI: good**
 
+> **STATUS: SHIPPED 2026-07-28.** sizingMode store+toolbar control (3 Cubase modes, persisted),
+> cmd/clip.resizeStretch (audio spectral + MIDI time-scaling, END-anchored left drags),
+> cmd/clip.resize moveContents for audio + MIDI, material clamps lifted in non-normal modes,
+> drag HUD shows stretch %. Known limit: stretch renders synchronously (long clips stall
+> briefly — same tradeoff as bounce).
+
 | Task | Cost | Notes |
 |---|---|---|
 | `sizingMode: normal / moveContents / timeStretch` store field + toolbar split-button + toolbox rows | S | 6 known touch points for tool-adjacent state |

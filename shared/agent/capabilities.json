@@ -1127,13 +1127,17 @@
     },
     "ClipResizeRequest": {
       "additionalProperties": false,
-      "description": "audio: trims srcOffset/len; no stretch in v1 (SPEC §5.3)",
+      "description": "audio: trims srcOffset/len (use clip.resizeStretch to stretch); moveContents = Cubase Sizing Moves Contents",
       "properties": {
         "clipId": {
           "type": "number"
         },
         "edge": {
           "$ref": "#/schemas/ClipEdge"
+        },
+        "moveContents": {
+          "description": "the material rides with the dragged edge instead of staying timeline-anchored",
+          "type": "boolean"
         },
         "newLengthBeats": {
           "type": "number"
@@ -5405,6 +5409,70 @@
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "edge": "r",
+            "newLengthBeats": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.resizeStretch",
+      "category": "clips",
+      "description": "Sizing Applies Time Stretch: resize AND stretch the content to fit (audio renders a spectral derivative, MIDI scales times); left edge anchors the END.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "edge": {
+            "$ref": "#/schemas/ClipEdge"
+          },
+          "newLengthBeats": {
+            "type": "number"
+          },
+          "newStartBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "edge"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthBeats": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "type": "object"
       },
       "examples": [
         {

@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "b270a496799fa94c73cb368817d167f606835c493a93ae79d57814030a0266e4";
+const char kAgentCatalogSha256[] = "e40c7d4c075a364e561ea5c5fc3190e5829c14a9e9b119da80e7c05a2e3c94f1";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -1135,13 +1135,17 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     },
     "ClipResizeRequest": {
       "additionalProperties": false,
-      "description": "audio: trims srcOffset/len; no stretch in v1 (SPEC §5.3)",
+      "description": "audio: trims srcOffset/len (use clip.resizeStretch to stretch); moveContents = Cubase Sizing Moves Contents",
       "properties": {
         "clipId": {
           "type": "number"
         },
         "edge": {
           "$ref": "#/schemas/ClipEdge"
+        },
+        "moveContents": {
+          "description": "the material rides with the dragged edge instead of staying timeline-anchored",
+          "type": "boolean"
         },
         "newLengthBeats": {
           "type": "number"
@@ -5413,6 +5417,70 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "edge": "r",
+            "newLengthBeats": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.resizeStretch",
+      "category": "clips",
+      "description": "Sizing Applies Time Stretch: resize AND stretch the content to fit (audio renders a spectral derivative, MIDI scales times); left edge anchors the END.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "edge": {
+            "$ref": "#/schemas/ClipEdge"
+          },
+          "newLengthBeats": {
+            "type": "number"
+          },
+          "newStartBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "edge"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthBeats": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "type": "object"
       },
       "examples": [
         {

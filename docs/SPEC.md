@@ -205,7 +205,15 @@ the entire drag.
 - `cmd/clip.addMidi {trackId, startBeat, lengthBeats}` → `{clip}` ;
   `cmd/clip.addAudio {trackId, startBeat, assetId}` → `{clip}`
 - `cmd/clip.move {clipIds:[], deltaBeats, targetTrackId?}` ; `cmd/clip.resize {clipId, edge:"l"|"r",
-  newStartBeat?, newLengthBeats?}` (audio: trims srcOffset/len; no stretch in v1)
+  newStartBeat?, newLengthBeats?, moveContents?}` (audio: trims srcOffset/len; `moveContents` =
+  Cubase "Sizing Moves Contents": the material rides with the dragged edge — audio keeps/absorbs
+  srcOffset per edge, MIDI note offsets follow the edge instead of the timeline)
+- `cmd/clip.resizeStretch {clipId, edge, newStartBeat?, newLengthBeats?}` — the "Sizing Applies
+  Time Stretch" tool mode: resize AND stretch the content to the new duration in one undo entry
+  (ratio clamped 0.25..4). Audio renders a spectral-stretch derivative asset; MIDI scales
+  note/CC times. Left-edge drags anchor the clip's END. UI: sizing-mode control next to the
+  toolbar tools (Normal / Moves Contents / Applies Time Stretch, persisted as ui.sizingMode);
+  the resize drag HUD shows the stretch ratio.
 - `cmd/clip.split {clipIds:[], atBeat}` → `{newClipIds:[]}` ; `cmd/clip.join {clipIds:[]}` → `{clip}`
   (midi only in v1; audio join only if contiguous same-asset)
 - `cmd/clip.stretch {clipId, ratio, transpose?, tape?, algorithm?}` → `{assetId, lengthSamples}`

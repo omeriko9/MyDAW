@@ -839,6 +839,17 @@ export interface ClipResizeRequest {
   edge: ClipEdge;
   newStartBeat?: number;
   newLengthBeats?: number;
+  /** Cubase "Sizing Moves Contents": the material rides with the dragged edge. */
+  moveContents?: boolean;
+}
+
+/** "Sizing Applies Time Stretch" resize: audio renders a spectral-stretch derivative,
+ *  MIDI scales note/CC times; left-edge drags anchor the clip's END. */
+export interface ClipResizeStretchRequest {
+  clipId: number;
+  edge: ClipEdge;
+  newStartBeat?: number;
+  newLengthBeats?: number;
 }
 
 export interface ClipSplitRequest {
@@ -1795,6 +1806,7 @@ export interface RequestMap {
   "cmd/clip.addAudio": { req: ClipAddAudioRequest; reply: ClipAddAudioReply };
   "cmd/clip.move": { req: ClipMoveRequest; reply: EmptyObject };
   "cmd/clip.resize": { req: ClipResizeRequest; reply: EmptyObject };
+  "cmd/clip.resizeStretch": { req: ClipResizeStretchRequest; reply: { assetId?: number; lengthSamples?: number; lengthBeats?: number } };
   "cmd/clip.split": { req: ClipSplitRequest; reply: ClipSplitReply };
   "cmd/clip.join": { req: ClipJoinRequest; reply: ClipJoinReply };
   "cmd/clip.crossfade": { req: ClipCrossfadeRequest; reply: { overlapSec: number } };

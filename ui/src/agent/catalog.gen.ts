@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "b270a496799fa94c73cb368817d167f606835c493a93ae79d57814030a0266e4";
+export const AGENT_CATALOG_SHA256 = "e40c7d4c075a364e561ea5c5fc3190e5829c14a9e9b119da80e7c05a2e3c94f1";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -1155,13 +1155,17 @@ export const AGENT_CATALOG: AgentCatalog = {
     },
     "ClipResizeRequest": {
       "additionalProperties": false,
-      "description": "audio: trims srcOffset/len; no stretch in v1 (SPEC §5.3)",
+      "description": "audio: trims srcOffset/len (use clip.resizeStretch to stretch); moveContents = Cubase Sizing Moves Contents",
       "properties": {
         "clipId": {
           "type": "number"
         },
         "edge": {
           "$ref": "#/schemas/ClipEdge"
+        },
+        "moveContents": {
+          "description": "the material rides with the dragged edge instead of staying timeline-anchored",
+          "type": "boolean"
         },
         "newLengthBeats": {
           "type": "number"
@@ -5433,6 +5437,70 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "edge": "r",
+            "newLengthBeats": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.resizeStretch",
+      "category": "clips",
+      "description": "Sizing Applies Time Stretch: resize AND stretch the content to fit (audio renders a spectral derivative, MIDI scales times); left edge anchors the END.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "edge": {
+            "$ref": "#/schemas/ClipEdge"
+          },
+          "newLengthBeats": {
+            "type": "number"
+          },
+          "newStartBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "edge"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthBeats": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "type": "object"
       },
       "examples": [
         {
@@ -10057,6 +10125,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/clip.move",
   "cmd/clip.processAudio",
   "cmd/clip.resize",
+  "cmd/clip.resizeStretch",
   "cmd/clip.set",
   "cmd/clip.split",
   "cmd/clip.stretch",
@@ -10382,6 +10451,10 @@ export const REQUEST_COVERAGE = {
   "cmd/clip.resize": {
     "kind": "operation",
     "operation": "cmd/clip.resize"
+  },
+  "cmd/clip.resizeStretch": {
+    "kind": "operation",
+    "operation": "cmd/clip.resizeStretch"
   },
   "cmd/clip.split": {
     "kind": "operation",
@@ -11009,6 +11082,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
     }
   ],
   "cmd/clip.resize": [
+    {
+      "clipId": 21,
+      "edge": "r",
+      "newLengthBeats": 8
+    }
+  ],
+  "cmd/clip.resizeStretch": [
     {
       "clipId": 21,
       "edge": "r",

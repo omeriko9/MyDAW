@@ -147,7 +147,21 @@ export const resizeClip = (
   clipId: number,
   edge: ClipEdge,
   opts: { newStartBeat?: number; newLengthBeats?: number },
-) => ws.request("cmd/clip.resize", { clipId, edge, ...opts });
+  moveContents?: boolean,
+) =>
+  ws.request("cmd/clip.resize", {
+    clipId,
+    edge,
+    ...opts,
+    ...(moveContents ? { moveContents: true } : {}),
+  });
+
+/** "Sizing Applies Time Stretch": resize + stretch the content to fit, one undo entry. */
+export const resizeStretchClip = (
+  clipId: number,
+  edge: ClipEdge,
+  opts: { newStartBeat?: number; newLengthBeats?: number },
+) => ws.request("cmd/clip.resizeStretch", { clipId, edge, ...opts });
 
 export const splitClips = (clipIds: number[], atBeat: number) =>
   ws.request("cmd/clip.split", { clipIds, atBeat });
