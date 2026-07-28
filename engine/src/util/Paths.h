@@ -36,6 +36,10 @@ bool ensureDir(const std::string& utf8Path);
 bool fileExists(const std::string& utf8Path);
 bool dirExists(const std::string& utf8Path);
 
+// Deletes one file. Returns true when the file is gone afterwards (including
+// "didn't exist"). Never throws.
+bool deleteFile(const std::string& utf8Path);
+
 // Parent directory of `path` (no trailing separator); "" if none.
 std::string parentDir(std::string_view path);
 

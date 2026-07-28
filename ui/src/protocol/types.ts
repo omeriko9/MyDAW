@@ -1916,6 +1916,7 @@ export interface RequestMap {
   "midi/setThruTracks": { req: MidiSetThruTracksRequest; reply: EmptyObject };
   "media/import": { req: MediaImportRequest; reply: MediaImportReply };
   "media/relink": { req: MediaRelinkRequest; reply: EmptyObject };
+  "cmd/media.removeUnused": { req: { preview?: boolean; deleteFiles?: boolean }; reply: { unused: Array<{ id: number; file: string }>; count: number; deletedFiles?: number } };
   "export/render": { req: ExportRenderRequest; reply: ExportRenderReply };
   "export/midi": { req: ExportMidiRequest; reply: ExportMidiReply };
   "export/trackArchive": { req: ExportTrackArchiveRequest; reply: ExportTrackArchiveReply };

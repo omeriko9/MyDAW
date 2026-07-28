@@ -195,6 +195,11 @@ export const joinClips = (clipIds: number[]) => ws.request("cmd/clip.join", { cl
 export const processChain = (req: ClipProcessChainRequest) =>
   ws.request("cmd/clip.processChain", req);
 
+/** Cubase "Remove Unused Media": preview lists, execute removes records; deleteFiles
+ *  also deletes project-owned files and clears undo (cannot be undone). */
+export const removeUnusedMedia = (opts?: { preview?: boolean; deleteFiles?: boolean }) =>
+  ws.request("cmd/media.removeUnused", { ...opts });
+
 /** Symmetric crossfade over the overlap of two audio clips on one track (X). */
 export const crossfadeClips = (clipIds: number[], curve?: FadeCurve) =>
   ws.request("cmd/clip.crossfade", { clipIds, ...(curve !== undefined ? { curve } : {}) });

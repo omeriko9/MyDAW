@@ -143,6 +143,12 @@ bool fileExists(const std::string& utf8Path) {
     return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+bool deleteFile(const std::string& utf8Path) {
+    if (!fileExists(utf8Path))
+        return true;
+    return ::DeleteFileW(utf8ToWide(utf8Path).c_str()) != 0;
+}
+
 bool dirExists(const std::string& utf8Path) {
     const DWORD attrs = ::GetFileAttributesW(utf8ToWide(utf8Path).c_str());
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);

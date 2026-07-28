@@ -734,7 +734,7 @@ json CommandProcessor::execute(const std::string& type, const json& payload,
     if (transient || !r.mutated)
         return reply;
 
-    if (ctx_.undoStack) {
+    if (ctx_.undoStack && !r.skipUndo) {
         UndoEntry e;
         e.label = r.label.empty() ? type : r.label;
         e.before = std::move(before);
@@ -973,6 +973,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.bounceSelection") return clipBounceSelection(p, r);
     if (type == "cmd/clip.dissolve")        return clipDissolve(p, r);
     if (type == "cmd/midi.mergeLoop")       return midiMergeLoop(p, r);
+    if (type == "cmd/media.removeUnused")   return mediaRemoveUnused(p, r);
     if (type == "cmd/track.renderInPlace")  return trackRenderInPlace(p, r);
     if (type == "cmd/track.createSampler")  return trackCreateSampler(p, r);
     if (type == "cmd/clip.delete")      return clipDelete(p, r);
@@ -2054,6 +2055,104 @@ json CommandProcessor::midiMergeLoop(const json& p, CmdResult& r) {
     r.structural = true;
     r.fullEvent = true;
     return json{{"trackId", newTrackId}, {"clipId", newClipId}, {"sourceTracks", sourceTracks}};
+}
+
+// cmd/media.removeUnused {preview?, deleteFiles?} — Cubase "Remove Unused Media".
+// The reference scan covers EVERY asset consumer: flat clips (assetId + DOP
+// provenance), take-folder lanes, parked track versions (their clips AND their take
+// folders), frozen tracks, and sampler bindings. preview:true only reports.
+// Removing records is a normal undoable edit (files stay on disk, so undo is fully
+// consistent). deleteFiles:true additionally deletes project-owned files (relative
+// "audio/…" entries of a SAVED project only — the shared fallback media dir is never
+// touched) and, because that cannot be undone, clears the undo stack and pushes no
+// entry for this command either.
+json CommandProcessor::mediaRemoveUnused(const json& p, CmdResult& r) {
+    Model& m = model();
+    const bool preview = getOr<bool>(p, "preview", false);
+    const bool deleteFiles = getOr<bool>(p, "deleteFiles", false);
+
+    std::set<uint64_t> used;
+    const auto scanClip = [&used](const Clip& c) {
+        if (const AudioClip* a = asAudio(&c)) {
+            if (a->assetId != 0)
+                used.insert(a->assetId);
+            if (a->dopAssetId != 0)
+                used.insert(a->dopAssetId);
+        }
+    };
+    const auto scanFolders = [&](const std::vector<TakeFolder>& folders) {
+        for (const TakeFolder& f : folders)
+            for (const TakeLane& lane : f.lanes)
+                for (const Clip& c : lane.clips)
+                    scanClip(c);
+    };
+    const auto scanTrack = [&](const Track& t) {
+        for (const Clip& c : t.clips)
+            scanClip(c);
+        scanFolders(t.takeFolders);
+        for (const TrackVersion& v : t.versions) {
+            for (const Clip& c : v.clips)
+                scanClip(c);
+            scanFolders(v.takeFolders);
+        }
+        if (t.frozen && t.frozenAssetId != 0)
+            used.insert(t.frozenAssetId);
+        for (const PluginInstance& pi : t.inserts)
+            if (pi.sampleAssetId != 0)
+                used.insert(pi.sampleAssetId);
+    };
+    for (const Track& t : m.project.tracks)
+        scanTrack(t);
+    scanTrack(m.project.masterTrack);
+
+    json unusedList = json::array();
+    std::vector<size_t> unusedIdx;
+    for (size_t i = 0; i < m.project.assets.size(); ++i) {
+        const Asset& a = m.project.assets[i];
+        if (used.count(a.id) != 0)
+            continue;
+        unusedIdx.push_back(i);
+        unusedList.push_back(json{{"id", a.id}, {"file", a.file}});
+    }
+    if (preview || unusedIdx.empty()) {
+        r.mutated = false;
+        return json{{"unused", unusedList}, {"count", unusedIdx.size()}};
+    }
+
+    // File deletion targets: project-owned relative entries only, and only when no
+    // SURVIVING asset record points at the same file.
+    std::set<std::string> survivingFiles;
+    {
+        std::set<size_t> gone(unusedIdx.begin(), unusedIdx.end());
+        for (size_t i = 0; i < m.project.assets.size(); ++i)
+            if (gone.count(i) == 0)
+                survivingFiles.insert(m.project.assets[i].file);
+    }
+    int deleted = 0;
+    if (deleteFiles && projectIO_ && projectIO_->hasPath()) {
+        for (const size_t i : unusedIdx) {
+            const std::string& file = m.project.assets[i].file;
+            const bool relative =
+                file.rfind("audio/", 0) == 0 || file.rfind("audio\\", 0) == 0;
+            if (!relative || survivingFiles.count(file) != 0)
+                continue;
+            if (mydaw::deleteFile(pathJoin(projectIO_->projectDir(), file)))
+                ++deleted;
+        }
+    }
+    for (auto it = unusedIdx.rbegin(); it != unusedIdx.rend(); ++it)
+        m.project.assets.erase(m.project.assets.begin() + static_cast<ptrdiff_t>(*it));
+
+    if (deleteFiles && ctx_.undoStack) {
+        ctx_.undoStack->clear(); // deleted files make any restore inconsistent
+        r.skipUndo = true;
+    }
+    r.label = "Remove Unused Media";
+    r.structural = true;
+    r.fullEvent = true; // asset list changed
+    return json{{"unused", unusedList},
+                {"count", unusedIdx.size()},
+                {"deletedFiles", deleted}};
 }
 
 // cmd/track.duplicate {trackId} → {track} — deep copy inserted right after the source

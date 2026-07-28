@@ -244,7 +244,9 @@ Caveat: synchronous stretch stalls on long clips — acceptable v1 (bounce prece
 > without rendering), BUILT-IN effects as offline processes (block-pumped, tails truncated),
 > Offline Processes… dialog (live list, per-op param re-edit). Still open from this swipe:
 > VST/out-of-process plugins as offline processes (throwaway-instance route), async recompute
-> with progress for long clips, orphan derived-file GC on save, per-entry plugin param UI.
+> with progress for long clips, per-entry plugin param UI. The derived-file leak is handled by
+> **cmd/media.removeUnused** (Project ▸ Remove Unused Media…, shipped 2026-07-28): preview →
+> undoable record removal → optional file deletion (clears undo, saved projects only).
 
 The real Cubase differentiator: per-event, ordered, re-editable, non-destructive process history.
 

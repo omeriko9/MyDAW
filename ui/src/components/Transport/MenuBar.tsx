@@ -23,6 +23,7 @@ import {
   mergeMidiLoop,
   panic,
   removeTrack,
+  removeUnusedMedia,
 } from "../../store/actions";
 import { showToast } from "../common/ToastHost";
 import { hasClipboard } from "../../lib/clipboard";
@@ -40,6 +41,7 @@ import { openLogicalEditor } from "../PianoRoll/LogicalEditorDialog";
 import type { MenuEntry } from "../common/ContextMenu";
 import { Icon, type IconName } from "../common/icons";
 import { confirmDialog } from "../Dialogs/confirm";
+import { fieldsDialog } from "../Dialogs/fields";
 import { addTrackMenuItems } from "../Timeline/TrackHeaders";
 import {
   closeProjectFlow,
@@ -346,7 +348,53 @@ function buildProjectMenu(): MenuEntry[] {
       title: none ? "Select a track first" : undefined,
       onClick: () => removeSelectedTracksFlow(selTracks),
     },
+    "separator",
+    {
+      label: "Remove Unused Media…",
+      icon: "trash",
+      disabled: noProject,
+      title: noProject
+        ? "No project"
+        : "Drop asset records nothing references (edit renders pile up) — optionally delete the files too",
+      onClick: () => removeUnusedMediaFlow(),
+    },
   ];
+}
+
+/** Preview → confirm (optional file deletion) → execute. The engine's reference scan
+ *  covers clips, DOP provenance, take lanes, track versions, freezes, and samplers. */
+function removeUnusedMediaFlow(): void {
+  void removeUnusedMedia({ preview: true })
+    .then((r) => {
+      if (r.count === 0) {
+        showToast("No unused media — every asset is referenced", "success");
+        return;
+      }
+      return fieldsDialog({
+        title: "Remove Unused Media",
+        message: `${r.count} asset record${r.count === 1 ? " is" : "s are"} not referenced by any clip, take, track version, freeze, or sampler. Removing records is undoable; deleting files is not.`,
+        fields: [
+          {
+            key: "del",
+            label: "Also delete the files from disk (clears undo — cannot be undone)",
+            kind: "checkbox",
+            value: false,
+          },
+        ],
+        confirmLabel: "Remove",
+      }).then((v) => {
+        if (!v) return;
+        const del = v.del === true;
+        return removeUnusedMedia({ deleteFiles: del }).then((res) => {
+          showToast(
+            `Removed ${res.count} unused asset${res.count === 1 ? "" : "s"}` +
+              (del ? ` — ${res.deletedFiles ?? 0} file${(res.deletedFiles ?? 0) === 1 ? "" : "s"} deleted` : ""),
+            "success",
+          );
+        });
+      });
+    })
+    .catch(() => showToast("Remove Unused Media failed", "info"));
 }
 
 /* ============================================================================

@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "c95d48ca163f343d04404267e5be734b90498d4a652a6086dda34ca1db7d1b5a";
+export const AGENT_CATALOG_SHA256 = "9ffabcbbcea01a6aeae5a0012f5ea2c898f6e2a48885d4ac1dc56bff9d9cf917";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -6040,6 +6040,78 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/media.removeUnused",
+      "category": "media",
+      "description": "Remove asset records no clip/take/version/freeze/sampler references. preview only reports; deleteFiles also deletes project-owned files and clears undo.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "deleteFiles": {
+            "description": "also delete project-owned files from disk — clears the undo stack (cannot be undone)",
+            "type": "boolean"
+          },
+          "preview": {
+            "description": "report the unused assets without changing anything",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "deletedFiles": {
+            "type": "number"
+          },
+          "unused": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "file"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "unused",
+          "count"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "preview": true
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/midi.mergeLoop",
       "category": "clips",
       "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
@@ -10525,6 +10597,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/marker.add",
   "cmd/marker.remove",
   "cmd/marker.set",
+  "cmd/media.removeUnused",
   "cmd/midi.mergeLoop",
   "cmd/notes.edit",
   "cmd/notes.quantize",
@@ -11073,6 +11146,10 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "media/relink"
   },
+  "cmd/media.removeUnused": {
+    "kind": "operation",
+    "operation": "cmd/media.removeUnused"
+  },
   "export/render": {
     "kind": "operation",
     "operation": "export/render"
@@ -11556,6 +11633,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
         "name": "Bridge",
         "beat": 32
       }
+    }
+  ],
+  "cmd/media.removeUnused": [
+    {
+      "preview": true
     }
   ],
   "cmd/midi.mergeLoop": [

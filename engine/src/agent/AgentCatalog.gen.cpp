@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "c95d48ca163f343d04404267e5be734b90498d4a652a6086dda34ca1db7d1b5a";
+const char kAgentCatalogSha256[] = "9ffabcbbcea01a6aeae5a0012f5ea2c898f6e2a48885d4ac1dc56bff9d9cf917";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -6015,6 +6015,78 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "name": "Bridge",
               "beat": 32
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/media.removeUnused",
+      "category": "media",
+      "description": "Remove asset records no clip/take/version/freeze/sampler references. preview only reports; deleteFiles also deletes project-owned files and clears undo.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "deleteFiles": {
+            "description": "also delete project-owned files from disk — clears the undo stack (cannot be undone)",
+            "type": "boolean"
+          },
+          "preview": {
+            "description": "report the unused assets without changing anything",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "deletedFiles": {
+            "type": "number"
+          },
+          "unused": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "file"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "unused",
+          "count"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "preview": true
           }
         }
       ]

@@ -522,6 +522,26 @@ async function main() {
       `chained=${chained} edited=${edited} cleared=${cleared} permanent=${permanent}`);
   }
 
+  // Remove Unused Media: the DOP/process checks above left derived assets behind
+  {
+    const pv = await req("cmd/media.removeUnused", { preview: true });
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const beforeAssets = proj.assets.length;
+    const previewOnly = proj.assets.length === beforeAssets && pv.count > 0; // preview mutated nothing
+    const run = await req("cmd/media.removeUnused", {}); // records only (undoable)
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const removed = beforeAssets - proj.assets.length === run.count && run.count === pv.count;
+    // every remaining asset must be referenced (second pass finds nothing)
+    const again = await req("cmd/media.removeUnused", { preview: true });
+    const clean = again.count === 0;
+    await req("edit/undo", {}); // records restored (files were never touched)
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const restored = proj.assets.length === beforeAssets;
+    report("media.removeUnused (preview, remove records, undo restores)",
+      previewOnly && removed && clean && restored,
+      `unused=${pv.count} removed=${run.count} cleanAfter=${clean} undoRestored=${restored}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

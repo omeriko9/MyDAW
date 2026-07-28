@@ -120,6 +120,10 @@ private:
         std::string label;       // undo label; "" -> command type used
         bool mutated = true;     // false: nothing changed (no undo entry / events)
         bool structural = false; // AudioGraph::rebuild required
+        // True: mutation happened but NO undo entry is pushed (irreversible side
+        // effects — e.g. media.removeUnused with deleteFiles cleared the stack;
+        // an entry would "restore" records whose files are gone).
+        bool skipUndo = false;
         // event/projectChanged shape (§5.8):
         bool fullEvent = false;          // scope:"project" + full snapshot
         std::string scope = "track";     // "track" | "clip" | "mixer"
@@ -165,6 +169,7 @@ private:
     json clipBounceSelection(const json& p, CmdResult& r);
     json clipResizeStretch(const json& p, CmdResult& r);
     json clipProcessChain(const json& p, CmdResult& r);
+    json mediaRemoveUnused(const json& p, CmdResult& r);
     // DOP helpers (SPEC §6): replay a clip's offline-process chain into a new derived
     // asset / drop the chain keeping the current render (also used by length-changing
     // bakes so trims keep meaning).

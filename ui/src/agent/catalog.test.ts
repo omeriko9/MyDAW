@@ -100,6 +100,7 @@ const REQUEST_TYPES = [
   "midi/setThruTracks",
   "media/import",
   "media/relink",
+  "cmd/media.removeUnused",
   "export/render",
   "export/midi",
   "export/trackArchive",
@@ -285,9 +286,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(127);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(128);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(141);
+    expect(AGENT_CATALOG.operations).toHaveLength(142);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

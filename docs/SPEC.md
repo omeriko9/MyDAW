@@ -242,6 +242,16 @@ the entire drag.
   `fadeIn`/`fadeOut` (full-span, `curve`) | `reverse` | `invert` | `silence` | `dcRemove` |
   `stereoFlip` (`flipMode`) | `resample` (`targetRate` — length-changing, so it collapses the
   chain and bakes destructively as before).
+- `cmd/media.removeUnused {preview?, deleteFiles?}` → `{unused:[{id,file}], count,
+  deletedFiles?}`: Cubase "Remove Unused Media". The reference scan covers every asset
+  consumer — flat clips (assetId + DOP provenance), take-folder lanes, parked track versions
+  (clips AND their take folders), frozen tracks, sampler bindings. `preview` only reports.
+  Removing records is a normal undoable edit (files stay on disk → undo is consistent);
+  `deleteFiles` additionally deletes project-owned files (relative `audio/…` entries of a
+  SAVED project only — the shared fallback media dir is never touched, nor files another
+  surviving record references) and clears the undo stack (CmdResult.skipUndo — no entry is
+  pushed either, since restore would point at deleted files). UI: Project menu ▸ Remove
+  Unused Media… (preview → count + delete-files checkbox → execute).
 - `cmd/clip.processChain {clipId, action, …}` → `{assetId, lengthSamples}`: edit the chain —
   `addPlugin {uid}` (built-in effects only, default params; params normalized 0..1 by id) |
   `remove`/`toggle`/`reorder`/`setParams {processId, …}` | `clear` (drops the chain and

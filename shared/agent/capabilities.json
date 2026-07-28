@@ -6012,6 +6012,78 @@
       ]
     },
     {
+      "name": "cmd/media.removeUnused",
+      "category": "media",
+      "description": "Remove asset records no clip/take/version/freeze/sampler references. preview only reports; deleteFiles also deletes project-owned files and clears undo.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "deleteFiles": {
+            "description": "also delete project-owned files from disk — clears the undo stack (cannot be undone)",
+            "type": "boolean"
+          },
+          "preview": {
+            "description": "report the unused assets without changing anything",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "deletedFiles": {
+            "type": "number"
+          },
+          "unused": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "file"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "unused",
+          "count"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "preview": true
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/midi.mergeLoop",
       "category": "clips",
       "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
