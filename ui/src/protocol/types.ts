@@ -1361,6 +1361,10 @@ export interface ExportRenderReply {
 /** SMF export — if no path, the engine shows a native save dialog (*.mid). */
 export interface ExportMidiRequest {
   path?: string;
+  /** Optional range (endBeat > startBeat): export only that span, re-anchored to its
+   *  start — Cubase "Export MIDI Loop". */
+  startBeat?: number;
+  endBeat?: number;
 }
 
 export interface ExportMidiReply {
@@ -1795,6 +1799,8 @@ export interface RequestMap {
   "cmd/clip.join": { req: ClipJoinRequest; reply: ClipJoinReply };
   "cmd/clip.crossfade": { req: ClipCrossfadeRequest; reply: { overlapSec: number } };
   "cmd/clip.bounceSelection": { req: { clipIds: number[] }; reply: { clipId: number; assetId: number } };
+  "cmd/clip.dissolve": { req: { clipId: number; by?: "channel" | "pitch" }; reply: { trackIds: number[] } };
+  "cmd/midi.mergeLoop": { req: { trackIds?: number[] }; reply: { trackId: number; clipId: number; sourceTracks: number } };
   "cmd/clip.delete": { req: ClipDeleteRequest; reply: EmptyObject };
   "cmd/clip.duplicate": { req: ClipDuplicateRequest; reply: ClipDuplicateReply };
   "cmd/clip.set": { req: ClipSetRequest; reply: EmptyObject };

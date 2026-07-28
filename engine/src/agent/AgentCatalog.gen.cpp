@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "5ed106cc3be6536c138f85f926a04590a08243e698f43e48e8313a38dac7ed4b";
+const char kAgentCatalogSha256[] = "b270a496799fa94c73cb368817d167f606835c493a93ae79d57814030a0266e4";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -1459,10 +1459,16 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     },
     "ExportMidiRequest": {
       "additionalProperties": false,
-      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid).",
+      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid). Optional beat range (endBeat > startBeat) exports only that span, re-anchored to its start (Export MIDI Loop).",
       "properties": {
+        "endBeat": {
+          "type": "number"
+        },
         "path": {
           "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
         }
       },
       "type": "object"
@@ -5096,6 +5102,70 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/clip.dissolve",
+      "category": "clips",
+      "description": "Cubase Dissolve Part: split a MIDI clip into one new track per channel (or pitch); controllers copied to each part, source clip muted.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "track.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "enum": [
+              "channel",
+              "pitch"
+            ],
+            "type": "string"
+          },
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "trackIds"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "by": "pitch"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/clip.duplicate",
       "category": "clips",
       "description": "Duplicate one or more clips in place.",
@@ -5679,6 +5749,66 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "beat": 32
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "cmd/midi.mergeLoop",
+      "category": "clips",
+      "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "track.id",
+        "clip.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "description": "source tracks (empty/absent = every unmuted MIDI/instrument track)",
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "sourceTracks": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "clipId",
+          "sourceTracks"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
         }
       ]
     },
@@ -10041,6 +10171,7 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/clip.addMidi",
     "cmd/clip.crossfade",
     "cmd/clip.delete",
+    "cmd/clip.dissolve",
     "cmd/clip.duplicate",
     "cmd/clip.join",
     "cmd/clip.move",
@@ -10052,6 +10183,7 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/marker.add",
     "cmd/marker.remove",
     "cmd/marker.set",
+    "cmd/midi.mergeLoop",
     "cmd/notes.edit",
     "cmd/notes.quantize",
     "cmd/plugin.add",

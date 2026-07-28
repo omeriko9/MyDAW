@@ -388,6 +388,36 @@ async function main() {
     report("renderInPlace + bounceSelection + createSampler", ok, detail);
   }
 
+  // dissolve part / merge MIDI in loop / export MIDI loop
+  {
+    // dissolve by pitch: the 3-note clip (60/64/67) → 3 new midi tracks, source muted
+    const dv = await req("cmd/clip.dissolve", { clipId: mclip.id, by: "pitch" });
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const dvTracks = (dv.trackIds ?? []).map((tid) => proj.tracks.find((t) => t.id === tid));
+    const srcMuted =
+      proj.tracks.find((t) => t.id === midiT.id)?.clips?.find((c) => c.id === mclip.id)
+        ?.muted === true;
+    const dvOk =
+      dvTracks.length === 3 &&
+      dvTracks.every((t) => t?.kind === "midi" && t?.clips?.[0]?.notes?.length === 1) &&
+      srcMuted;
+    await req("edit/undo", {});
+
+    // merge MIDI in loop (loop 0..8 was set earlier): all unmuted midi tracks → 1 clip
+    const mg = await req("cmd/midi.mergeLoop", {});
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const mt = proj.tracks.find((t) => t.id === mg.trackId);
+    const mgOk = mt?.kind === "midi" && (mt?.clips?.[0]?.notes?.length ?? 0) >= 3;
+    await req("edit/undo", {});
+
+    // export only the loop range as SMF
+    const midPath = path.join(TMP, "loop.mid");
+    await req("export/midi", { path: midPath, startBeat: 0, endBeat: 8 });
+    const emOk = existsSync(midPath) && readFileSync(midPath).toString("ascii", 0, 4) === "MThd";
+    report("clip.dissolve + midi.mergeLoop + export MIDI loop", dvOk && mgOk && emOk,
+      `dissolve=${dvOk} (${dvTracks.length} tracks, srcMuted=${srcMuted}) merge=${mgOk} (${mt?.clips?.[0]?.notes?.length ?? 0} notes) smf=${emOk}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

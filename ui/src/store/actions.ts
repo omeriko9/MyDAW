@@ -196,6 +196,16 @@ export const renderTrackInPlace = (trackId: number, startBeat?: number, endBeat?
 export const createSamplerTrack = (clipId: number) =>
   ws.request("cmd/track.createSampler", { clipId });
 
+/** Cubase Dissolve Part: one new MIDI track per channel/pitch; source clip muted. */
+export const dissolveClip = (clipId: number, by: "channel" | "pitch") =>
+  ws.request("cmd/clip.dissolve", { clipId, by });
+
+/** Cubase Merge MIDI in Loop: loop-region events from MIDI tracks → one new clip/track. */
+export const mergeMidiLoop = (trackIds?: number[]) =>
+  ws.request("cmd/midi.mergeLoop", {
+    ...(trackIds !== undefined && trackIds.length > 0 ? { trackIds } : {}),
+  });
+
 export const deleteClips = (clipIds: number[]) => ws.request("cmd/clip.delete", { clipIds });
 
 /** atSource: copies land ON the originals (Alt+drag measures its delta from there);

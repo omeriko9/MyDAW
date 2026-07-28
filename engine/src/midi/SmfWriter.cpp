@@ -89,12 +89,22 @@ uint8_t u7(double normalized) { // 0..1 -> 0..127
 
 } // namespace
 
-bool SmfWriter::write(const Model& model, const std::string& absPath, std::string& err) {
+bool SmfWriter::write(const Model& model, const std::string& absPath, std::string& err,
+                      double startBeat, double endBeat) {
     err.clear();
     const Project& p = model.project;
 
     TempoMap map; // bar -> beat for time-signature metas (sample rate irrelevant)
     map.setMap(p.tempoMap, p.timeSigMap);
+
+    // Optional range export (Cubase "Export MIDI Loop"): events re-anchor to startBeat;
+    // tempo/timesig entries before the range collapse to tick 0 (last one wins).
+    const bool ranged = endBeat > startBeat;
+    const double rs = ranged ? std::max(0.0, startBeat) : 0.0;
+    const int64_t baseTick = ranged ? tickAt(rs) : 0;
+    const auto tk = [baseTick](double beat) {
+        return std::max<int64_t>(0, tickAt(beat) - baseTick);
+    };
 
     // ---- track 0: tempo + time-signature metas ---------------------------------
     std::vector<TEvent> conductor;
@@ -104,7 +114,7 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
             std::clamp<int64_t>(static_cast<int64_t>(std::llround(60000000.0 / bpm)), 1,
                                 0xFFFFFF);
         TEvent e;
-        e.tick = tickAt(te.beat);
+        e.tick = tk(te.beat);
         e.bytes = {0xFF, 0x51, 0x03, static_cast<uint8_t>((usPerQn >> 16) & 0xFF),
                    static_cast<uint8_t>((usPerQn >> 8) & 0xFF),
                    static_cast<uint8_t>(usPerQn & 0xFF)};
@@ -115,7 +125,7 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
         for (int d = ts.den; d > 1 && lg < 7; d >>= 1)
             ++lg;
         TEvent e;
-        e.tick = tickAt(map.beatAtBar(ts.bar));
+        e.tick = tk(map.beatAtBar(ts.bar));
         e.prio = 1;
         e.bytes = {0xFF, 0x58, 0x04,
                    static_cast<uint8_t>(std::clamp(ts.num, 1, 255)), lg,
@@ -157,11 +167,16 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
                 if (n.startBeat < 0.0 || n.startBeat >= mc->lengthBeats)
                     continue;
                 const double onB = mc->startBeat + n.startBeat;
-                const double offB = std::min(onB + n.lengthBeats, clipEnd);
+                double offB = std::min(onB + n.lengthBeats, clipEnd);
+                if (ranged) {
+                    if (onB < rs || onB >= endBeat)
+                        continue;
+                    offB = std::min(offB, endBeat);
+                }
                 if (offB <= onB)
                     continue;
-                const int64_t on = tickAt(onB);
-                int64_t off = tickAt(offB);
+                const int64_t on = tk(onB);
+                int64_t off = tk(offB);
                 if (off <= on)
                     off = on + 1;
                 const uint8_t pitch =
@@ -178,7 +193,10 @@ bool SmfWriter::write(const Model& model, const std::string& absPath, std::strin
                     continue;
                 if (pt.beat < 0.0 || pt.beat >= mc->lengthBeats)
                     continue;
-                const int64_t tick = tickAt(mc->startBeat + pt.beat);
+                const double absB = mc->startBeat + pt.beat;
+                if (ranged && (absB < rs || absB >= endBeat))
+                    continue;
+                const int64_t tick = tk(absB);
                 TEvent e;
                 e.tick = tick;
                 e.prio = 1;

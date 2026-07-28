@@ -55,6 +55,10 @@ import * as D from "./prDraw";
 import * as MF from "../../lib/midiFunctions";
 import "./pianoRoll.css";
 
+/** Note clipboard (module-level so notes can be pasted into another clip): note inputs
+ *  with startBeat RELATIVE to the copied selection's earliest onset. */
+let noteClipboard: NoteInput[] | null = null;
+
 /* ============================================================================
  * Active-clip lookup
  * ========================================================================= */
@@ -1007,8 +1011,8 @@ function Editor({ track, clip }: EditorProps) {
   };
 
   /* stable api for []-effects (keyboard context, escape listener) */
-  const apiRef = useRef({ cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected });
-  apiRef.current = { cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected };
+  const apiRef = useRef({ cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected });
+  apiRef.current = { cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1065,6 +1069,59 @@ function Editor({ track, clip }: EditorProps) {
       selectAll: () => {
         const x = ctx();
         if (x) x.st.setSelection({ noteIds: x.c.notes.map((n) => n.id) });
+      },
+      // Note-level clipboard (module-level, so notes travel between clips). Falsy
+      // return = fall through to the timeline's clip clipboard.
+      copy: () => {
+        const x = ctx();
+        if (!x || x.sel.length === 0) return false;
+        const notes = x.c.notes.filter((n) => x.sel.includes(n.id));
+        const base = Math.min(...notes.map((n) => n.startBeat));
+        noteClipboard = notes.map((n) => ({
+          pitch: n.pitch,
+          velocity: n.velocity,
+          startBeat: n.startBeat - base,
+          lengthBeats: n.lengthBeats,
+          ...(n.channel !== undefined ? { channel: n.channel } : {}),
+        }));
+        return true;
+      },
+      cut: () => {
+        const x = ctx();
+        if (!x || x.sel.length === 0) return false;
+        const notes = x.c.notes.filter((n) => x.sel.includes(n.id));
+        const base = Math.min(...notes.map((n) => n.startBeat));
+        noteClipboard = notes.map((n) => ({
+          pitch: n.pitch,
+          velocity: n.velocity,
+          startBeat: n.startBeat - base,
+          lengthBeats: n.lengthBeats,
+          ...(n.channel !== undefined ? { channel: n.channel } : {}),
+        }));
+        x.api.deleteSelected();
+        return true;
+      },
+      // Paste at the grid-snapped playhead when it's inside the active clip, else at
+      // the clip start — clip-relative, so cross-clip paste lands musically.
+      paste: () => {
+        const x = ctx();
+        if (!x || !noteClipboard || noteClipboard.length === 0) return false;
+        const c = x.c;
+        const playhead = transportBus.last?.beat ?? 0;
+        const rel = playhead - c.startBeat;
+        const step = stepRef.current;
+        const inClip = rel >= 0 && rel < c.lengthBeats;
+        const at = inClip ? Math.round(rel / step) * step : 0;
+        void editNotes(c.id, {
+          add: noteClipboard.map((n) => ({ ...n, startBeat: at + n.startBeat })),
+        });
+        return true;
+      },
+      duplicate: () => {
+        const x = ctx();
+        if (!x || x.sel.length === 0) return false;
+        x.api.duplicateSelected();
+        return true;
       },
       escape: () => {
         const x = ctx();

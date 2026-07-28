@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "5ed106cc3be6536c138f85f926a04590a08243e698f43e48e8313a38dac7ed4b";
+export const AGENT_CATALOG_SHA256 = "b270a496799fa94c73cb368817d167f606835c493a93ae79d57814030a0266e4";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -1479,10 +1479,16 @@ export const AGENT_CATALOG: AgentCatalog = {
     },
     "ExportMidiRequest": {
       "additionalProperties": false,
-      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid).",
+      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid). Optional beat range (endBeat > startBeat) exports only that span, re-anchored to its start (Export MIDI Loop).",
       "properties": {
+        "endBeat": {
+          "type": "number"
+        },
         "path": {
           "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
         }
       },
       "type": "object"
@@ -5116,6 +5122,70 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/clip.dissolve",
+      "category": "clips",
+      "description": "Cubase Dissolve Part: split a MIDI clip into one new track per channel (or pitch); controllers copied to each part, source clip muted.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "track.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "enum": [
+              "channel",
+              "pitch"
+            ],
+            "type": "string"
+          },
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "trackIds"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "by": "pitch"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/clip.duplicate",
       "category": "clips",
       "description": "Duplicate one or more clips in place.",
@@ -5699,6 +5769,66 @@ export const AGENT_CATALOG: AgentCatalog = {
               "beat": 32
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "cmd/midi.mergeLoop",
+      "category": "clips",
+      "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "track.id",
+        "clip.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "description": "source tracks (empty/absent = every unmuted MIDI/instrument track)",
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "sourceTracks": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "clipId",
+          "sourceTracks"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
         }
       ]
     },
@@ -9921,6 +10051,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/clip.bounceSelection",
   "cmd/clip.crossfade",
   "cmd/clip.delete",
+  "cmd/clip.dissolve",
   "cmd/clip.duplicate",
   "cmd/clip.join",
   "cmd/clip.move",
@@ -9934,6 +10065,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/marker.add",
   "cmd/marker.remove",
   "cmd/marker.set",
+  "cmd/midi.mergeLoop",
   "cmd/notes.edit",
   "cmd/notes.quantize",
   "cmd/plugin.add",
@@ -10059,6 +10191,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/clip.addMidi",
   "cmd/clip.crossfade",
   "cmd/clip.delete",
+  "cmd/clip.dissolve",
   "cmd/clip.duplicate",
   "cmd/clip.join",
   "cmd/clip.move",
@@ -10070,6 +10203,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/marker.add",
   "cmd/marker.remove",
   "cmd/marker.set",
+  "cmd/midi.mergeLoop",
   "cmd/notes.edit",
   "cmd/notes.quantize",
   "cmd/plugin.add",
@@ -10264,6 +10398,14 @@ export const REQUEST_COVERAGE = {
   "cmd/clip.bounceSelection": {
     "kind": "operation",
     "operation": "cmd/clip.bounceSelection"
+  },
+  "cmd/clip.dissolve": {
+    "kind": "operation",
+    "operation": "cmd/clip.dissolve"
+  },
+  "cmd/midi.mergeLoop": {
+    "kind": "operation",
+    "operation": "cmd/midi.mergeLoop"
   },
   "cmd/clip.delete": {
     "kind": "operation",
@@ -10828,6 +10970,12 @@ export const ENGINE_OPERATION_EXAMPLES = {
       ]
     }
   ],
+  "cmd/clip.dissolve": [
+    {
+      "clipId": 21,
+      "by": "pitch"
+    }
+  ],
   "cmd/clip.duplicate": [
     {
       "clipIds": [
@@ -10925,6 +11073,9 @@ export const ENGINE_OPERATION_EXAMPLES = {
         "beat": 32
       }
     }
+  ],
+  "cmd/midi.mergeLoop": [
+    {}
   ],
   "cmd/notes.edit": [
     {

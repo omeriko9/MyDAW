@@ -34,6 +34,7 @@ import {
   createSamplerTrack,
   crossfadeClips,
   deleteClips,
+  dissolveClip,
   duplicateClips,
   joinClips,
   flattenArranger,
@@ -2505,6 +2506,42 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                 "separator",
                 { label: "Transpose +12 st", onClick: () => fire(stretchClip(clip.id, 2.0, true)) },
                 { label: "Transpose −12 st", onClick: () => fire(stretchClip(clip.id, 0.5, true)) },
+              ],
+            },
+          ] as MenuEntry[])
+        : []),
+      ...(clip.type === "midi"
+        ? ([
+            {
+              label: "Dissolve Part",
+              icon: "layers",
+              title:
+                "Split this clip into one new track per channel/pitch (controllers copied to each; this clip is muted)",
+              submenu: [
+                {
+                  label: "By Channel",
+                  onClick: () =>
+                    void dissolveClip(clip.id, "channel").catch((e) =>
+                      showToast(
+                        e instanceof Error && e.message.includes("share one")
+                          ? "All notes share one channel — nothing to dissolve"
+                          : "Dissolve failed",
+                        "info",
+                      ),
+                    ),
+                },
+                {
+                  label: "By Pitch",
+                  onClick: () =>
+                    void dissolveClip(clip.id, "pitch").catch((e) =>
+                      showToast(
+                        e instanceof Error && e.message.includes("share one")
+                          ? "All notes share one pitch — nothing to dissolve"
+                          : "Dissolve failed",
+                        "info",
+                      ),
+                    ),
+                },
               ],
             },
           ] as MenuEntry[])

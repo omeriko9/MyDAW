@@ -1451,10 +1451,16 @@
     },
     "ExportMidiRequest": {
       "additionalProperties": false,
-      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid).",
+      "description": "SMF export — if no path, the engine shows a native save dialog (*.mid). Optional beat range (endBeat > startBeat) exports only that span, re-anchored to its start (Export MIDI Loop).",
       "properties": {
+        "endBeat": {
+          "type": "number"
+        },
         "path": {
           "type": "string"
+        },
+        "startBeat": {
+          "type": "number"
         }
       },
       "type": "object"
@@ -5088,6 +5094,70 @@
       ]
     },
     {
+      "name": "cmd/clip.dissolve",
+      "category": "clips",
+      "description": "Cubase Dissolve Part: split a MIDI clip into one new track per channel (or pitch); controllers copied to each part, source clip muted.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "track.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "by": {
+            "enum": [
+              "channel",
+              "pitch"
+            ],
+            "type": "string"
+          },
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "trackIds"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "by": "pitch"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/clip.duplicate",
       "category": "clips",
       "description": "Duplicate one or more clips in place.",
@@ -5671,6 +5741,66 @@
               "beat": 32
             }
           }
+        }
+      ]
+    },
+    {
+      "name": "cmd/midi.mergeLoop",
+      "category": "clips",
+      "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [
+        "track.id",
+        "clip.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackIds": {
+            "description": "source tracks (empty/absent = every unmuted MIDI/instrument track)",
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "sourceTracks": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "clipId",
+          "sourceTracks"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
         }
       ]
     },

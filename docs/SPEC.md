@@ -254,6 +254,21 @@ the entire drag.
   one undoable step that adds an instrument track after the clip's track, loads
   `builtin:sampler`, and binds the clip's asset via the setSample path. The sampler now has a
   dedicated editor panel (`InstrumentEditors.tsx`).
+- `cmd/clip.dissolve {clipId, by:"channel"|"pitch"}` → `{trackIds:[]}` (MIDI): Cubase Dissolve
+  Part — one new MIDI track per distinct channel/pitch right below the source track, each with a
+  clip at the same position holding that group's notes; controller data is copied to every part;
+  the SOURCE clip is muted (not deleted). Fails when everything shares one channel/pitch.
+- `cmd/midi.mergeLoop {trackIds?}` → `{trackId, clipId, sourceTracks}`: Cubase Merge MIDI in
+  Loop — every note/CC whose onset falls in the loop region, gathered from the given
+  MIDI/instrument tracks (default: all unmuted), becomes ONE clip on a new MIDI track; note
+  lengths clamp to the loop end; sources untouched.
+- `export/midi {path?, startBeat?, endBeat?}`: the optional range (endBeat > startBeat) exports
+  only that span re-anchored to its start (Export MIDI Loop; tempo/timesig entries before the
+  range collapse to tick 0, last wins). UI: MIDI menu ▸ Merge MIDI in Loop / Export MIDI Loop….
+- **Piano-roll note clipboard**: the pianoRoll key context now implements copy/cut/paste/
+  duplicate over selected NOTES (module-level clipboard, offsets relative to the earliest
+  onset; paste lands at the grid-snapped playhead inside the active clip, else at clip start).
+  Falls through to the timeline clip clipboard when no notes are selected.
 - **Comping / take folders** (see §6 Comping): `cmd/take.create {trackId, clipIds:[], name?}` →
   `{folder}` moves the listed clips off the flat clip list into a new take folder (one lane per
   clip); `cmd/take.setComp {trackId, folderId, activeLane?|comp:[{startBeat,lane}]}` picks the

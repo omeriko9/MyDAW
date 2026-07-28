@@ -200,6 +200,11 @@ Why together: all three are "render/compose existing primitives into a new comma
 
 ### Swipe 5 — Clip-level MIDI arrangement ops ✂️ — **Cost: M (≈3d) · Value: ★★★ · ROI: good**
 
+> **STATUS: SHIPPED 2026-07-28.** cmd/clip.dissolve (by channel/pitch, controllers copied,
+> source muted), cmd/midi.mergeLoop (loop-region gather → new track), export/midi range
+> (Export MIDI Loop, re-anchored SMF), piano-roll note copy/cut/paste/duplicate via the
+> key-context clipboard (Edit menu gates widened to note selections).
+
 Why together: all are engine clip-model surgery + arrangement context-menu entries (same files as each other, distinct from Swipe 1's note-level scope).
 
 | Task | Cost | Notes |

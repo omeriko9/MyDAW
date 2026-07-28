@@ -24,7 +24,11 @@ public:
     // Writes `model` to `absPath`. Returns false with a human-readable `err` on
     // failure (unwritable path, disk error). A project without midi/instrument tracks
     // still produces a valid file containing only the conductor track.
-    static bool write(const Model& model, const std::string& absPath, std::string& err);
+    // Optional beat range (endBeat > startBeat): export only events whose onset falls
+    // inside [startBeat, endBeat) — note-offs clamp to the range end — re-anchored so
+    // the file starts at startBeat (Cubase "Export MIDI Loop"). Default = whole project.
+    static bool write(const Model& model, const std::string& absPath, std::string& err,
+                      double startBeat = 0.0, double endBeat = -1.0);
 };
 
 } // namespace mydaw

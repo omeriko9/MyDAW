@@ -457,8 +457,12 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
                 return json();
             }
         }
+        // Optional beat range (endBeat > startBeat) = Cubase "Export MIDI Loop":
+        // events re-anchored so the file starts at startBeat.
+        const double startBeat = getOr<double>(p, "startBeat", 0.0);
+        const double endBeat = getOr<double>(p, "endBeat", -1.0);
         std::string err;
-        if (!SmfWriter::write(app_.model, path, err)) {
+        if (!SmfWriter::write(app_.model, path, err, startBeat, endBeat)) {
             ec = "export_failed";
             em = err.empty() ? "midi export failed" : err;
             return json();

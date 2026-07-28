@@ -163,6 +163,8 @@ private:
     json clipJoin(const json& p, CmdResult& r);
     json clipCrossfade(const json& p, CmdResult& r);
     json clipBounceSelection(const json& p, CmdResult& r);
+    json clipDissolve(const json& p, CmdResult& r);
+    json midiMergeLoop(const json& p, CmdResult& r);
     json trackRenderInPlace(const json& p, CmdResult& r);
     json trackCreateSampler(const json& p, CmdResult& r);
     json clipDelete(const json& p, CmdResult& r);

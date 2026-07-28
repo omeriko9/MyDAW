@@ -968,6 +968,8 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.join")        return clipJoin(p, r);
     if (type == "cmd/clip.crossfade")   return clipCrossfade(p, r);
     if (type == "cmd/clip.bounceSelection") return clipBounceSelection(p, r);
+    if (type == "cmd/clip.dissolve")        return clipDissolve(p, r);
+    if (type == "cmd/midi.mergeLoop")       return midiMergeLoop(p, r);
     if (type == "cmd/track.renderInPlace")  return trackRenderInPlace(p, r);
     if (type == "cmd/track.createSampler")  return trackCreateSampler(p, r);
     if (type == "cmd/clip.delete")      return clipDelete(p, r);
@@ -1871,6 +1873,161 @@ json CommandProcessor::trackCreateSampler(const json& p, CmdResult& r) {
     r.structural = true;
     r.fullEvent = true; // track list + inserts changed together
     return json{{"trackId", newTrackId}, {"instanceId", instanceId}};
+}
+
+// cmd/clip.dissolve {clipId, by:"channel"|"pitch"} — Cubase Dissolve Part: split a MIDI
+// clip's notes into one new MIDI track per distinct channel (or pitch), each holding a
+// clip at the same position; controller data is copied to every dissolved part (Cubase
+// behavior) and the source clip is muted, not deleted.
+json CommandProcessor::clipDissolve(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(id);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    MidiClip* mc = asMidi(ref.clip);
+    if (!mc)
+        return r.fail("bad_request", "dissolve requires a MIDI clip");
+    const std::string by = getOr(p, "by", "channel");
+    if (by != "channel" && by != "pitch")
+        return r.fail("bad_request", "by must be \"channel\" or \"pitch\"");
+    const bool byPitch = by == "pitch";
+
+    std::map<int, std::vector<Note>> groups; // key = channel or pitch, ordered
+    for (const Note& n : mc->notes)
+        groups[byPitch ? n.pitch : n.channel].push_back(n);
+    if (groups.size() < 2)
+        return r.fail("bad_request",
+                      byPitch ? "all notes share one pitch — nothing to dissolve"
+                              : "all notes share one channel — nothing to dissolve");
+
+    static const char* kNoteNames[12] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                         "F#", "G",  "G#", "A",  "A#", "B"};
+    const Track* src = ref.track;
+    const uint64_t srcTrackId = src->id;
+    const std::string baseName = mc->name.empty() ? src->name : mc->name;
+    const MidiClip proto = *mc; // copy: track insertion below invalidates mc/ref
+    json newTrackIds = json::array();
+    int insertAt = m.trackIndex(srcTrackId) + 1;
+    for (const auto& [key, notes] : groups) {
+        Track nt;
+        nt.id = m.nextId();
+        nt.kind = TrackKind::Midi;
+        nt.channels = 2;
+        nt.parentId = src->parentId;
+        nt.color = src->color;
+        nt.outputTarget = OutputTarget::master();
+        if (byPitch) {
+            char nm[64];
+            std::snprintf(nm, sizeof(nm), "%s %s%d", baseName.c_str(), kNoteNames[key % 12],
+                          key / 12 - 1);
+            nt.name = nm;
+        } else {
+            nt.name = baseName + " ch " + std::to_string(key + 1);
+        }
+        MidiClip nc;
+        nc.id = m.nextId();
+        nc.name = nt.name;
+        nc.startBeat = proto.startBeat;
+        nc.lengthBeats = proto.lengthBeats;
+        nc.color = proto.color;
+        nc.notes = notes;
+        for (Note& n : nc.notes)
+            n.id = m.nextId();
+        nc.cc = proto.cc; // controllers ride along with every dissolved part
+        for (MidiCc& c : nc.cc)
+            c.id = m.nextId();
+        nt.clips.emplace_back(std::move(nc));
+        newTrackIds.push_back(nt.id);
+        m.project.tracks.insert(m.project.tracks.begin() + insertAt, std::move(nt));
+        ++insertAt;
+        src = m.trackById(srcTrackId); // re-resolve after each insertion
+    }
+    // Mute the source clip (Cubase leaves it in place, silenced).
+    if (const ClipRef ref2 = m.clipById(id))
+        if (MidiClip* mc2 = asMidi(ref2.clip))
+            mc2->muted = true;
+
+    r.label = byPitch ? "Dissolve Part (pitch)" : "Dissolve Part (channel)";
+    r.structural = true;
+    r.fullEvent = true; // track list changed
+    return json{{"trackIds", newTrackIds}};
+}
+
+// cmd/midi.mergeLoop {trackIds?} — Cubase Merge MIDI in Loop: collect every note/CC
+// whose onset falls inside the loop region from the given MIDI/instrument tracks
+// (default: all unmuted ones), and write them as ONE new clip on a new MIDI track.
+// Note lengths clamp to the loop end; sources are left untouched.
+json CommandProcessor::midiMergeLoop(const json& p, CmdResult& r) {
+    Model& m = model();
+    const LoopRegion& loop = m.project.loop;
+    if (!(loop.endBeat > loop.startBeat))
+        return r.fail("bad_request", "set a loop region first");
+    const double ls = loop.startBeat;
+    const double le = loop.endBeat;
+    const std::vector<uint64_t> wanted = idArray(p, "trackIds"); // empty = all eligible
+
+    MidiClip merged;
+    merged.id = m.nextId();
+    merged.name = "Merged";
+    merged.startBeat = ls;
+    merged.lengthBeats = le - ls;
+    int sourceTracks = 0;
+    for (const Track& t : m.project.tracks) {
+        if (t.kind != TrackKind::Midi && t.kind != TrackKind::Instrument)
+            continue;
+        if (wanted.empty() ? t.mute : !containsId(wanted, t.id))
+            continue;
+        bool any = false;
+        for (const Clip& c : t.clips) {
+            const MidiClip* mc = asMidi(&c);
+            if (!mc || mc->muted)
+                continue;
+            for (const Note& n : mc->notes) {
+                const double onB = mc->startBeat + n.startBeat;
+                if (onB < ls || onB >= le)
+                    continue;
+                Note nn = n;
+                nn.id = m.nextId();
+                nn.startBeat = onB - ls;
+                nn.lengthBeats = std::max(kMinNoteBeats, std::min(n.lengthBeats, le - onB));
+                merged.notes.push_back(nn);
+                any = true;
+            }
+            for (const MidiCc& pt : mc->cc) {
+                const double absB = mc->startBeat + pt.beat;
+                if (absB < ls || absB >= le)
+                    continue;
+                MidiCc nc = pt;
+                nc.id = m.nextId();
+                nc.beat = absB - ls;
+                merged.cc.push_back(nc);
+                any = true;
+            }
+        }
+        if (any)
+            ++sourceTracks;
+    }
+    if (merged.notes.empty() && merged.cc.empty())
+        return r.fail("bad_request", "no MIDI events inside the loop region");
+    sortNotes(merged);
+    sortCc(merged);
+
+    Track nt;
+    nt.id = m.nextId();
+    nt.kind = TrackKind::Midi;
+    nt.channels = 2;
+    nt.name = "Merged";
+    nt.outputTarget = OutputTarget::master();
+    const uint64_t newTrackId = nt.id;
+    const uint64_t newClipId = merged.id;
+    nt.clips.emplace_back(std::move(merged));
+    m.project.tracks.push_back(std::move(nt));
+
+    r.label = "Merge MIDI in Loop";
+    r.structural = true;
+    r.fullEvent = true;
+    return json{{"trackId", newTrackId}, {"clipId", newClipId}, {"sourceTracks", sourceTracks}};
 }
 
 // cmd/track.duplicate {trackId} → {track} — deep copy inserted right after the source

@@ -20,6 +20,7 @@ import {
   exportTrackArchive,
   getImportFormats,
   joinClips,
+  mergeMidiLoop,
   panic,
   removeTrack,
 } from "../../store/actions";
@@ -219,15 +220,10 @@ function buildEditMenu(): MenuEntry[] {
   const hasClips = s.selection.clipIds.length > 0;
   const hasSel = hasClips || s.selection.noteIds.length > 0;
   const selTitle = hasSel ? undefined : "Nothing selected";
-  // Cut/Copy/Duplicate route to the CLIP clipboard/duplicate paths only — no note-level
-  // handler exists yet, so a notes-only selection must disable them with an honest
-  // reason (§10: every entry either works or is visibly disabled with a tooltip).
-  // Delete stays on hasSel: the piano-roll key context deletes selected notes.
-  const clipTitle = hasClips
-    ? undefined
-    : hasSel
-      ? "Select clips — note cut/copy/duplicate isn't supported yet"
-      : "Nothing selected";
+  // Cut/Copy/Duplicate route through invokeEditAction (focused pane first), so a
+  // focused piano roll handles selected NOTES via its own clipboard; otherwise the
+  // clip clipboard handles selected clips.
+  const clipTitle = hasSel ? undefined : "Nothing selected";
   const canPaste = hasClipboard();
   return [
     { label: "Undo", icon: "undo", shortcut: "Ctrl+Z", onClick: () => invokeEdit("undo") },
@@ -237,14 +233,14 @@ function buildEditMenu(): MenuEntry[] {
       label: "Cut",
       icon: "scissors",
       shortcut: "Ctrl+X",
-      disabled: !hasClips,
+      disabled: !hasSel,
       title: clipTitle,
       onClick: () => invokeEdit("cut"),
     },
     {
       label: "Copy",
       shortcut: "Ctrl+C",
-      disabled: !hasClips,
+      disabled: !hasSel,
       title: clipTitle,
       onClick: () => invokeEdit("copy"),
     },
@@ -258,7 +254,7 @@ function buildEditMenu(): MenuEntry[] {
     {
       label: "Duplicate",
       shortcut: "Ctrl+D",
-      disabled: !hasClips,
+      disabled: !hasSel,
       title: clipTitle,
       onClick: () => invokeEdit("duplicate"),
     },
@@ -505,11 +501,51 @@ function buildHelpMenu(): MenuEntry[] {
 }
 
 function buildMidiMenu(): MenuEntry[] {
+  const s = useStore.getState();
+  const loop = s.project?.loop;
+  const loopSet = !!loop && loop.endBeat > loop.startBeat;
+  const loopTitle = loopSet ? undefined : "Set a loop region first (L / drag in the ruler)";
   return [
     {
       label: "All Notes Off (Panic)",
       icon: "warning",
       onClick: () => fire(panic()),
+    },
+    "separator",
+    {
+      label: "Merge MIDI in Loop",
+      icon: "glue",
+      disabled: !loopSet,
+      title:
+        loopTitle ??
+        "Gather notes/CC inside the loop from selected MIDI tracks (none selected = all unmuted) into one clip on a new track",
+      onClick: () => {
+        const trackIds = useStore.getState().selection.trackIds;
+        void mergeMidiLoop(trackIds).catch((e) =>
+          showToast(
+            e instanceof Error && e.message.includes("no MIDI events")
+              ? "No MIDI events inside the loop region"
+              : "Merge MIDI in Loop failed",
+            "info",
+          ),
+        );
+      },
+    },
+    {
+      label: "Export MIDI Loop…",
+      icon: "export",
+      disabled: !loopSet,
+      title: loopTitle ?? "Export only the loop region as a Standard MIDI File",
+      onClick: () => {
+        const l = useStore.getState().project?.loop;
+        if (!l) return;
+        void exportMidi({ startBeat: l.startBeat, endBeat: l.endBeat })
+          .then((r) => showToast(`Exported ${r.path}`, "success"))
+          .catch((e) => {
+            if (!(e instanceof Error && e.message.includes("cancelled")))
+              showToast("MIDI loop export failed", "info");
+          });
+      },
     },
     "separator",
     {
