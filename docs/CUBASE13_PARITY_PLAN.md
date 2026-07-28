@@ -162,6 +162,11 @@ Gotcha: fade edits are `structural` and rebuild the graph per drag message (`Com
 > stretch/pitch engine (8 kHz tonality limit; `algorithm:"wsola"` keeps the legacy path).
 > Deferred: in-dialog audition/preview (needs a preview render path — revisit with DOP in
 > Swipe 7); selection-range (partial-event) processing stays in the backlog.
+> **2026-07-29: Cubase-style fade follow-up dialog SHIPPED** — FadeProcessDialog (waveform
+> preview with the fade applied + curve-shape tiles + curve line), shared by Process ▸ Fade
+> In/Out (render)…, the DOP chain entry pencil (previews over the pre-chain material), and
+> the clip fade-handle dialog (adds the length field; prefills 1 s when no fade exists so the
+> preview reads immediately). Visual audition (hearing the preview) is still the open item.
 
 Why together: one new `ProcessDialog` component + extensions to a single engine handler (`clipProcessAudio`).
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FADE_CURVES, envGainAt, fadeGain } from "./fadeCurves";
+import { FADE_CURVES, envGainAt, fadeGain, fadeGainAt } from "./fadeCurves";
 
 describe("fadeGain", () => {
   it("every shape starts at 0 and ends at 1", () => {
@@ -43,6 +43,37 @@ describe("fadeGain", () => {
   it("expo is slower than linear early; log is faster", () => {
     expect(fadeGain("expo", 0.25)).toBeLessThan(0.25);
     expect(fadeGain("log", 0.25)).toBeGreaterThan(0.25);
+  });
+});
+
+describe("fadeGainAt", () => {
+  it("fadeFrac 0 = no fade anywhere", () => {
+    for (const c of FADE_CURVES) {
+      expect(fadeGainAt("in", c, 0, 0)).toBe(1);
+      expect(fadeGainAt("out", c, 0, 1)).toBe(1);
+    }
+  });
+
+  it("full-span fade-in matches fadeGain; fade-out mirrors it", () => {
+    for (const c of FADE_CURVES) {
+      for (let k = 0; k <= 10; k++) {
+        const p = k / 10;
+        expect(fadeGainAt("in", c, 1, p)).toBeCloseTo(fadeGain(c, p), 9);
+        expect(fadeGainAt("out", c, 1, p)).toBeCloseTo(fadeGain(c, 1 - p), 9);
+      }
+    }
+  });
+
+  it("partial fade-in covers [0, frac] and holds unity after", () => {
+    expect(fadeGainAt("in", "linear", 0.5, 0.25)).toBeCloseTo(0.5, 9);
+    expect(fadeGainAt("in", "linear", 0.5, 0.5)).toBe(1);
+    expect(fadeGainAt("in", "linear", 0.5, 0.9)).toBe(1);
+  });
+
+  it("partial fade-out holds unity until 1-frac, then falls to 0", () => {
+    expect(fadeGainAt("out", "linear", 0.25, 0.5)).toBe(1);
+    expect(fadeGainAt("out", "linear", 0.25, 0.875)).toBeCloseTo(0.5, 9);
+    expect(fadeGainAt("out", "linear", 0.25, 1)).toBeCloseTo(0, 9);
   });
 });
 

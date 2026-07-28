@@ -15,6 +15,7 @@ import { showToast } from "../common/ToastHost";
 import { useStore } from "../../store/store";
 import { processChain } from "../../store/actions";
 import { fieldsDialog, type FieldSpec } from "../Dialogs/fields";
+import { openFadeProcessDialog } from "./FadeProcessDialog";
 import { FADE_CURVES, FADE_CURVE_LABELS } from "../../lib/fadeCurves";
 import { isAudioClip, type AudioClip, type ClipProcess, type FadeCurve } from "../../protocol/types";
 import "../Dialogs/dialogs.css";
@@ -274,6 +275,29 @@ function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) 
   const chain = clip.processes ?? [];
 
   const editEntry = (pr: ClipProcess): void => {
+    // Fades get the Cubase-style curve chooser (waveform + tiles) instead of a plain
+    // dropdown; previewed over the PRE-chain material the chain replays from.
+    if (pr.op === "fadeIn" || pr.op === "fadeOut") {
+      const proj = useStore.getState().project;
+      const assetId = clip.dopAssetId ?? clip.assetId;
+      const asset = proj?.assets.find((a) => a.id === assetId);
+      openFadeProcessDialog({
+        title: `Edit — ${entryLabel(pr)}`,
+        which: pr.op === "fadeIn" ? "in" : "out",
+        assetId,
+        channels: asset?.channels ?? 2,
+        sampleRate: asset?.sampleRate ?? 48000,
+        srcOffsetSamples: clip.dopOffsetSamples ?? clip.srcOffsetSamples,
+        lengthSamples: clip.dopLengthSamples ?? clip.lengthSamples,
+        initialCurve: (pr.sparams?.curve as FadeCurve) ?? "linear",
+        onApply: (curve) =>
+          fire(
+            processChain({ clipId, action: "setParams", processId: pr.id, sparams: { curve } }),
+            "Edit process",
+          ),
+      });
+      return;
+    }
     const fields = editFields(pr);
     if (!fields) return;
     void fieldsDialog({ title: `Edit — ${entryLabel(pr)}`, fields }).then((v) => {

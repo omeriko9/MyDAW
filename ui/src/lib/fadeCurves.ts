@@ -34,6 +34,22 @@ export function fadeGain(curve: FadeCurve | undefined, t: number): number {
   }
 }
 
+/**
+ * Fade gain at clip position p (0..1) for a fade occupying `fadeFrac` of the span
+ * from the faded end (in: [0, fadeFrac]; out: [1-fadeFrac, 1]); 1 outside the fade.
+ * fadeFrac 1 = the full-span render fades; 0 = no fade.
+ */
+export function fadeGainAt(
+  which: "in" | "out",
+  curve: FadeCurve | undefined,
+  fadeFrac: number,
+  p: number,
+): number {
+  if (fadeFrac <= 0) return 1;
+  if (which === "in") return p < fadeFrac ? fadeGain(curve, p / fadeFrac) : 1;
+  return p > 1 - fadeFrac ? fadeGain(curve, (1 - p) / fadeFrac) : 1;
+}
+
 /** Evaluate a clip gain envelope (sorted points, pos 0..1) at pos; 1 when empty. */
 export function envGainAt(
   env: ReadonlyArray<{ pos: number; value: number }> | undefined,

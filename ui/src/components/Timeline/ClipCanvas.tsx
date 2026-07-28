@@ -93,7 +93,7 @@ import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { confirmDialog } from "../Dialogs/confirm";
 import { fieldsDialog } from "../Dialogs/fields";
 import { openDopDialog } from "./DopDialog";
-import { FADE_CURVES, FADE_CURVE_LABELS } from "../../lib/fadeCurves";
+import { openFadeProcessDialog } from "./FadeProcessDialog";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
 import { addTrackMenuItems } from "./TrackHeaders";
@@ -136,7 +136,7 @@ import {
   type Row,
   type TrackRowL,
 } from "./layout";
-import type { AudioClip, AutomationPoint, Clip, ClipEdge, FadeCurve, NormalizeMode, Project, StereoFlipMode, Track } from "../../protocol/types";
+import type { AudioClip, AutomationPoint, Clip, ClipEdge, NormalizeMode, Project, StereoFlipMode, Track } from "../../protocol/types";
 
 const MIN_CLIP_BEATS = 1 / 16;
 const MOVE_THRESHOLD_PX = 3;
@@ -1804,41 +1804,57 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
   /* ------------------------------------------------------------ dbl click */
 
-  // Double-click a fade corner handle → Cubase-style fade dialog (length + curve).
+  // Double-click a fade corner handle → Cubase-style fade dialog: waveform preview
+  // with the partial-span fade applied, curve tiles, editable length.
   const openFadeDialog = (clip: AudioClip, which: "in" | "out"): void => {
     const isIn = which === "in";
-    const curSec = isIn ? clip.fadeInSec : clip.fadeOutSec;
-    const curCurve = (isIn ? clip.fadeInCurve : clip.fadeOutCurve) ?? "linear";
-    void fieldsDialog({
+    const proj = stateRef.current.project;
+    const asset = proj?.assets.find((a) => a.id === clip.assetId);
+    const sr = asset?.sampleRate ?? proj?.sampleRate ?? 48000;
+    openFadeProcessDialog({
       title: isIn ? "Fade In" : "Fade Out",
-      fields: [
-        {
-          key: "sec",
-          label: "Length (seconds)",
-          kind: "number",
-          value: Math.round(curSec * 1000) / 1000,
-          min: 0,
-          max: 600,
-          step: 0.05,
-        },
-        {
-          key: "curve",
-          label: "Curve",
-          kind: "select",
-          value: curCurve,
-          options: FADE_CURVES.map((c) => ({ value: c, label: FADE_CURVE_LABELS[c] })),
-        },
-      ],
-    }).then((v) => {
-      if (!v) return;
-      fire(
-        setClip(
-          clip.id,
-          isIn
-            ? { fadeInSec: v.sec as number, fadeInCurve: v.curve as FadeCurve }
-            : { fadeOutSec: v.sec as number, fadeOutCurve: v.curve as FadeCurve },
+      which,
+      assetId: clip.assetId,
+      channels: asset?.channels ?? 2,
+      sampleRate: sr,
+      srcOffsetSamples: clip.srcOffsetSamples,
+      lengthSamples: clip.lengthSamples,
+      initialCurve: (isIn ? clip.fadeInCurve : clip.fadeOutCurve) ?? "linear",
+      length: {
+        // no existing fade: prefill a visible default (1 s, clamped) so the preview
+        // shows the curve immediately — Apply then creates exactly what is shown
+        sec:
+          (isIn ? clip.fadeInSec : clip.fadeOutSec) ||
+          Math.min(1, clip.lengthSamples / sr),
+        maxSec: clip.lengthSamples / sr,
+      },
+      onApply: (curve, sec) =>
+        fire(
+          setClip(
+            clip.id,
+            isIn
+              ? { fadeInSec: sec ?? 0, fadeInCurve: curve }
+              : { fadeOutSec: sec ?? 0, fadeOutCurve: curve },
+          ),
         ),
-      );
+    });
+  };
+
+  // Process ▸ Fade In/Out (render)… — same dialog, full-span, appends to the DOP chain.
+  const openProcessFadeDialog = (proj: Project, clip: AudioClip, which: "in" | "out"): void => {
+    const asset = proj.assets.find((a) => a.id === clip.assetId);
+    openFadeProcessDialog({
+      title: which === "in" ? "Process — Fade In" : "Process — Fade Out",
+      which,
+      assetId: clip.assetId,
+      channels: asset?.channels ?? 2,
+      sampleRate: asset?.sampleRate ?? 48000,
+      srcOffsetSamples: clip.srcOffsetSamples,
+      lengthSamples: clip.lengthSamples,
+      initialCurve: "linear",
+      applyLabel: "Process",
+      onApply: (curve) =>
+        fire(processAudioClip(clip.id, which === "in" ? "fadeIn" : "fadeOut", { curve })),
     });
   };
 
@@ -2471,19 +2487,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                 },
                 "separator",
                 {
-                  label: "Fade In (render)",
+                  label: "Fade In (render)…",
                   title: "Bake a full-span fade into the audio (the clip fade handles stay separate)",
-                  submenu: FADE_CURVES.map((cv) => ({
-                    label: FADE_CURVE_LABELS[cv],
-                    onClick: () => fire(processAudioClip(clip.id, "fadeIn", { curve: cv })),
-                  })),
+                  onClick: () => openProcessFadeDialog(proj, clip, "in"),
                 },
                 {
-                  label: "Fade Out (render)",
-                  submenu: FADE_CURVES.map((cv) => ({
-                    label: FADE_CURVE_LABELS[cv],
-                    onClick: () => fire(processAudioClip(clip.id, "fadeOut", { curve: cv })),
-                  })),
+                  label: "Fade Out (render)…",
+                  title: "Bake a full-span fade into the audio (the clip fade handles stay separate)",
+                  onClick: () => openProcessFadeDialog(proj, clip, "out"),
                 },
                 "separator",
                 { label: "Reverse", onClick: () => fire(processAudioClip(clip.id, "reverse")) },
