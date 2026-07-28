@@ -150,6 +150,7 @@ const UI_OPERATION_TYPES = [
   "ui/focus.set",
   "ui/follow.set",
   "ui/layout.set",
+  "ui/midi.logicalEditor",
   "ui/midi.transform",
   "ui/pluginEditor.set",
   "ui/selection.get",
@@ -284,8 +285,8 @@ describe("generated agent capability catalog", () => {
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
     expect(ENGINE_OPERATION_NAMES).toHaveLength(126);
-    expect(UI_OPERATION_NAMES).toHaveLength(13);
-    expect(AGENT_CATALOG.operations).toHaveLength(139);
+    expect(UI_OPERATION_NAMES).toHaveLength(14);
+    expect(AGENT_CATALOG.operations).toHaveLength(140);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

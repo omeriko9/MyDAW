@@ -268,6 +268,12 @@ Tier 2 (**defer until demanded**): real MIDI insert chain (MIDI-out from `IInser
 
 ### Swipe 9 — Logical Editor 🧠 — **Cost: L (≈1.5–2w) · Value: ★★★ · ROI: medium, big power-user + agent synergy**
 
+> **STATUS: SHIPPED 2026-07-28.** lib/logicalEditor rule engine (filters ANDed incl.
+> pitchClass/index/modEq, transform/delete/select modes, clamped actions, injectable rng,
+> unit-tested), LogicalEditorDialog (preset dropdown + editable filter/action rows, Apply
+> stays open), piano-roll Functions + MIDI-menu entries, and the ui/midi.logicalEditor agent
+> op (full program schema — the agent-capability unlock). Preset save/load-to-disk deferred.
+
 Filter rules (property / condition / value, AND-OR) → actions (set/add/mul/random on pitch/vel/pos/len/chan), preset library (ship Cubase's classic presets: "select every other note", "delete short notes", "randomize velocity ±10"…). Implement as a rule interpreter over the pure-function layer (`midiFunctions.ts`) so it works on selection or whole clip, plus a `cmd`-level twin so the **agent** can run arbitrary logical-editor programs — this doubles as a major agent-capability unlock, which is the hidden ROI here. UI: modal with rule rows + preset dropdown, mirrored into MENUS for palette access.
 
 ---

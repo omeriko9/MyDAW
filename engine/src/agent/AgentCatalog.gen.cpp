@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "321b2a169036296fc7bd7a680c8f40a476851391260e3d7606560d26bbcef0fc";
+const char kAgentCatalogSha256[] = "3020d9bd4a9c0c3cdbf0471fa965c1426d6508405b85315a1d6733b210af1f7d";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -9536,6 +9536,197 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "input": {
             "agent": true,
             "bottomTab": "pianoRoll"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ui/midi.logicalEditor",
+      "category": "ui",
+      "description": "Run a Logical Editor program (ANDed filters, then transform/delete/select) on explicit or selected notes; edits commit as one undoable notes.edit.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "changedNoteIds[]",
+        "removedNoteIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "noteIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          },
+          "program": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "transform",
+                  "delete",
+                  "select"
+                ]
+              },
+              "filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prop": {
+                      "type": "string",
+                      "enum": [
+                        "pitch",
+                        "velocity",
+                        "startBeat",
+                        "lengthBeats",
+                        "channel",
+                        "pitchClass",
+                        "index"
+                      ]
+                    },
+                    "cond": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "ne",
+                        "lt",
+                        "gt",
+                        "le",
+                        "ge",
+                        "inRange",
+                        "outsideRange",
+                        "even",
+                        "odd",
+                        "modEq"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "value2": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prop",
+                    "cond"
+                  ]
+                }
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prop": {
+                      "type": "string",
+                      "enum": [
+                        "pitch",
+                        "velocity",
+                        "startBeat",
+                        "lengthBeats",
+                        "channel"
+                      ]
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "set",
+                        "add",
+                        "mul",
+                        "random"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "value2": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prop",
+                    "op",
+                    "value"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "mode",
+              "filters"
+            ]
+          }
+        },
+        "required": [
+          "program"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "notes": {
+            "type": "number"
+          },
+          "matched": {
+            "type": "number"
+          },
+          "selected": {
+            "type": "number"
+          },
+          "updated": {
+            "type": "number"
+          },
+          "removed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "notes",
+          "matched"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "program": {
+              "mode": "delete",
+              "filters": [
+                {
+                  "prop": "velocity",
+                  "cond": "lt",
+                  "value": 30
+                }
+              ],
+              "actions": []
+            }
           }
         }
       ]

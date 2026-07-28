@@ -36,6 +36,7 @@ import {
 import { applyTheme, getTheme, THEMES } from "../../lib/theme";
 import { toggleMetronome } from "../../store/metronome";
 import { closeContextMenu, openContextMenu } from "../common/ContextMenu";
+import { openLogicalEditor } from "../PianoRoll/LogicalEditorDialog";
 import type { MenuEntry } from "../common/ContextMenu";
 import { Icon, type IconName } from "../common/icons";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -512,6 +513,13 @@ function buildMidiMenu(): MenuEntry[] {
       onClick: () => fire(panic()),
     },
     "separator",
+    {
+      label: "Logical Editor…",
+      icon: "sliders",
+      title:
+        "Rule-based note transform on the active MIDI clip: filters → transform/delete/select (with presets)",
+      onClick: () => openLogicalEditor(),
+    },
     {
       label: "Merge MIDI in Loop",
       icon: "glue",

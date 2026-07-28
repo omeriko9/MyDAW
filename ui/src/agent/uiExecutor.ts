@@ -1,5 +1,5 @@
 /**
- * Typed UI executor (Increment 5) — runs the 13 ui/* catalog operations against the live
+ * Typed UI executor (Increment 5) — runs the 14 ui/* catalog operations against the live
  * store/theme, making mydaw_ui work for the in-app agent (and, via the controller bridge,
  * for external MCP clients). No arbitrary selector clicking or JS evaluation: every action
  * is a typed, whitelisted store mutation.
@@ -18,6 +18,7 @@ import {
 } from "../lib/keyboard";
 import { pasteAt } from "../lib/clipboard";
 import * as MF from "../lib/midiFunctions";
+import { applyLogicalEditor, type LeProgram } from "../lib/logicalEditor";
 import { editNotes } from "../store/actions";
 import type { MidiClip, Note } from "../protocol/types";
 import {
@@ -258,6 +259,59 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
         default:
           throw new UiOpError("invalid_arguments", `unknown edit action: ${action}`);
       }
+    }
+
+    case "ui/midi.logicalEditor": {
+      // Cubase-style Logical Editor, agent-flavored: run an arbitrary rule program
+      // (filters → transform/delete/select) from lib/logicalEditor over explicit notes,
+      // a whole clip, or the current selection; committed as ONE cmd/notes.edit.
+      const project = store.project;
+      if (!project) throw new UiOpError("no_project", "no project loaded");
+      const explicitClipId = asNumber(args.clipId);
+      const clipId = explicitClipId ?? store.activeMidiClipId ?? undefined;
+      if (clipId === undefined)
+        throw new UiOpError(
+          "invalid_arguments",
+          "no clipId given and no active MIDI clip — pass clipId (mydaw_query view:clips)",
+        );
+      let clip: MidiClip | undefined;
+      for (const t of project.tracks) {
+        const c = t.clips.find((x) => x.id === clipId);
+        if (c) {
+          if (c.type !== "midi") throw new UiOpError("invalid_arguments", "clipId is not a MIDI clip");
+          clip = c;
+          break;
+        }
+      }
+      if (!clip) throw new UiOpError("not_found", `clipId not found: ${clipId}`);
+      const idFilter = asIntArray(args.noteIds);
+      const wanted =
+        idFilter.length > 0
+          ? idFilter
+          : explicitClipId === undefined
+            ? store.selection.noteIds
+            : [];
+      const notes: Note[] =
+        wanted.length > 0 ? clip.notes.filter((n) => wanted.includes(n.id)) : [...clip.notes];
+      if (notes.length === 0)
+        throw new UiOpError("invalid_arguments", "no notes matched (clip empty or bad noteIds)");
+      const program = asObject(args.program) as unknown as LeProgram;
+      if (!Array.isArray(program.filters) || typeof program.mode !== "string")
+        throw new UiOpError("invalid_arguments", "program needs {mode, filters[], actions[]}");
+      if (!Array.isArray(program.actions)) program.actions = [];
+      const r = applyLogicalEditor(notes, program);
+      if (program.mode === "select") {
+        useStore.getState().setSelection({ noteIds: r.matchedIds });
+        return { clipId, notes: notes.length, matched: r.matchedIds.length, selected: r.matchedIds.length };
+      }
+      const updates = r.patch.update?.length ?? 0;
+      const removes = r.patch.remove?.length ?? 0;
+      if (updates > 0 || removes > 0) {
+        void editNotes(clipId, r.patch).catch((err) =>
+          console.warn("[agent] midi.logicalEditor commit failed:", err),
+        );
+      }
+      return { clipId, notes: notes.length, matched: r.matchedIds.length, updated: updates, removed: removes };
     }
 
     case "ui/midi.transform": {

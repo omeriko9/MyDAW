@@ -273,6 +273,14 @@ the entire drag.
 - `export/midi {path?, startBeat?, endBeat?}`: the optional range (endBeat > startBeat) exports
   only that span re-anchored to its start (Export MIDI Loop; tempo/timesig entries before the
   range collapse to tick 0, last wins). UI: MIDI menu ▸ Merge MIDI in Loop / Export MIDI Loop….
+- **Logical Editor** (Cubase-style, `lib/logicalEditor.ts` + `PianoRoll/LogicalEditorDialog`):
+  a PROGRAM = ANDed filters over pitch/velocity/position/length/channel/pitchClass/index
+  (conditions incl. ranges, even/odd, mod A = B) + a mode — transform (set/add/mul/random
+  actions, clamped per property), delete, or select. 8 shipped presets ("Select every other
+  note", "Delete short notes", "Accent downbeats", …). Runs on the note selection of the
+  active MIDI clip (whole clip when nothing selected); edits commit as ONE cmd/notes.edit.
+  UI: piano-roll Functions ▸ Logical Editor… + MIDI menu (palette). Agent:
+  `ui/midi.logicalEditor {clipId?, noteIds?, program}` runs arbitrary programs.
 - **Piano-roll note clipboard**: the pianoRoll key context now implements copy/cut/paste/
   duplicate over selected NOTES (module-level clipboard, offsets relative to the earliest
   onset; paste lands at the grid-snapped playhead inside the active clip, else at clip start).

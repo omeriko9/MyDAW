@@ -50,6 +50,7 @@ import { useIsKeyTarget } from "../common/paneFocus";
 import { ZoomPill } from "../common/ZoomPill";
 import { confirmDialog } from "../Dialogs/confirm";
 import { fieldsDialog } from "../Dialogs/fields";
+import { openLogicalEditor } from "./LogicalEditorDialog";
 import * as M from "./prMath";
 import * as D from "./prDraw";
 import * as MF from "../../lib/midiFunctions";
@@ -1851,6 +1852,12 @@ function Editor({ track, clip }: EditorProps) {
     const step = stepRef.current;
     const stepLabel = M.lengthLabel(step);
     const fnItems: MenuEntry[] = [
+      {
+        label: "Logical Editor…",
+        title: "Rule-based transform: filters → transform/delete/select (with presets)",
+        onClick: () => openLogicalEditor(),
+      },
+      "separator",
       {
         label: "Legato",
         title: "Extend each note to the next onset",

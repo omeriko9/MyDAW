@@ -107,6 +107,32 @@
   opacity: 0.5;
 }
 
+/* Logical Editor rows (LogicalEditorDialog): prop/cond/value strips */
+.le-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.le-row select,
+.le-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.le-row input[type="number"] {
+  flex: 0 0 72px;
+}
+.le-status {
+  font-size: 12px;
+  align-self: center;
+  text-align: left;
+}
+
 .dlg-summary {
   padding: 7px 10px;
   border: 1px solid var(--border);

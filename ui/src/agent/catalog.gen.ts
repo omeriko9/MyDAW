@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "321b2a169036296fc7bd7a680c8f40a476851391260e3d7606560d26bbcef0fc";
+export const AGENT_CATALOG_SHA256 = "3020d9bd4a9c0c3cdbf0471fa965c1426d6508405b85315a1d6733b210af1f7d";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -9561,6 +9561,197 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "ui/midi.logicalEditor",
+      "category": "ui",
+      "description": "Run a Logical Editor program (ANDed filters, then transform/delete/select) on explicit or selected notes; edits commit as one undoable notes.edit.",
+      "target": "ui",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "ui-only",
+        "undoable"
+      ],
+      "supports": [],
+      "requires": [
+        "ui-controller",
+        "project",
+        "midi-clip"
+      ],
+      "produces": [
+        "changedNoteIds[]",
+        "removedNoteIds[]"
+      ],
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "noteIds": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "uniqueItems": true
+          },
+          "program": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "transform",
+                  "delete",
+                  "select"
+                ]
+              },
+              "filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prop": {
+                      "type": "string",
+                      "enum": [
+                        "pitch",
+                        "velocity",
+                        "startBeat",
+                        "lengthBeats",
+                        "channel",
+                        "pitchClass",
+                        "index"
+                      ]
+                    },
+                    "cond": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "ne",
+                        "lt",
+                        "gt",
+                        "le",
+                        "ge",
+                        "inRange",
+                        "outsideRange",
+                        "even",
+                        "odd",
+                        "modEq"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "value2": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prop",
+                    "cond"
+                  ]
+                }
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "prop": {
+                      "type": "string",
+                      "enum": [
+                        "pitch",
+                        "velocity",
+                        "startBeat",
+                        "lengthBeats",
+                        "channel"
+                      ]
+                    },
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "set",
+                        "add",
+                        "mul",
+                        "random"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "value2": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "prop",
+                    "op",
+                    "value"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "mode",
+              "filters"
+            ]
+          }
+        },
+        "required": [
+          "program"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          },
+          "notes": {
+            "type": "number"
+          },
+          "matched": {
+            "type": "number"
+          },
+          "selected": {
+            "type": "number"
+          },
+          "updated": {
+            "type": "number"
+          },
+          "removed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "notes",
+          "matched"
+        ]
+      },
+      "examples": [
+        {
+          "input": {
+            "program": {
+              "mode": "delete",
+              "filters": [
+                {
+                  "prop": "velocity",
+                  "cond": "lt",
+                  "value": 30
+                }
+              ],
+              "actions": []
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "ui/midi.transform",
       "category": "ui",
       "description": "Run a pure MIDI function (transpose, legato, velocity ops, delete overlaps/doubles, mirror, polyphony) on explicit or selected notes; one undoable notes.edit.",
@@ -10290,6 +10481,7 @@ export const UI_OPERATION_NAMES = [
   "ui/focus.set",
   "ui/follow.set",
   "ui/layout.set",
+  "ui/midi.logicalEditor",
   "ui/midi.transform",
   "ui/pluginEditor.set",
   "ui/selection.get",
@@ -10921,6 +11113,7 @@ export interface UiOperationMap {
   "ui/focus.set": { req: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; }; reply: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/follow.set": { req: { "enabled": boolean; }; reply: { "enabled": boolean; } };
   "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); "bottomTab2"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); } };
+  "ui/midi.logicalEditor": { req: { "clipId"?: number; "noteIds"?: Array<number>; "program": { "mode": "transform" | "delete" | "select"; "filters": Array<{ "prop": "pitch" | "velocity" | "startBeat" | "lengthBeats" | "channel" | "pitchClass" | "index"; "cond": "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "inRange" | "outsideRange" | "even" | "odd" | "modEq"; "value"?: number; "value2"?: number; }>; "actions"?: Array<{ "prop": "pitch" | "velocity" | "startBeat" | "lengthBeats" | "channel"; "op": "set" | "add" | "mul" | "random"; "value": number; "value2"?: number; }>; }; }; reply: { "clipId": number; "notes": number; "matched": number; "selected"?: number; "updated"?: number; "removed"?: number; } };
   "ui/midi.transform": { req: { "clipId"?: number; "noteIds"?: Array<number>; "transform": "transpose" | "fixedLength" | "legato" | "humanizeTiming" | "humanizeVelocity" | "scaleVelocity" | "reverse" | "deleteDoubles" | "deleteOverlapsMono" | "deleteOverlapsPoly" | "fixedVelocity" | "limitVelocity" | "compressVelocity" | "deleteNotes" | "mirror" | "restrictPolyphony" | "rampVelocity" | "smoothVelocity"; "options"?: { "semitones"?: number; "lengthBeats"?: number; "maxBeats"?: number; "amount"?: number; "multiplier"?: number; "add"?: number; "overlapBeats"?: number; "velocity"?: number; "min"?: number; "max"?: number; "ratio"?: number; "center"?: number; "minLengthBeats"?: number; "minVelocity"?: number; "axisPitch"?: number; "maxVoices"?: number; "from"?: number; "to"?: number; }; }; reply: { "changedNoteIds": Array<number>; "removedNoteIds": Array<number>; } };
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };
   "ui/selection.get": { req: {  }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
@@ -11780,6 +11973,21 @@ export const UI_OPERATION_EXAMPLES = {
     {
       "agent": true,
       "bottomTab": "pianoRoll"
+    }
+  ],
+  "ui/midi.logicalEditor": [
+    {
+      "program": {
+        "mode": "delete",
+        "filters": [
+          {
+            "prop": "velocity",
+            "cond": "lt",
+            "value": 30
+          }
+        ],
+        "actions": []
+      }
     }
   ],
   "ui/midi.transform": [
