@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "7ba14eff87cf2acc3d98eb1365b6208536143949b400c9579f7024eb77c83549";
+const char kAgentCatalogSha256[] = "5ed106cc3be6536c138f85f926a04590a08243e698f43e48e8313a38dac7ed4b";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4959,6 +4959,69 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/clip.bounceSelection",
+      "category": "clips",
+      "description": "Consolidate selected audio clips on one track into one continuous clip: gain/fades/envelopes baked, gaps become silence, track inserts NOT applied.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "clip.id",
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipIds": {
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "clipIds"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/clip.crossfade",
       "category": "clips",
       "description": "Crossfade two overlapping audio clips on one track: fade-out on the earlier, fade-in on the later, spanning the overlap (equal-power default).",
@@ -6380,6 +6443,64 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/track.createSampler",
+      "category": "tracks",
+      "description": "Cubase Create Sampler Track: add an instrument track after the clip's track, load builtin:sampler, bind the clip's audio asset — one undoable step.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "track.id",
+        "instance.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "instanceId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "instanceId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/track.duplicate",
       "category": "tracks",
       "description": "Duplicate a channel with its clips, routing, and inserts.",
@@ -6478,6 +6599,68 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "input": {
             "trackId": 7,
             "sendIndex": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.renderInPlace",
+      "category": "tracks",
+      "description": "Render the track solo'd through its insert chain over a range (default: its clip extent) onto a NEW audio track below; the source track is muted.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "track.id",
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "endBeat": {
+            "type": "number"
+          },
+          "startBeat": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7
           }
         }
       ]
@@ -9886,6 +10069,7 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/timesig.set",
     "cmd/track.add",
     "cmd/track.addSend",
+    "cmd/track.createSampler",
     "cmd/track.duplicate",
     "cmd/track.remove",
     "cmd/track.removeSend",

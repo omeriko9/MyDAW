@@ -180,6 +180,22 @@ export const joinClips = (clipIds: number[]) => ws.request("cmd/clip.join", { cl
 export const crossfadeClips = (clipIds: number[], curve?: FadeCurve) =>
   ws.request("cmd/clip.crossfade", { clipIds, ...(curve !== undefined ? { curve } : {}) });
 
+/** Consolidate selected audio clips into one continuous clip (no track inserts). */
+export const bounceSelection = (clipIds: number[]) =>
+  ws.request("cmd/clip.bounceSelection", { clipIds });
+
+/** Render a track through its insert chain onto a new audio track; mutes the source. */
+export const renderTrackInPlace = (trackId: number, startBeat?: number, endBeat?: number) =>
+  ws.request("cmd/track.renderInPlace", {
+    trackId,
+    ...(startBeat !== undefined ? { startBeat } : {}),
+    ...(endBeat !== undefined ? { endBeat } : {}),
+  });
+
+/** Cubase Create Sampler Track: instrument track + builtin:sampler bound to the clip's asset. */
+export const createSamplerTrack = (clipId: number) =>
+  ws.request("cmd/track.createSampler", { clipId });
+
 export const deleteClips = (clipIds: number[]) => ws.request("cmd/clip.delete", { clipIds });
 
 /** atSource: copies land ON the originals (Alt+drag measures its delta from there);

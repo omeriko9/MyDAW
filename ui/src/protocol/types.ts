@@ -1783,6 +1783,8 @@ export interface RequestMap {
   "cmd/track.bounce": { req: TrackBounceRequest; reply: TrackBounceReply };
   "cmd/track.unfreeze": { req: TrackUnfreezeRequest; reply: EmptyObject };
   "cmd/track.duplicate": { req: TrackDuplicateRequest; reply: TrackDuplicateReply };
+  "cmd/track.renderInPlace": { req: { trackId: number; startBeat?: number; endBeat?: number }; reply: { trackId: number; assetId: number } };
+  "cmd/track.createSampler": { req: { clipId: number }; reply: { trackId: number; instanceId: number } };
 
   // §5.3 clips / notes / automation / arrangement
   "cmd/clip.addMidi": { req: ClipAddMidiRequest; reply: ClipAddMidiReply };
@@ -1792,6 +1794,7 @@ export interface RequestMap {
   "cmd/clip.split": { req: ClipSplitRequest; reply: ClipSplitReply };
   "cmd/clip.join": { req: ClipJoinRequest; reply: ClipJoinReply };
   "cmd/clip.crossfade": { req: ClipCrossfadeRequest; reply: { overlapSec: number } };
+  "cmd/clip.bounceSelection": { req: { clipIds: number[] }; reply: { clipId: number; assetId: number } };
   "cmd/clip.delete": { req: ClipDeleteRequest; reply: EmptyObject };
   "cmd/clip.duplicate": { req: ClipDuplicateRequest; reply: ClipDuplicateReply };
   "cmd/clip.set": { req: ClipSetRequest; reply: EmptyObject };

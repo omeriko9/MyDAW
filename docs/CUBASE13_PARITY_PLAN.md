@@ -180,6 +180,11 @@ Why together: one new `ProcessDialog` component + extensions to a single engine 
 
 ### Swipe 4 — Render in Place, Bounce Selection, Sampler Track 📦 — **Cost: M (≈4d) · Value: ★★★★ · ROI: high**
 
+> **STATUS: SHIPPED 2026-07-28.** bounceRenderHook widened with startBeat;
+> cmd/track.renderInPlace (new audio track below, source muted); cmd/clip.bounceSelection
+> (insert-free consolidation, fades/envelopes baked); cmd/track.createSampler (one undo entry)
+> + SamplerEditor panel with audition keyboard. Deferred: drag-clip-onto-instrument affordance.
+
 Why together: all three are "render/compose existing primitives into a new command + context-menu entry"; the first two share the `bounceRenderHook` range-widening.
 
 | Task | Cost | Notes |

@@ -196,8 +196,9 @@ bool App::init(std::string& err) {
     cmd->setProjectIO(&projectIO);
     cmd->setOrphanStates(&orphanPluginStates);
     cmd->captureReconcileHook = [this] { reconcileCaptureDevice(); };
-    cmd->bounceRenderHook = [this](uint64_t trackId, double endBeat, Asset& out,
-                                   std::string& herr) -> bool {
+    cmd->bounceRenderHook = [this](uint64_t trackId, double startBeat, double endBeat,
+                                   Asset& out, std::string& herr) -> bool {
+        const int64_t startSample = tempoMap.beatsToSamples(std::max(startBeat, 0.0));
         const int64_t endSample = tempoMap.beatsToSamples(std::max(endBeat, 1.0));
         const bool hasProject = projectIO.hasPath();
         const std::string dir =
@@ -228,7 +229,8 @@ bool App::init(std::string& err) {
                 w.appendPlanar(ch, frames);
         };
         // NOTE(pinned-api): solo-track overload assumed as trailing soloTrackId param.
-        if (!graph->renderOffline(model, 0, endSample, 2048, sink, nullptr, herr, trackId)) {
+        if (!graph->renderOffline(model, startSample, endSample, 2048, sink, nullptr, herr,
+                                  trackId)) {
             w.finalize();
             return false;
         }

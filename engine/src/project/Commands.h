@@ -67,11 +67,13 @@ public:
     // 48000/2048; E9 updates on driver (re)start).
     void setAudioFormat(int sampleRate, int maxBlock);
 
-    // cmd/track.bounce / freeze render hook, injected by E9: render `trackId` solo'd
-    // offline over beats [0, endBeat] (SPEC: freeze renders from beat 0 so playback
-    // offset is 0), write the wav under <projectDir>/audio/, fill every field of `out`
-    // except `id`, return true. On false, `err` carries the reason.
-    std::function<bool(uint64_t trackId, double endBeat, Asset& out, std::string& err)>
+    // cmd/track.bounce / freeze / renderInPlace render hook, injected by E9: render
+    // `trackId` solo'd offline over beats [startBeat, endBeat], write the wav under
+    // <projectDir>/audio/, fill every field of `out` except `id`, return true. On
+    // false, `err` carries the reason. Freeze always passes startBeat 0 (SPEC: frozen
+    // playback offsets from 0); renderInPlace passes the selection/track range.
+    std::function<bool(uint64_t trackId, double startBeat, double endBeat, Asset& out,
+                       std::string& err)>
         bounceRenderHook;
 
     // PCM → asset hook, injected by E9: write planar float `planes` (session rate) to a wav
@@ -160,6 +162,9 @@ private:
     json clipSplit(const json& p, CmdResult& r);
     json clipJoin(const json& p, CmdResult& r);
     json clipCrossfade(const json& p, CmdResult& r);
+    json clipBounceSelection(const json& p, CmdResult& r);
+    json trackRenderInPlace(const json& p, CmdResult& r);
+    json trackCreateSampler(const json& p, CmdResult& r);
     json clipDelete(const json& p, CmdResult& r);
     json clipDuplicate(const json& p, CmdResult& r);
     json clipSet(const json& p, CmdResult& r);

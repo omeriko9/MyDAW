@@ -967,6 +967,9 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.split")       return clipSplit(p, r);
     if (type == "cmd/clip.join")        return clipJoin(p, r);
     if (type == "cmd/clip.crossfade")   return clipCrossfade(p, r);
+    if (type == "cmd/clip.bounceSelection") return clipBounceSelection(p, r);
+    if (type == "cmd/track.renderInPlace")  return trackRenderInPlace(p, r);
+    if (type == "cmd/track.createSampler")  return trackCreateSampler(p, r);
     if (type == "cmd/clip.delete")      return clipDelete(p, r);
     if (type == "cmd/clip.duplicate")   return clipDuplicate(p, r);
     if (type == "cmd/clip.set")         return clipSet(p, r);
@@ -1569,7 +1572,7 @@ json CommandProcessor::trackBounce(const json& p, CmdResult& r) {
 
     Asset a;
     std::string err;
-    if (!bounceRenderHook(id, endBeat, a, err))
+    if (!bounceRenderHook(id, 0.0, endBeat, a, err))
         return r.fail("render_failed", err.empty() ? "offline render failed" : err);
     a.id = m.nextId();
     a.missing = false;
@@ -1612,6 +1615,262 @@ json CommandProcessor::trackUnfreeze(const json& p, CmdResult& r) {
     r.structural = true;
     r.fullEvent = true;
     return json::object();
+}
+
+// cmd/track.renderInPlace {trackId, startBeat?, endBeat?} — render the track solo'd
+// through its full insert chain over the given range (default: its clip extent) and
+// drop the result as a new AUDIO track right below; the source track is muted so the
+// material isn't heard twice. One undo entry reverts everything.
+json CommandProcessor::trackRenderInPlace(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "trackId", 0);
+    Track* t = m.trackById(id);
+    if (!t)
+        return r.fail("not_found", "unknown trackId");
+    if (!t->canHoldClips())
+        return r.fail("bad_request", "only audio/midi/instrument tracks can be rendered");
+    double clipStart = -1.0;
+    for (const Clip& c : t->clips) {
+        const double s = clipStartBeat(c);
+        if (clipStart < 0.0 || s < clipStart)
+            clipStart = s;
+    }
+    const double trackEnd = trackEndBeat(*t, tm());
+    const double startBeat = std::max(0.0, getOr<double>(p, "startBeat", std::max(0.0, clipStart)));
+    const double endBeat = getOr<double>(p, "endBeat", trackEnd);
+    if (endBeat <= startBeat)
+        return r.fail("nothing_to_bounce", "track has nothing to render in that range");
+    if (!bounceRenderHook)
+        return r.fail("not_supported", "offline rendering is not wired");
+
+    Asset a;
+    std::string err;
+    if (!bounceRenderHook(id, startBeat, endBeat, a, err))
+        return r.fail("render_failed", err.empty() ? "offline render failed" : err);
+    a.id = m.nextId();
+    a.missing = false;
+    m.project.assets.push_back(a);
+    if (ctx_.assetStore) {
+        ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+        ctx_.assetStore->ensurePeaks(a);
+    }
+
+    t = m.trackById(id); // re-lookup (hook may have touched the model)
+    Track nt;
+    nt.id = m.nextId();
+    nt.kind = TrackKind::Audio;
+    nt.channels = 2;
+    nt.name = t->name + " (R)";
+    nt.color = t->color;
+    nt.parentId = t->parentId;
+    nt.outputTarget = OutputTarget::master();
+    AudioClip c;
+    c.id = m.nextId();
+    c.name = nt.name;
+    c.startBeat = startBeat;
+    c.assetId = a.id;
+    c.srcOffsetSamples = 0;
+    c.lengthSamples = a.lengthSamples;
+    nt.clips.emplace_back(std::move(c));
+    const int idx = m.trackIndex(id);
+    const uint64_t newTrackId = nt.id;
+    m.project.tracks.insert(m.project.tracks.begin() + idx + 1, std::move(nt));
+    m.trackById(id)->mute = true; // hear only the render
+
+    r.label = "Render in Place";
+    r.structural = true;
+    r.fullEvent = true; // asset + track list changed
+    return json{{"trackId", newTrackId}, {"assetId", a.id}};
+}
+
+// Fade/envelope math shared by cmd/clip.bounceSelection's offline assembly — mirrors
+// TrackNode.cpp's RT versions exactly so a bounce is sample-identical to playback.
+static double bounceFadeShape(FadeCurve curve, double t) {
+    switch (curve) {
+        case FadeCurve::Expo: return t * t;
+        case FadeCurve::Log: { const double u = 1.0 - t; return 1.0 - u * u; }
+        case FadeCurve::SCurve: return t * t * (3.0 - 2.0 * t);
+        case FadeCurve::EqPower: return std::sin(t * 1.5707963267948966);
+        default: return t;
+    }
+}
+
+static double bounceEnvGain(const std::vector<ClipEnvPoint>& env, double pos) {
+    if (env.empty())
+        return 1.0;
+    if (pos <= env.front().pos)
+        return env.front().value;
+    if (pos >= env.back().pos)
+        return env.back().value;
+    for (size_t i = 0; i + 1 < env.size(); ++i) {
+        if (pos <= env[i + 1].pos) {
+            const double span = env[i + 1].pos - env[i].pos;
+            const double t = span > 0.0 ? (pos - env[i].pos) / span : 1.0;
+            return env[i].value + (env[i + 1].value - env[i].value) * t;
+        }
+    }
+    return env.back().value;
+}
+
+// cmd/clip.bounceSelection {clipIds} — consolidate selected AUDIO clips on one track
+// into one continuous clip: clip gain/fades/envelopes are baked, silence fills the
+// gaps, track inserts are NOT applied (Cubase Bounce Selection semantics — use
+// track.renderInPlace for a through-the-chain render). The originals are replaced.
+json CommandProcessor::clipBounceSelection(const json& p, CmdResult& r) {
+    Model& m = model();
+    const std::vector<uint64_t> ids = idArray(p, "clipIds");
+    if (ids.empty())
+        return r.fail("bad_request", "clipIds is empty");
+    if (!ctx_.assetStore || !pcmToAssetHook)
+        return r.fail("not_supported", "bounce is not wired");
+
+    Track* track = nullptr;
+    std::vector<const AudioClip*> clips;
+    for (uint64_t id : ids) {
+        const ClipRef ref = m.clipById(id);
+        if (!ref)
+            return r.fail("not_found", "unknown clipId");
+        const AudioClip* a = asAudio(ref.clip);
+        if (!a)
+            return r.fail("bad_request", "bounceSelection requires audio clips");
+        if (!track)
+            track = ref.track;
+        else if (track != ref.track)
+            return r.fail("bad_request", "clips must be on the same track");
+        clips.push_back(a);
+    }
+    const TempoMap& T = tm();
+    const double sr = static_cast<double>(sampleRate_);
+    int64_t startSample = INT64_MAX;
+    int64_t endSample = 0;
+    int nch = 1;
+    for (const AudioClip* a : clips) {
+        const PcmData* pcm = ctx_.assetStore->pcm(a->assetId);
+        if (!pcm || pcm->planes.empty())
+            return r.fail("bad_request", "clip audio not loaded: " + a->name);
+        nch = std::max(nch, static_cast<int>(pcm->planes.size()));
+        const int64_t cs = llround(T.beatsToSamplesF(a->startBeat));
+        startSample = std::min(startSample, cs);
+        endSample = std::max(endSample, cs + a->lengthSamples);
+    }
+    const int64_t span = endSample - startSample;
+    if (span <= 0)
+        return r.fail("bad_request", "selection span is empty");
+    nch = std::min(nch, 2);
+    std::vector<std::vector<float>> out(static_cast<size_t>(nch),
+                                        std::vector<float>(static_cast<size_t>(span), 0.f));
+
+    for (const AudioClip* a : clips) {
+        if (a->muted)
+            continue;
+        const PcmData* pcm = ctx_.assetStore->pcm(a->assetId);
+        const float* srcL = pcm->planes[0].data();
+        const float* srcR = pcm->planes.size() >= 2 ? pcm->planes[1].data() : srcL;
+        const int64_t pcmFrames = pcm->frames;
+        const int64_t cs = llround(T.beatsToSamplesF(a->startBeat));
+        const int64_t fadeIn = static_cast<int64_t>(a->fadeInSec * sr + 0.5);
+        const int64_t fadeOut = static_cast<int64_t>(a->fadeOutSec * sr + 0.5);
+        for (int64_t i = 0; i < a->lengthSamples; ++i) {
+            const int64_t src = a->srcOffsetSamples + i;
+            if (src < 0 || src >= pcmFrames)
+                continue;
+            double g = a->gain;
+            if (fadeIn > 0 && i < fadeIn)
+                g *= bounceFadeShape(a->fadeInCurve,
+                                     static_cast<double>(i + 1) / static_cast<double>(fadeIn));
+            if (fadeOut > 0 && (a->lengthSamples - i) <= fadeOut)
+                g *= bounceFadeShape(a->fadeOutCurve,
+                                     static_cast<double>(a->lengthSamples - i) /
+                                         static_cast<double>(fadeOut));
+            if (!a->env.empty())
+                g *= bounceEnvGain(a->env,
+                                   static_cast<double>(i) /
+                                       static_cast<double>(std::max<int64_t>(1, a->lengthSamples)));
+            const int64_t o = cs + i - startSample;
+            if (o < 0 || o >= span)
+                continue;
+            out[0][static_cast<size_t>(o)] += srcL[src] * static_cast<float>(g);
+            if (nch >= 2)
+                out[1][static_cast<size_t>(o)] += srcR[src] * static_cast<float>(g);
+        }
+    }
+
+    Asset a;
+    std::string err;
+    const std::string base = clips[0]->name.empty() ? std::string("bounce") : clips[0]->name;
+    if (!pcmToAssetHook(out, base + "-bounce", a, err))
+        return r.fail("render_failed", err.empty() ? "bounce write failed" : err);
+    a.id = m.nextId();
+    a.missing = false;
+    m.project.assets.push_back(a);
+    ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+    ctx_.assetStore->ensurePeaks(a);
+
+    // Replace the originals with one continuous clip.
+    AudioClip merged;
+    merged.id = m.nextId();
+    merged.name = base;
+    merged.startBeat = T.samplesToBeats(startSample);
+    merged.assetId = a.id;
+    merged.srcOffsetSamples = 0;
+    merged.lengthSamples = span;
+    merged.color = clips[0]->color;
+    const uint64_t newClipId = merged.id;
+    Track* tt = track;
+    tt->clips.erase(std::remove_if(tt->clips.begin(), tt->clips.end(),
+                                   [&](const Clip& c) {
+                                       const uint64_t cid = clipId(c);
+                                       return std::find(ids.begin(), ids.end(), cid) != ids.end();
+                                   }),
+                    tt->clips.end());
+    tt->clips.emplace_back(std::move(merged));
+    sortClipsByStart(*tt);
+
+    r.label = "Bounce Selection";
+    r.structural = true;
+    r.fullEvent = true;
+    return json{{"clipId", newClipId}, {"assetId", a.id}};
+}
+
+// cmd/track.createSampler {clipId} — Cubase "Create Sampler Track": one undoable step
+// that adds an instrument track after the clip's track, loads builtin:sampler on it,
+// and binds the clip's audio asset as the sample.
+json CommandProcessor::trackCreateSampler(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t clipIdv = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(clipIdv);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    const AudioClip* ac = asAudio(ref.clip);
+    if (!ac)
+        return r.fail("bad_request", "createSampler requires an audio clip");
+    if (ac->assetId == 0 || !m.assetById(ac->assetId))
+        return r.fail("bad_request", "clip has no audio asset");
+    const uint64_t assetId = ac->assetId;
+    const std::string clipName = ac->name.empty() ? std::string("Sampler") : ac->name;
+
+    json addReply = trackAdd(
+        json{{"kind", "instrument"},
+             {"name", clipName + " Sampler"},
+             {"index", m.trackIndex(ref.track->id) + 1}},
+        r);
+    if (!r.errCode.empty())
+        return json();
+    const uint64_t newTrackId = addReply["track"]["id"].get<uint64_t>();
+
+    json plugReply = pluginAdd(json{{"trackId", newTrackId}, {"uid", "builtin:sampler"}}, r);
+    if (!r.errCode.empty())
+        return json();
+    const uint64_t instanceId = plugReply["instance"]["instanceId"].get<uint64_t>();
+
+    pluginSetSample(json{{"instanceId", instanceId}, {"assetId", assetId}}, r);
+    if (!r.errCode.empty())
+        return json();
+
+    r.label = "Create Sampler Track";
+    r.structural = true;
+    r.fullEvent = true; // track list + inserts changed together
+    return json{{"trackId", newTrackId}, {"instanceId", instanceId}};
 }
 
 // cmd/track.duplicate {trackId} → {track} — deep copy inserted right after the source

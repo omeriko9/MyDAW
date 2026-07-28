@@ -21,6 +21,7 @@ import {
   addTrack,
   addTrackVersion,
   bounceTrack,
+  renderTrackInPlace,
   deleteTrackVersion,
   duplicateTrack,
   removePlugin,
@@ -757,6 +758,14 @@ export default function TrackHeaders({
         label: "Bounce to Audio",
         icon: "export",
         onClick: () => fire(bounceTrack(t.id, false)),
+      });
+      items.push({
+        label: "Render in Place",
+        icon: "audioWave",
+        title:
+          "Render this track through its insert chain onto a new audio track below (source muted)",
+        disabled: t.clips.length === 0,
+        onClick: () => fire(renderTrackInPlace(t.id)),
       });
     }
     items.push("separator", {

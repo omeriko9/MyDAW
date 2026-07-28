@@ -243,6 +243,17 @@ the entire drag.
   `bad_request` when the clips don't overlap. UI: X key / clip context menu with 2 clips selected;
   fade dialog on fade-handle double-click; curves editable in Inspector + Clip Editor (which also
   edits the envelope via its Envelope mode: click adds, drag moves, right-click deletes).
+- `cmd/clip.bounceSelection {clipIds:[]}` → `{clipId, assetId}` (audio, one track): consolidate
+  the selected clips into ONE continuous clip — clip gain/fades/envelopes baked (sample-identical
+  to playback), gaps become silence, track inserts NOT applied (Cubase Bounce Selection). The
+  originals are replaced; the render is a new asset via `pcmToAssetHook`.
+- `cmd/track.renderInPlace {trackId, startBeat?, endBeat?}` → `{trackId, assetId}`: render the
+  track solo'd THROUGH its insert chain (bounceRenderHook range render) onto a new audio track
+  inserted right below; the source track is muted. Default range = the track's clip extent.
+- `cmd/track.createSampler {clipId}` → `{trackId, instanceId}`: Cubase Create Sampler Track —
+  one undoable step that adds an instrument track after the clip's track, loads
+  `builtin:sampler`, and binds the clip's asset via the setSample path. The sampler now has a
+  dedicated editor panel (`InstrumentEditors.tsx`).
 - **Comping / take folders** (see §6 Comping): `cmd/take.create {trackId, clipIds:[], name?}` →
   `{folder}` moves the listed clips off the flat clip list into a new take folder (one lane per
   clip); `cmd/take.setComp {trackId, folderId, activeLane?|comp:[{startBeat,lane}]}` picks the

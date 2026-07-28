@@ -30,6 +30,7 @@ export interface InstrumentEditorSpec {
 const SPECS: Record<string, InstrumentEditorSpec> = {
   "builtin:piano": { w: 720, h: 400 },
   "builtin:polysynth": { w: 792, h: 560 },
+  "builtin:sampler": { w: 640, h: 360 },
 };
 
 export function instrumentEditorSpec(uid: string | undefined): InstrumentEditorSpec | null {
@@ -50,6 +51,7 @@ export interface InstrumentEditorProps {
 export default function InstrumentEditor(props: InstrumentEditorProps) {
   if (props.uid === "builtin:piano") return <PianoEditor {...props} />;
   if (props.uid === "builtin:polysynth") return <PolySynthEditor {...props} />;
+  if (props.uid === "builtin:sampler") return <SamplerEditor {...props} />;
   return null;
 }
 
@@ -373,6 +375,53 @@ export function KeyboardStrip({
           style={{ left: `${k.x * 100}%`, width: `${k.w * 100}%` }}
         />
       ))}
+    </div>
+  );
+}
+
+/* ============================================================================
+ * Sampler — builtin:sampler (param ids mirror SamplerInstrument's enum)
+ * ========================================================================= */
+
+const SAMP = { root: 0, tune: 1, gain: 2, attack: 3, release: 4, loop: 5 };
+
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const fmtNote = (n: number) => {
+  const note = Math.min(127, Math.max(0, Math.round(clamp01(n) * 127)));
+  return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
+};
+
+const LOOP_OPTIONS = [
+  { label: "Off", title: "Play the sample once per note" },
+  { label: "On", title: "Loop the sample while the note is held" },
+];
+
+function SamplerEditor({ params, trackId, disabled, onChange, onCommit, onMenu }: InstrumentEditorProps) {
+  const ctl: CtlProps = { params, disabled, onChange, onCommit, onMenu };
+  return (
+    <div className="ie-root ie-sampler">
+      <div className="ie-brand">
+        <span className="ie-brand-name">Sampler</span>
+        <span className="ie-brand-sub">chromatic one-shot · 16 voices</span>
+      </div>
+      <div className="ie-panels">
+        <Section title="Sample">
+          <PKnob ctl={ctl} id={SAMP.root} label="Root" format={fmtNote} />
+          <Seg ctl={ctl} id={SAMP.loop} options={LOOP_OPTIONS} ariaLabel="Loop mode" />
+        </Section>
+        <Section title="Pitch">
+          <PKnob ctl={ctl} id={SAMP.tune} label="Tune" bipolar
+            format={(n) => `${Math.round(linMap(n, -12, 12)) > 0 ? "+" : ""}${Math.round(linMap(n, -12, 12))} st`} />
+        </Section>
+        <Section title="Envelope">
+          <PKnob ctl={ctl} id={SAMP.attack} label="Attack" format={fmtMs(1, 2000)} />
+          <PKnob ctl={ctl} id={SAMP.release} label="Release" format={fmtMs(1, 4000)} />
+        </Section>
+        <Section title="Output">
+          <PKnob ctl={ctl} id={SAMP.gain} label="Gain" format={fmtDb(-24, 6)} />
+        </Section>
+      </div>
+      <KeyboardStrip trackId={trackId} disabled={disabled} low={36} high={84} />
     </div>
   );
 }

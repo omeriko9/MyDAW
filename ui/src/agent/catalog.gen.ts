@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "7ba14eff87cf2acc3d98eb1365b6208536143949b400c9579f7024eb77c83549";
+export const AGENT_CATALOG_SHA256 = "5ed106cc3be6536c138f85f926a04590a08243e698f43e48e8313a38dac7ed4b";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4979,6 +4979,69 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/clip.bounceSelection",
+      "category": "clips",
+      "description": "Consolidate selected audio clips on one track into one continuous clip: gain/fades/envelopes baked, gaps become silence, track inserts NOT applied.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "clip.id",
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipIds": {
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "clipIds"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId",
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipIds": [
+              21,
+              22
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/clip.crossfade",
       "category": "clips",
       "description": "Crossfade two overlapping audio clips on one track: fade-out on the earlier, fade-in on the later, spanning the overlap (equal-power default).",
@@ -6400,6 +6463,64 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/track.createSampler",
+      "category": "tracks",
+      "description": "Cubase Create Sampler Track: add an instrument track after the clip's track, load builtin:sampler, bind the clip's audio asset — one undoable step.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "track.id",
+        "instance.id"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "instanceId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "instanceId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/track.duplicate",
       "category": "tracks",
       "description": "Duplicate a channel with its clips, routing, and inserts.",
@@ -6498,6 +6619,68 @@ export const AGENT_CATALOG: AgentCatalog = {
           "input": {
             "trackId": 7,
             "sendIndex": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/track.renderInPlace",
+      "category": "tracks",
+      "description": "Render the track solo'd through its insert chain over a range (default: its clip extent) onto a NEW audio track below; the source track is muted.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [
+        "track.id",
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "endBeat": {
+            "type": "number"
+          },
+          "startBeat": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "trackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 7
           }
         }
       ]
@@ -9735,6 +9918,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/chord.set",
   "cmd/clip.addAudio",
   "cmd/clip.addMidi",
+  "cmd/clip.bounceSelection",
   "cmd/clip.crossfade",
   "cmd/clip.delete",
   "cmd/clip.duplicate",
@@ -9768,9 +9952,11 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/track.add",
   "cmd/track.addSend",
   "cmd/track.bounce",
+  "cmd/track.createSampler",
   "cmd/track.duplicate",
   "cmd/track.remove",
   "cmd/track.removeSend",
+  "cmd/track.renderInPlace",
   "cmd/track.reorder",
   "cmd/track.set",
   "cmd/track.setEq",
@@ -9901,6 +10087,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/timesig.set",
   "cmd/track.add",
   "cmd/track.addSend",
+  "cmd/track.createSampler",
   "cmd/track.duplicate",
   "cmd/track.remove",
   "cmd/track.removeSend",
@@ -10038,6 +10225,14 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/track.duplicate"
   },
+  "cmd/track.renderInPlace": {
+    "kind": "operation",
+    "operation": "cmd/track.renderInPlace"
+  },
+  "cmd/track.createSampler": {
+    "kind": "operation",
+    "operation": "cmd/track.createSampler"
+  },
   "cmd/clip.addMidi": {
     "kind": "operation",
     "operation": "cmd/clip.addMidi"
@@ -10065,6 +10260,10 @@ export const REQUEST_COVERAGE = {
   "cmd/clip.crossfade": {
     "kind": "operation",
     "operation": "cmd/clip.crossfade"
+  },
+  "cmd/clip.bounceSelection": {
+    "kind": "operation",
+    "operation": "cmd/clip.bounceSelection"
   },
   "cmd/clip.delete": {
     "kind": "operation",
@@ -10605,6 +10804,14 @@ export const ENGINE_OPERATION_EXAMPLES = {
       ]
     }
   ],
+  "cmd/clip.bounceSelection": [
+    {
+      "clipIds": [
+        21,
+        22
+      ]
+    }
+  ],
   "cmd/clip.crossfade": [
     {
       "clipIds": [
@@ -10866,6 +11073,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "freeze": false
     }
   ],
+  "cmd/track.createSampler": [
+    {
+      "clipId": 21
+    }
+  ],
   "cmd/track.duplicate": [
     {
       "trackId": 7
@@ -10880,6 +11092,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "trackId": 7,
       "sendIndex": 0
+    }
+  ],
+  "cmd/track.renderInPlace": [
+    {
+      "trackId": 7
     }
   ],
   "cmd/track.reorder": [

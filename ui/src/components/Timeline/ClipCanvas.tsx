@@ -29,7 +29,9 @@ import {
   addPlugin,
   addTrack,
   addTranspose,
+  bounceSelection,
   commitParam,
+  createSamplerTrack,
   crossfadeClips,
   deleteClips,
   duplicateClips,
@@ -2321,6 +2323,25 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                     "Crossfade failed — the two clips must overlap on one track",
                     "info",
                   ),
+                ),
+            },
+            {
+              label: "Bounce Selection",
+              icon: "export",
+              title:
+                "Consolidate the selected clips into ONE continuous clip — gain/fades/envelopes baked, gaps become silence (inserts not applied)",
+              onClick: () =>
+                void bounceSelection(ids).catch(() =>
+                  showToast("Bounce failed — select audio clips on one track", "info"),
+                ),
+            },
+            {
+              label: "Create Sampler Track",
+              icon: "piano",
+              title: "New instrument track with the built-in Sampler playing this clip's audio",
+              onClick: () =>
+                void createSamplerTrack(clip.id).catch(() =>
+                  showToast("Could not create a sampler track from this clip", "info"),
                 ),
             },
             {

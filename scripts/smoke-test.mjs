@@ -336,6 +336,58 @@ async function main() {
     report("processAudio stereoFlip + resample", ok, detail);
   }
 
+  // render in place / bounce selection / create sampler track
+  {
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const findAud = (p) => p.tracks.find((t) => t.id === audioT.id);
+    let pc = findAud(proj)?.clips?.find((c) => c.type === "audio");
+    let ok = false;
+    let detail = "no audio clip";
+    if (pc) {
+      // 1) render in place → new audio track below with one clip; source muted
+      const rip = await req("cmd/track.renderInPlace", { trackId: audioT.id });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      const rendered = proj.tracks.find((t) => t.id === rip.trackId);
+      const srcIdx = proj.tracks.findIndex((t) => t.id === audioT.id);
+      const ripOk =
+        rendered?.kind === "audio" &&
+        rendered?.clips?.length === 1 &&
+        proj.tracks[srcIdx]?.mute === true &&
+        proj.tracks[srcIdx + 1]?.id === rip.trackId;
+      await req("edit/undo", {}); // put the source back (unmuted, no extra track)
+
+      // 2) split the clip, then bounce the two halves back into ONE continuous clip
+      // (the track also holds the far-away crossfade dup — bounce ONLY the two pieces)
+      const sp = await req("cmd/clip.split", { clipIds: [pc.id], atBeat: 1.5 });
+      const pieces = [pc.id, ...(sp.newClipIds ?? [])];
+      const clipCount = findAud((await req("session/hello", { clientName: "smoke" })).project)
+        .clips.filter((c) => c.type === "audio").length;
+      const bs = await req("cmd/clip.bounceSelection", { clipIds: pieces });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      const after = findAud(proj).clips.filter((c) => c.type === "audio");
+      const merged = after.find((c) => c.id === bs.clipId);
+      const bsOk =
+        pieces.length === 2 &&
+        after.length === clipCount - 1 &&
+        !!merged &&
+        Math.abs(merged.lengthSamples - pc.lengthSamples) <= 2;
+
+      // 3) sampler track from the bounced clip
+      const cs = await req("cmd/track.createSampler", { clipId: bs.clipId });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      const st = proj.tracks.find((t) => t.id === cs.trackId);
+      const ins = st?.inserts?.[0];
+      const csOk =
+        st?.kind === "instrument" &&
+        ins?.uid === "builtin:sampler" &&
+        ins?.instanceId === cs.instanceId &&
+        (ins?.sampleAssetId ?? 0) === bs.assetId;
+      ok = ripOk && bsOk && csOk;
+      detail = `rip=${ripOk} (track ${rip.trackId}) bounce=${bsOk} (${pieces.length}->1) sampler=${csOk}`;
+    }
+    report("renderInPlace + bounceSelection + createSampler", ok, detail);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });
