@@ -1787,6 +1787,21 @@ export interface ScanDoneEvent {
   registry: PluginInfo[];
 }
 
+/** Async offline-process (DOP) render progress — a VST chain replaying on a worker. */
+export interface DopProgressEvent {
+  clipId: number;
+  pct: number;
+  label?: string;
+}
+
+/** Async DOP render finished; on ok the derived asset committed (full projectChanged follows). */
+export interface DopDoneEvent {
+  clipId: number;
+  ok: boolean;
+  label?: string;
+  error?: string;
+}
+
 export interface PluginParamsEvent {
   instanceId: number;
   /** edits from native editor */
@@ -2002,6 +2017,8 @@ export interface EventMap {
   "event/recordingNotes": RecordingNotesEvent;
   "event/importProgress": ImportProgressEvent;
   "event/exportProgress": ExportProgressEvent;
+  "event/dopProgress": DopProgressEvent;
+  "event/dopDone": DopDoneEvent;
   "event/scanProgress": ScanProgressEvent;
   "event/scanDone": ScanDoneEvent;
   "event/pluginLoadProgress": PluginLoadProgressEvent;

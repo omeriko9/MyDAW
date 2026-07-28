@@ -5622,6 +5622,10 @@
           },
           "lengthSamples": {
             "type": "number"
+          },
+          "pending": {
+            "description": "true: a VST chain renders on a worker; the result commits via event/dopDone (commands are rejected with busy_processing meanwhile)",
+            "type": "boolean"
           }
         },
         "required": [

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -178,9 +179,53 @@ private:
     static void collapseDop(AudioClip& ac);
     // One VST/out-of-process chain entry, run offline over `seg` in place via a
     // throwaway host instance. May write pr.sparams["state"] (first-render default
-    // capture) — see the impl for the inline-state contract.
+    // capture) — see the impl for the inline-state contract. `runOnMain` marshals
+    // every host/registry/model access (null = caller IS the main thread, run
+    // inline); the block pump runs on the calling thread (worker-safe, mirrors
+    // AudioGraph::renderOffline). `progress(done, total)` ticks per pumped block.
     bool applyVstFxOffline(std::vector<std::vector<float>>& seg, ClipProcess& pr,
+                           int sampleRate, const TempoMap& map,
+                           const std::function<bool(std::function<void()>)>& runOnMain,
+                           const std::function<void(int64_t, int64_t)>& progress,
                            std::string& err);
+
+    // --- async DOP recompute (SPEC §6): chains with VST entries render on a worker ---
+    // In-flight render of one clip's chain. The command mutates the chain, snapshots
+    // everything the worker needs, and returns immediately (skipUndo); the worker runs
+    // the chain over the copied segment (host ops marshalled to main via runOnMain) and
+    // posts finishDopJob, which commits the derived asset + writes back captured VST
+    // state + pushes the SINGLE undo entry (before = pre-command snapshot). While a job
+    // is in flight the Api busy guard (busy_processing) blocks every model mutation.
+    struct DopJob {
+        uint64_t clipId = 0;
+        std::string label;    // undo label
+        json before;          // full-project snapshot from before the command
+        AudioClip clipBefore; // surgical rollback target on render failure
+        std::vector<std::vector<float>> seg; // provenance slice, processed in place
+        std::vector<ClipProcess> processes;  // post-edit chain copy (state captured here)
+        int sampleRate = 48000;
+        TempoMap tempo; // copy — the model's map is guarded but the worker never touches it
+        std::string clipName;
+    };
+public:
+    struct AsyncDopHooks {
+        std::function<bool(std::function<void()>)> runOnMain;    // App::postAndWait
+        std::function<void(std::function<void()>)> spawnWorker;  // App::spawnWorker
+        std::function<void(std::function<void()>)> postToMain;   // App::post
+        std::function<bool()> beginBusy;                         // App::beginProcessing
+        std::function<void()> endBusy;                           // App::endProcessing
+        std::function<void(const std::string&, json)> broadcast; // App::broadcastEvent
+    };
+    void setAsyncDopHooks(AsyncDopHooks h) { dopHooks_ = std::move(h); }
+
+private:
+    bool asyncDopAvailable() const;
+    // Starts the worker render for `ac` (chain already mutated). On precondition
+    // failure rolls *ac back to clipBefore and fills r. Returns the command reply.
+    json startAsyncDop(AudioClip* ac, const AudioClip& clipBefore, json beforeProj,
+                       const char* label, CmdResult& r);
+    void runDopJobWorker(std::shared_ptr<DopJob> job); // worker thread
+    void finishDopJob(std::shared_ptr<DopJob> job, bool ok, std::string err); // main
     json clipDissolve(const json& p, CmdResult& r);
     json midiMergeLoop(const json& p, CmdResult& r);
     json trackRenderInPlace(const json& p, CmdResult& r);
@@ -281,6 +326,10 @@ private:
     int maxBlock_ = 2048;
     uint64_t revision_ = 0;
     TempoMap localTm_; // fallback when ctx_.tempoMap is not wired (tests)
+    AsyncDopHooks dopHooks_; // unset members -> DOP recomputes stay synchronous
+    // True while executeBatch dispatches its operations: an atomic batch cannot leave
+    // a render in flight between its own commands, so DOP stays synchronous inside.
+    bool inBatch_ = false;
     // Project snapshot taken at the FIRST transient command of a drag gesture; the
     // gesture's final non-transient commit uses it as the undo "before" so one undo
     // reverts the whole drag (see execute()).

@@ -16,6 +16,7 @@
  */
 
 import { create } from "zustand";
+import { showToast } from "../components/common/ToastHost";
 import { dropPeaks } from "../components/Timeline/peaksCache";
 import { invalidatePeaks } from "../lib/peaks";
 import {
@@ -226,6 +227,8 @@ export interface DawState {
   scanProgress: ScanProgressEvent | null;
   importProgress: ImportProgressEvent | null;
   exportProgress: number | null;
+  /** async offline-process (DOP) render in flight: event/dopProgress → event/dopDone */
+  dopJob: { clipId: number; pct: number; label?: string } | null;
 
   /* recent warn/error log lines (event/log), capped */
   logLines: LogEvent[];
@@ -431,6 +434,7 @@ export const useStore = create<DawState>((set) => ({
   scanProgress: null,
   importProgress: null,
   exportProgress: null,
+  dopJob: null,
   logLines: [],
 
   selection: { trackIds: [], clipIds: [], noteIds: [] },
@@ -676,6 +680,15 @@ ws.on("event/importProgress", (ev) => {
 
 ws.on("event/exportProgress", (ev) => {
   useStore.setState({ exportProgress: ev.pct >= 100 ? null : ev.pct });
+});
+
+ws.on("event/dopProgress", (ev) => {
+  useStore.setState({ dopJob: { clipId: ev.clipId, pct: ev.pct ?? 0, label: ev.label } });
+});
+
+ws.on("event/dopDone", (ev) => {
+  useStore.setState({ dopJob: null });
+  if (!ev.ok) showToast(`Offline process failed: ${ev.error ?? "render failed"}`, "error");
 });
 
 ws.on("event/log", (ev) => {

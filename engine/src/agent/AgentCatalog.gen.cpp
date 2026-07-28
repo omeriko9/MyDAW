@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "7cd431edc094090ae9e51a9b2d35bb7bd2bcdbca6a921a5ee4a96314aa6da542";
+const char kAgentCatalogSha256[] = "82472863fded739a8847bb3e2f25171bdcdf7d6fe9773c3f12b7cd37e4b98045";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -5630,6 +5630,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           },
           "lengthSamples": {
             "type": "number"
+          },
+          "pending": {
+            "description": "true: a VST chain renders on a worker; the result commits via event/dopDone (commands are rejected with busy_processing meanwhile)",
+            "type": "boolean"
           }
         },
         "required": [

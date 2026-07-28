@@ -251,9 +251,17 @@ Caveat: synchronous stretch stalls on long clips — acceptable v1 (bounce prece
 > samples; tails truncated like built-ins) → destroy. `addPlugin` accepts registry VST uids
 > (+ optional `copyFrom` insert instanceId, chunk priority live→orphan→stateFile) and stamps
 > `sparams["name"]` for display; DopDialog gained a VST picker (registry, deduped by uid).
-> E2E: scripts/dop-vst-test.mjs (18 checks, real Waves MaxxBass VST3 incl. save/reload replay
-> + undo/redo). Still open from this swipe: async recompute with progress for long clips
-> (VST recompute is synchronous on the command thread, bounce precedent). The derived-file leak is handled by
+> E2E: scripts/dop-vst-test.mjs (22 checks, real Waves MaxxBass VST3 incl. save/reload replay
+> + undo/redo). **Async recompute SHIPPED 2026-07-29**: chains containing an enabled VST entry
+> replay on an `App::spawnWorker` thread — the command mutates the chain, snapshots a `DopJob`
+> (provenance slice + chain copy + undo "before") and returns `{pending:true}` immediately;
+> the worker pumps blocks (host create/state/destroy marshalled to the main loop via
+> `postAndWait`), broadcasts `event/dopProgress`, and posts `finishDopJob` which commits the
+> derived asset, writes back captured VST state, pushes the SINGLE undo entry and emits
+> `event/dopDone`. While in flight, `App::processing_` mirrors the export busy guard (Api
+> rejects cmd/edit/media/project-load/export with `busy_processing`); atomic batches force the
+> sync path (`inBatch_`). Builtin-only chains still recompute synchronously. UI: dopProgress
+> row in DopDialog + failure toast (store `dopJob`). The derived-file leak is handled by
 > **cmd/media.removeUnused** (Project ▸ Remove Unused Media…, shipped 2026-07-28): preview →
 > undoable record removal → optional file deletion (clears undo, saved projects only).
 >

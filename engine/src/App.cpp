@@ -296,6 +296,21 @@ bool App::init(std::string& err) {
         return true;
     };
 
+    // Async DOP: chains containing VST entries render on a worker (host ops marshalled
+    // back to the main loop); processing_ mirrors the export busy guard (SPEC §6).
+    {
+        CommandProcessor::AsyncDopHooks hooks;
+        hooks.runOnMain = [this](std::function<void()> f) { return postAndWait(std::move(f)); };
+        hooks.spawnWorker = [this](std::function<void()> f) { spawnWorker(std::move(f)); };
+        hooks.postToMain = [this](std::function<void()> f) { post(std::move(f)); };
+        hooks.beginBusy = [this] { return beginProcessing(); };
+        hooks.endBusy = [this] { endProcessing(); };
+        hooks.broadcast = [this](const std::string& type, json payload) {
+            broadcastEvent(type, std::move(payload));
+        };
+        cmd->setAsyncDopHooks(std::move(hooks));
+    }
+
     // 9. Autosave interval from settings. Child "new window" instances share the primary's
     //    %APPDATA% recovery slot, so they never autosave — they'd clobber the primary's
     //    crash-recovery data. (Explicit File > Save still works; that writes a chosen path.)

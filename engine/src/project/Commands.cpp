@@ -874,6 +874,15 @@ json CommandProcessor::executeBatch(const json& payload, std::string& errCode,
         return pluginsRestored;
     };
 
+    // Atomic batch: DOP recomputes must complete inside their own operation (a later
+    // op may depend on the result, and rollback assumes nothing is still in flight) —
+    // inBatch_ forces the synchronous path for the duration.
+    inBatch_ = true;
+    struct BatchFlagReset {
+        bool& flag;
+        ~BatchFlagReset() { flag = false; }
+    } batchFlagReset{inBatch_};
+
     for (size_t index = 0; index < operations.size(); ++index) {
         const json& operation = operations[index];
         const std::string type = operation["type"].get<std::string>();
@@ -3028,88 +3037,115 @@ static bool applyBuiltinFxOffline(std::vector<std::vector<float>>& seg, const st
 // `latency` extra silence and discarding the first `latency` output samples; any
 // tail beyond that is truncated (same policy as built-ins).
 bool CommandProcessor::applyVstFxOffline(std::vector<std::vector<float>>& seg,
-                                         ClipProcess& pr, std::string& err) {
-    Model& m = model();
-    const auto uidIt = pr.sparams.find("uid");
-    const std::string uid = uidIt != pr.sparams.end() ? uidIt->second : "";
-    if (!host_) {
-        err = "plugin hosting unavailable";
-        return false;
-    }
-    if (!ctx_.pluginRegistry) {
-        err = "plugin registry unavailable";
-        return false;
-    }
-    const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
-    if (!info) {
-        err = "uid not in plugin registry: " + uid;
-        return false;
-    }
-    if (info->isInstrument) {
-        err = "instruments cannot run as offline clip processes: " + info->name;
-        return false;
-    }
-    if (info->blacklisted) {
-        err = info->name + " is blacklisted";
-        return false;
-    }
-
+                                         ClipProcess& pr, int sampleRate,
+                                         const TempoMap& map,
+                                         const std::function<bool(std::function<void()>)>& runOnMain,
+                                         const std::function<void(int64_t, int64_t)>& progress,
+                                         std::string& err) {
+    // Every host/registry/model touch goes through `onMain` (async path: postAndWait
+    // into the main loop — safe because the busy guard blocks concurrent commands;
+    // sync path: run inline, we ARE the main thread). The block pump below runs on
+    // the calling thread — PluginProxyNode::processRt is offline-thread-sanctioned.
+    const auto onMain = [&](std::function<void()> f) {
+        if (!runOnMain) {
+            f();
+            return true;
+        }
+        return runOnMain(std::move(f));
+    };
     constexpr int kBlock = 2048;
     PluginInstance pi;
-    pi.instanceId = m.nextId();
-    pi.uid = info->uid;
-    pi.format = info->format;
-    pi.path = info->path;
-    pi.bitness = info->bitness;
-    pi.name = info->name;
-    if (!host_->create(pi, m.project.sampleRate, kBlock, err))
+    std::string name;
+    PluginProxyNode* node = nullptr;
+    bool ok = false;
+    if (!onMain([&] {
+            const auto uidIt = pr.sparams.find("uid");
+            const std::string uid = uidIt != pr.sparams.end() ? uidIt->second : "";
+            if (!host_) {
+                err = "plugin hosting unavailable";
+                return;
+            }
+            if (!ctx_.pluginRegistry) {
+                err = "plugin registry unavailable";
+                return;
+            }
+            const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
+            if (!info) {
+                err = "uid not in plugin registry: " + uid;
+                return;
+            }
+            if (info->isInstrument) {
+                err = "instruments cannot run as offline clip processes: " + info->name;
+                return;
+            }
+            if (info->blacklisted) {
+                err = info->name + " is blacklisted";
+                return;
+            }
+            name = info->name;
+            pi.instanceId = model().nextId();
+            pi.uid = info->uid;
+            pi.format = info->format;
+            pi.path = info->path;
+            pi.bitness = info->bitness;
+            pi.name = info->name;
+            if (!host_->create(pi, sampleRate, kBlock, err))
+                return;
+            // From here every failure must tear the throwaway instance down.
+            const auto stIt = pr.sparams.find("state");
+            if (stIt != pr.sparams.end() && !stIt->second.empty()) {
+                std::vector<uint8_t> chunk;
+                if (!base64Decode(stIt->second, chunk)) {
+                    err = name + ": stored state is not valid base64";
+                    host_->destroy(pi.instanceId);
+                    return;
+                }
+                // Recreate-grade timeout: soundbank loads inside setState blow past
+                // the regular 10 s op timeout. TimedOutAlive is a hard failure here —
+                // a throwaway instance has no "keep dormant and retry" to offer.
+                std::string stateErr;
+                if (host_->setStateForRecreate(pi.instanceId, chunk, stateErr) !=
+                    SetStateResult::Ok) {
+                    err = stateErr.empty() ? name + ": state restore failed"
+                                           : name + ": " + stateErr;
+                    host_->destroy(pi.instanceId);
+                    return;
+                }
+            } else {
+                std::vector<uint8_t> chunk;
+                if (host_->getState(pi.instanceId, chunk) && !chunk.empty()) {
+                    if (chunk.size() > 1024 * 1024)
+                        Log::warn("dop: %s default state is %zu KB — project.json and "
+                                  "every undo snapshot now carry it",
+                                  name.c_str(), chunk.size() / 1024);
+                    pr.sparams["state"] = base64Encode(chunk);
+                }
+            }
+            for (const auto& [key, value] : pr.params) {
+                char* endp = nullptr;
+                const long paramId = std::strtol(key.c_str(), &endp, 10);
+                if (endp && *endp == '\0' && paramId >= 0)
+                    host_->setParam(pi.instanceId, static_cast<uint32_t>(paramId),
+                                    std::clamp(value, 0.0, 1.0));
+            }
+            node = host_->node(pi.instanceId);
+            if (!node) {
+                err = name + ": plugin node unavailable";
+                host_->destroy(pi.instanceId);
+                return;
+            }
+            node->setOfflineMode(true); // stretch the done-wait; slow ≠ hung offline
+            ok = true;
+        })) {
+        err = "engine is shutting down";
         return false;
-    // Every exit below this point must tear the throwaway instance down.
-    const auto fail = [&](std::string msg) {
-        host_->destroy(pi.instanceId);
-        err = std::move(msg);
+    }
+    if (!ok)
         return false;
-    };
 
-    const auto stIt = pr.sparams.find("state");
-    if (stIt != pr.sparams.end() && !stIt->second.empty()) {
-        std::vector<uint8_t> chunk;
-        if (!base64Decode(stIt->second, chunk))
-            return fail(info->name + ": stored state is not valid base64");
-        // Recreate-grade timeout: soundbank loads inside setState blow past the
-        // regular 10 s op timeout. TimedOutAlive is a hard failure here — a
-        // throwaway instance has no "keep dormant and retry" to offer.
-        std::string stateErr;
-        if (host_->setStateForRecreate(pi.instanceId, chunk, stateErr) !=
-            SetStateResult::Ok)
-            return fail(stateErr.empty() ? info->name + ": state restore failed"
-                                         : info->name + ": " + stateErr);
-    } else {
-        std::vector<uint8_t> chunk;
-        if (host_->getState(pi.instanceId, chunk) && !chunk.empty()) {
-            if (chunk.size() > 1024 * 1024)
-                Log::warn("dop: %s default state is %zu KB — project.json and every "
-                          "undo snapshot now carry it",
-                          info->name.c_str(), chunk.size() / 1024);
-            pr.sparams["state"] = base64Encode(chunk);
-        }
-    }
-    for (const auto& [key, value] : pr.params) {
-        char* endp = nullptr;
-        const long paramId = std::strtol(key.c_str(), &endp, 10);
-        if (endp && *endp == '\0' && paramId >= 0)
-            host_->setParam(pi.instanceId, static_cast<uint32_t>(paramId),
-                            std::clamp(value, 0.0, 1.0));
-    }
-
-    PluginProxyNode* node = host_->node(pi.instanceId);
-    if (!node)
-        return fail(info->name + ": plugin node unavailable");
-    node->setOfflineMode(true); // stretch the done-wait; slow ≠ hung while offline
     const int64_t latency = std::max(0, node->latencySamples());
     const int nch = std::min<int>(2, static_cast<int>(seg.size()));
     const int64_t frames = static_cast<int64_t>(seg[0].size());
-    const TempoMap& map = tm();
     const MidiBuffer noMidi;
     std::vector<float> scratch(2 * static_cast<size_t>(kBlock));
     float* io[2] = {scratch.data(), scratch.data() + kBlock};
@@ -3129,16 +3165,20 @@ bool CommandProcessor::applyVstFxOffline(std::vector<std::vector<float>>& seg,
         ctx.playing = true;
         ctx.recording = false;
         ctx.looping = false;
-        ctx.sampleRate = m.project.sampleRate;
+        ctx.sampleRate = sampleRate;
         node->processRt(ctx, io, nch, noMidi);
+        // Latency compensation: output sample (pos+i) belongs at (pos+i-latency).
         for (int c = 0; c < nch; ++c)
             for (int i = 0; i < nthis; ++i) {
                 const int64_t dst = pos + i - latency;
                 if (dst >= 0 && dst < frames)
                     seg[static_cast<size_t>(c)][dst] = io[c][i];
             }
+        if (progress)
+            progress(std::min<int64_t>(pos + nthis, frames + latency), frames + latency);
     }
-    host_->destroy(pi.instanceId);
+    if (!onMain([&] { host_->destroy(pi.instanceId); }))
+        return false; // shutdown mid-render: the manager's own teardown reaps the host
     return true;
 }
 
@@ -3197,7 +3237,8 @@ bool CommandProcessor::recomputeDop(AudioClip* ac, std::string& err) {
             if (isBuiltinUid(uid)) {
                 if (!applyBuiltinFxOffline(seg, uid, pr.params, m.project.sampleRate, err))
                     return false;
-            } else if (!applyVstFxOffline(seg, pr, err)) {
+            } else if (!applyVstFxOffline(seg, pr, m.project.sampleRate, tm(), nullptr,
+                                          nullptr, err)) {
                 return false;
             }
         } else if (!applyClipDspOp(seg, pr.op, num, str, m.project.sampleRate, err)) {
@@ -3215,6 +3256,200 @@ bool CommandProcessor::recomputeDop(AudioClip* ac, std::string& err) {
     ctx_.assetStore->ensurePeaks(a);
     ac->assetId = a.id;
     return true;
+}
+
+// True when replaying `processes` would spawn a throwaway host instance (an enabled
+// non-builtin plugin entry) — the recompute then belongs on a worker.
+static bool chainHasEnabledVst(const std::vector<ClipProcess>& processes) {
+    for (const ClipProcess& pr : processes) {
+        if (!pr.enabled || pr.op != "plugin")
+            continue;
+        const auto it = pr.sparams.find("uid");
+        if (it != pr.sparams.end() && !isBuiltinUid(it->second))
+            return true;
+    }
+    return false;
+}
+
+bool CommandProcessor::asyncDopAvailable() const {
+    return !inBatch_ && dopHooks_.runOnMain && dopHooks_.spawnWorker &&
+           dopHooks_.postToMain && dopHooks_.beginBusy && dopHooks_.endBusy &&
+           dopHooks_.broadcast && ctx_.assetStore && pcmToAssetHook;
+}
+
+// Async DOP start (main thread, inside the command): the chain is already mutated on
+// *ac — slice the provenance span, snapshot everything into a DopJob, engage the busy
+// guard and hand off to a worker. The command completes immediately with skipUndo;
+// finishDopJob later pushes the single undo entry. On any precondition failure the
+// clip is rolled back and the command fails like the sync path would.
+json CommandProcessor::startAsyncDop(AudioClip* ac, const AudioClip& clipBefore,
+                                     json beforeProj, const char* label, CmdResult& r) {
+    Model& m = model();
+    const auto failRollback = [&](const char* code, const std::string& msg) {
+        *ac = clipBefore;
+        return r.fail(code, msg);
+    };
+    const PcmData* pcm = ctx_.assetStore->pcm(ac->dopAssetId);
+    if (!pcm || pcm->planes.empty())
+        return failRollback("bad_request", "original clip audio not loaded");
+    const int nch = static_cast<int>(pcm->planes.size());
+    const int64_t total = pcm->frames;
+    const int64_t off = std::clamp<int64_t>(ac->dopOffsetSamples, 0, total);
+    const int64_t len = std::clamp<int64_t>(ac->dopLengthSamples, 0, total - off);
+    if (len < 1)
+        return failRollback("bad_request", "original clip span is empty");
+    if (!dopHooks_.beginBusy())
+        return failRollback("busy_processing", "another offline render is in progress");
+
+    auto job = std::make_shared<DopJob>();
+    job->clipId = ac->id;
+    job->label = label;
+    job->before = std::move(beforeProj);
+    job->clipBefore = clipBefore;
+    job->seg.resize(static_cast<size_t>(nch));
+    for (int ch = 0; ch < nch; ++ch)
+        job->seg[static_cast<size_t>(ch)].assign(
+            pcm->planes[static_cast<size_t>(ch)].begin() + off,
+            pcm->planes[static_cast<size_t>(ch)].begin() + off + len);
+    job->processes = ac->processes;
+    job->sampleRate = m.project.sampleRate;
+    job->tempo = tm();
+    job->clipName = ac->name.empty() ? std::string("clip") : ac->name;
+
+    r.label = label;
+    r.skipUndo = true; // finishDopJob pushes the single before/after entry
+    const ClipRef ref = m.clipById(ac->id);
+    if (ref)
+        r.eventClips.emplace_back(ref.track->id, ac->id); // pending chain shows up now
+    dopHooks_.broadcast("event/dopProgress",
+                        json{{"clipId", job->clipId}, {"pct", 0.0}, {"label", label}});
+    dopHooks_.spawnWorker([this, job] { runDopJobWorker(job); });
+    return json{{"assetId", ac->assetId},
+                {"lengthSamples", ac->lengthSamples},
+                {"pending", true}};
+}
+
+// Worker thread: replay the chain over the job's segment. Pure DSP/built-ins run
+// right here; VST entries marshal host ops to main and pump on this thread.
+void CommandProcessor::runDopJobWorker(std::shared_ptr<DopJob> job) {
+    std::string err;
+    bool ok = true;
+    const int nVst = [&] {
+        int n = 0;
+        for (const ClipProcess& pr : job->processes)
+            if (pr.enabled && pr.op == "plugin" &&
+                !isBuiltinUid(pr.sparams.count("uid") ? pr.sparams.at("uid") : ""))
+                ++n;
+        return std::max(1, n);
+    }();
+    int vstDone = 0;
+    try {
+        for (ClipProcess& pr : job->processes) {
+            if (!pr.enabled)
+                continue;
+            const auto num = [&pr](const char* k, double d) {
+                const auto it = pr.params.find(k);
+                return it != pr.params.end() ? it->second : d;
+            };
+            const auto str = [&pr](const char* k, const char* d) -> std::string {
+                const auto it = pr.sparams.find(k);
+                return it != pr.sparams.end() ? it->second : std::string(d);
+            };
+            if (pr.op == "plugin") {
+                const std::string uid = str("uid", "");
+                if (isBuiltinUid(uid)) {
+                    ok = applyBuiltinFxOffline(job->seg, uid, pr.params, job->sampleRate,
+                                               err);
+                } else {
+                    const auto progress = [&](int64_t done, int64_t totalFrames) {
+                        const double pct =
+                            100.0 *
+                            (vstDone + static_cast<double>(done) /
+                                           static_cast<double>(std::max<int64_t>(
+                                               1, totalFrames))) /
+                            nVst;
+                        dopHooks_.broadcast("event/dopProgress",
+                                            json{{"clipId", job->clipId},
+                                                 {"pct", pct},
+                                                 {"label", job->label}});
+                    };
+                    ok = applyVstFxOffline(job->seg, pr, job->sampleRate, job->tempo,
+                                           dopHooks_.runOnMain, progress, err);
+                    ++vstDone;
+                }
+            } else {
+                ok = applyClipDspOp(job->seg, pr.op, num, str, job->sampleRate, err);
+            }
+            if (!ok)
+                break;
+        }
+    } catch (const std::exception& e) {
+        ok = false;
+        err = std::string("offline render failed: ") + e.what();
+    } catch (...) {
+        ok = false;
+        err = "offline render failed";
+    }
+    dopHooks_.postToMain(
+        [this, job, ok, err] { finishDopJob(job, ok, err); });
+}
+
+// Main thread (posted by the worker): commit the derived render — or roll the chain
+// edit back on failure — then release the busy guard.
+void CommandProcessor::finishDopJob(std::shared_ptr<DopJob> job, bool ok,
+                                    std::string err) {
+    dopHooks_.endBusy();
+    Model& m = model();
+    const ClipRef ref = m.clipById(job->clipId);
+    AudioClip* ac = ref ? asAudio(ref.clip) : nullptr;
+    const auto announce = [&](bool success, const std::string& msg) {
+        json ev{{"clipId", job->clipId}, {"ok", success}, {"label", job->label}};
+        if (!msg.empty())
+            ev["error"] = msg;
+        dopHooks_.broadcast("event/dopDone", std::move(ev));
+    };
+    if (!ac) { // defensive: the guard blocks load/new, but never trust a stale id
+        announce(false, "clip no longer exists");
+        return;
+    }
+    if (ok) {
+        Asset a;
+        if (!pcmToAssetHook(job->seg, job->clipName + "-dop", a, err))
+            ok = false;
+        if (ok) {
+            a.id = m.nextId();
+            a.missing = false;
+            m.project.assets.push_back(a);
+            ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+            ctx_.assetStore->ensurePeaks(a);
+            ac->assetId = a.id;
+            ac->processes = std::move(job->processes); // captured VST state lands here
+        }
+    }
+    if (!ok) {
+        *ac = job->clipBefore; // surgical rollback of the command's chain edit
+        rebuildGraph();
+        markDirty();
+        CmdResult r;
+        if (ref)
+            r.eventClips.emplace_back(ref.track->id, job->clipId);
+        broadcastChanges(r);
+        announce(false, err.empty() ? "offline render failed" : err);
+        return;
+    }
+    if (ctx_.undoStack) {
+        UndoEntry e;
+        e.label = job->label;
+        e.before = std::move(job->before);
+        e.after = toJson(m.project);
+        ctx_.undoStack->push(std::move(e));
+    }
+    rebuildGraph();
+    markDirty();
+    CmdResult r;
+    r.fullEvent = true; // asset list changed -> full snapshot, like the sync path
+    broadcastChanges(r);
+    announce(true, "");
 }
 
 // First chain entry: remember the pre-chain material and re-anchor the trim into the
@@ -3303,6 +3538,11 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
     }
 
     const AudioClip before = *ac; // rollback snapshot for a failed recompute
+    // Chains already carrying a VST entry replay on a worker — snapshot the undo
+    // "before" now, while nothing is mutated (startAsyncDop defers the undo push).
+    json beforeProj;
+    if (asyncDopAvailable() && chainHasEnabledVst(ac->processes))
+        beforeProj = toJson(m.project);
     ensureDopProvenance(*ac);
     ClipProcess pr;
     pr.id = m.nextId();
@@ -3318,13 +3558,16 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
     if (op == "stereoFlip")
         pr.sparams["flipMode"] = getOr(p, "flipMode", "swap");
     ac->processes.push_back(std::move(pr));
+    const std::string fullLabel = std::string("Process: ") + label;
+    if (asyncDopAvailable() && chainHasEnabledVst(ac->processes))
+        return startAsyncDop(ac, before, std::move(beforeProj), fullLabel.c_str(), r);
     std::string err;
     if (!recomputeDop(ac, err)) {
         *ac = before;
         return r.fail("render_failed", err.empty() ? "process failed" : err);
     }
 
-    r.label = std::string("Process: ") + label;
+    r.label = fullLabel;
     r.structural = true;
     r.fullEvent = true; // asset list changed → full snapshot
     return json{{"assetId", ac->assetId}, {"lengthSamples", ac->lengthSamples}};
@@ -3345,6 +3588,11 @@ json CommandProcessor::clipProcessChain(const json& p, CmdResult& r) {
         return r.fail("bad_request", "processChain requires an audio clip");
     const std::string action = getOr(p, "action", "");
     const AudioClip before = *ac;
+    // Undo "before" for a possibly-async recompute, taken while nothing is mutated
+    // (startAsyncDop defers the undo push to the worker's commit).
+    json beforeProj;
+    if (asyncDopAvailable())
+        beforeProj = toJson(m.project);
     const auto ok = [&](const char* lbl) {
         r.label = lbl;
         r.structural = true;
@@ -3352,6 +3600,8 @@ json CommandProcessor::clipProcessChain(const json& p, CmdResult& r) {
         return json{{"assetId", ac->assetId}, {"lengthSamples", ac->lengthSamples}};
     };
     const auto recomputeOrRollback = [&](const char* lbl) -> json {
+        if (asyncDopAvailable() && chainHasEnabledVst(ac->processes))
+            return startAsyncDop(ac, before, std::move(beforeProj), lbl, r);
         std::string err;
         if (!recomputeDop(ac, err)) {
             *ac = before;

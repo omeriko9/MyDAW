@@ -214,6 +214,13 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         em = "an export is in progress";
         return json();
     }
+    // Async DOP render in flight: same rejection set (plus export start below) until
+    // the worker's commit lands — the model must not change under the job.
+    if (app_.isProcessing() && (isBusyGuarded(type) || type.rfind("export/", 0) == 0)) {
+        ec = "busy_processing";
+        em = "an offline process render is in progress";
+        return json();
+    }
 
     // Internal agent primitives. These intentionally remain outside RequestMap and the
     // public capability catalog: the MCP/LLM tool layer is their typed external surface.

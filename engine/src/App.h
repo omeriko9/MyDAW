@@ -175,6 +175,16 @@ public:
     void endExport() { exporting_.store(false); }
     std::atomic<float>& exportProgressRef() { return exportProgress_; }
 
+    // ----- offline-process (DOP) render state ------------------------------------
+    // Same busy-guard semantics as exporting (Api rejects mutations with
+    // busy_processing) while a worker renders a clip's offline-process chain.
+    bool isProcessing() const { return processing_.load(std::memory_order_acquire); }
+    bool beginProcessing() {
+        bool expected = false;
+        return processing_.compare_exchange_strong(expected, true);
+    }
+    void endProcessing() { processing_.store(false); }
+
     // ----- misc ------------------------------------------------------------------
     void applySettings();           // autosave interval, plugin folders, host paths
     std::string fallbackMediaDir(); // %APPDATA%/MyDAW/media (recordings/bounces/imports
@@ -279,6 +289,7 @@ private:
     // export
     std::atomic<bool> exporting_{false};
     std::atomic<float> exportProgress_{0.0f};
+    std::atomic<bool> processing_{false}; // async DOP render in flight
 
     std::atomic<bool> pendingRebuild_{false};
 

@@ -58,11 +58,33 @@ let up = false;
 for (let i = 0; i < 40 && !up; i++) { try { up = (await fetch(`http://127.0.0.1:${PORT}/`)).ok; } catch { await sleep(500); } }
 if (!up) die(2, "engine failed to boot:\n" + elog.slice(-800));
 
-let nextId = 1; const pending = new Map();
+let nextId = 1; const pending = new Map(); const events = [];
 const sock = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error("ws")); });
-sock.onmessage = (m) => { const j = JSON.parse(m.data); if (j.replyTo != null) { const p = pending.get(j.replyTo); if (p) { pending.delete(j.replyTo); j.ok ? p.res(j.payload ?? {}) : p.rej(new Error(`${p.t}: ${j.error?.code} ${j.error?.message}`)); } } };
+sock.onmessage = (m) => {
+  const j = JSON.parse(m.data);
+  if (j.replyTo != null) { const p = pending.get(j.replyTo); if (p) { pending.delete(j.replyTo); j.ok ? p.res(j.payload ?? {}) : p.rej(new Error(`${p.t}: ${j.error?.code} ${j.error?.message}`)); } }
+  else events.push(j);
+};
 const req = (t, payload = {}, ms = 60000) => { const id = nextId++; sock.send(JSON.stringify({ id, type: t, payload })); return new Promise((res, rej) => { pending.set(id, { res, rej, t }); setTimeout(() => { if (pending.delete(id)) rej(new Error(t + ": timeout")); }, ms); }); };
+// Chain edits on VST-bearing chains reply immediately ({pending:true}) and commit via
+// event/dopDone — wait for it (returns the payload; throws on timeout).
+const awaitEvent = async (type, ms = 240000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const i = events.findIndex((e) => e.type === type);
+    if (i >= 0) return events.splice(i, 1)[0].payload;
+    await sleep(100);
+  }
+  throw new Error(`timeout waiting for ${type}`);
+};
+const chainCmd = async (payload) => {
+  const reply = await req("cmd/clip.processChain", payload, 240000);
+  if (!reply.pending) return { reply, done: { ok: true, sync: true } };
+  const done = await awaitEvent("event/dopDone");
+  if (!done.ok) throw new Error(`dop render failed: ${done.error}`);
+  return { reply, done };
+};
 
 const samplesOf = (file) => {
   if (!existsSync(file)) return null;
@@ -114,11 +136,21 @@ try {
   const dry = await render();
   report("dry render is audible", !!dry && rms(dry) > 100, `rms=${rms(dry ?? []).toFixed(1)}`);
 
-  // -- 1. addPlugin with a registry VST uid -----------------------------------------
-  let plug = null, addReply = null;
+  // -- 1. addPlugin with a registry VST uid (async: pending reply + dopDone commit) --
+  let plug = null, addReply = null, busyProbe = null;
   for (const cand of candidates) {
     try {
-      addReply = await req("cmd/clip.processChain", { clipId, action: "addPlugin", uid: cand.uid }, 240000);
+      events.length = 0;
+      const p = req("cmd/clip.processChain", { clipId, action: "addPlugin", uid: cand.uid }, 240000);
+      // While the render is in flight every mutation must bounce off the busy guard.
+      busyProbe = null;
+      addReply = await p;
+      if (addReply.pending) {
+        try { await req("cmd/track.add", { kind: "audio", name: "busy probe" }, 30000); busyProbe = "accepted"; }
+        catch (e) { busyProbe = String(e.message); }
+        const done = await awaitEvent("event/dopDone");
+        if (!done.ok) throw new Error(`dop render failed: ${done.error}`);
+      }
       plug = cand;
       break;
     } catch (e) {
@@ -127,6 +159,9 @@ try {
   }
   if (!plug) die(1, "FAIL: no candidate VST could be applied offline\n" + elog.slice(-800));
   console.log(`using: ${plug.name} (uid=${plug.uid})`);
+  report("addPlugin replies immediately (pending) and commits via event/dopDone", addReply.pending === true, `pending=${addReply.pending}`);
+  report("busy guard rejects commands mid-render", busyProbe != null && busyProbe.includes("busy_processing"), `probe=${busyProbe}`);
+  report("progress events emitted during the render", events.some((e) => e.type === "event/dopProgress"), `events=${events.filter((e) => e.type === "event/dopProgress").length}`);
 
   const clip1 = await getClip(clipId);
   const entry = (clip1.processes ?? [])[0];
@@ -155,11 +190,12 @@ try {
 
   // -- 3. toggle: disabled entry replays to the original ----------------------------
   const pid = clipR.processes[0].id;
-  await req("cmd/clip.processChain", { clipId, action: "toggle", processId: pid }, 240000);
+  const tOff = await chainCmd({ clipId, action: "toggle", processId: pid });
+  report("toggle-off (no enabled VST left) recomputes synchronously", tOff.done.sync === true, "");
   await sleep(500);
   const offRender = await render();
   report("toggle-off restores the dry signal", offRender && maxDiff(offRender, dry) < 8, `maxDiff=${offRender ? maxDiff(offRender, dry) : "?"}`);
-  await req("cmd/clip.processChain", { clipId, action: "toggle", processId: pid }, 240000);
+  await chainCmd({ clipId, action: "toggle", processId: pid });
   await sleep(500);
   const onRender = await render();
   report("toggle-on re-applies the VST (replayed from stored state)", onRender && maxDiff(onRender, dry) > 50, `maxDiff=${onRender ? maxDiff(onRender, dry) : "?"}`);
@@ -167,11 +203,11 @@ try {
   // -- 4. copyFrom: seed entry state from a live insert -----------------------------
   const t2 = (await req("cmd/track.add", { kind: "audio", name: "FX host" })).track;
   const inst = (await req("cmd/plugin.add", { trackId: t2.id, uid: plug.uid }, 240000)).instance;
-  const cf = await req("cmd/clip.processChain", { clipId, action: "addPlugin", copyFrom: inst.instanceId }, 240000);
+  await chainCmd({ clipId, action: "addPlugin", copyFrom: inst.instanceId });
   const clipC = await getClip(clipId);
   const cfEntry = (clipC.processes ?? [])[1];
-  report("addPlugin {copyFrom} inherits uid + captures live state", !!cfEntry && cfEntry.sparams?.uid === plug.uid && (cfEntry.sparams?.state ?? "").length > 0 && cf.lengthSamples === clip0.lengthSamples, `chain=${(clipC.processes ?? []).length}`);
-  await req("cmd/clip.processChain", { clipId, action: "remove", processId: cfEntry.id }, 240000);
+  report("addPlugin {copyFrom} inherits uid + captures live state", !!cfEntry && cfEntry.sparams?.uid === plug.uid && (cfEntry.sparams?.state ?? "").length > 0 && clipC.lengthSamples === clip0.lengthSamples, `chain=${(clipC.processes ?? []).length}`);
+  await chainCmd({ clipId, action: "remove", processId: cfEntry.id });
 
   // -- 5. persistence: chain + inline state survive saveAs/load ---------------------
   const projDir = path.join(TMP, "DopVst.mydaw");
@@ -188,7 +224,7 @@ try {
 
   // A post-reload recompute must replay the VST from the STORED chunk (throwaway
   // instance + setStateForRecreate) — appending a builtin forces a full replay.
-  await req("cmd/clip.processChain", { clipId, action: "addPlugin", uid: "builtin:utility" }, 240000);
+  await chainCmd({ clipId, action: "addPlugin", uid: "builtin:utility" });
   await sleep(500);
   const clipL2 = await getClip(clipId);
   report("post-reload recompute replays VST from stored state", (clipL2.processes ?? []).length === 2 && clipL2.lengthSamples === clip0.lengthSamples && clipL2.assetId !== clipL.assetId, "");

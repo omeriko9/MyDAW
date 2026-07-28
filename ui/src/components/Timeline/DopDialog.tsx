@@ -250,6 +250,7 @@ function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) 
   // Subscribing to the whole project keeps the list current after every recompute.
   useStore((st) => st.project);
   const registry = useStore((st) => st.registry);
+  const dopJob = useStore((st) => st.dopJob);
   const [vstUid, setVstUid] = React.useState("");
   // Effect VSTs, deduped by uid (shells list one entry per sub-plugin variant; the
   // engine's byUid lookup takes the first match anyway).
@@ -336,6 +337,11 @@ function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) 
       }
     >
       <div className="dlg-fields">
+        {dopJob && dopJob.clipId === clipId && (
+          <div className="dlg-confirm-msg dim">
+            Rendering… {Math.round(dopJob.pct)}%{dopJob.label ? ` — ${dopJob.label}` : ""}
+          </div>
+        )}
         {chain.length === 0 && (
           <div className="dlg-confirm-msg dim">
             No offline processes yet — use the clip's Process menu, or add an effect below.
