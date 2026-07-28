@@ -32,6 +32,7 @@ import {
   commitParam,
   deleteClips,
   duplicateClips,
+  joinClips,
   flattenArranger,
   locate,
   moveClips,
@@ -2212,6 +2213,24 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         icon: "scissors",
         shortcut: "B",
         onClick: () => fire(splitClips(ids, transportBus.last?.beat ?? 0)),
+      },
+      {
+        label: "Glue Clips",
+        icon: "glue",
+        title:
+          ids.length < 2
+            ? "Select two or more clips on the same track"
+            : "Merge the selected clips into one (audio requires contiguous material)",
+        disabled: ids.length < 2,
+        onClick: () =>
+          void joinClips(ids).catch((e) => {
+            showToast(
+              e instanceof Error && e.message.includes("contiguous")
+                ? "Audio clips can only be glued when they are contiguous pieces of the same recording"
+                : "Glue failed — clips must share one track and one type",
+              "info",
+            );
+          }),
       },
       {
         label: clip.muted ? "Unmute" : "Mute",

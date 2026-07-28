@@ -231,7 +231,7 @@ the entire drag.
   playing take — `activeLane` for the whole span, `comp[]` for per-segment swipe boundaries
   (`lane:-1` = silent gap); `cmd/take.flatten {trackId, folderId}` → `{clipIds:[]}` bounces the
   comp to plain clips and removes the folder. All three are structural (graph rebuild).
-- `cmd/notes.edit {clipId, add:[Note], remove:[noteIds], update:[{noteId,patch}]}` — one undo entry
+- `cmd/notes.edit {clipId, add:[Note], remove:[noteIds], update:[{noteId,patch}], cc?}` — one undo entry; the optional `cc {add, remove, update}` block mirrors `cmd/cc.edit` in the SAME entry so mixed note+controller functions (e.g. Pedals to Note Length) revert atomically
 - `cmd/notes.quantize {clipId, noteIds?:[], grid:<beats>, strength:0..1, swing:0..1}`
 - `cmd/automation.set {trackId, paramRef, add:[{t,v,curve?}], remove:[pointIds], update:[{pointId,patch}]}`
   `paramRef`: `"volume"|"pan"|"send:<index>"|"plugin:<instanceId>:<paramId>"`. A set that leaves

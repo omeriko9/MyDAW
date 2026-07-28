@@ -171,10 +171,16 @@ export const duplicateClips = (clipIds: number[], atSource?: boolean) =>
 export const setClip = (clipId: number, patch: ClipPatch, transient?: boolean) =>
   ws.request("cmd/clip.set", { clipId, patch }, transient);
 
-/** One undo entry for the whole batch (SPEC §5.3). */
+/** One undo entry for the whole batch (SPEC §5.3); the optional `cc` block rides in
+ *  the same entry so mixed note+controller functions revert together. */
 export const editNotes = (
   clipId: number,
-  edits: { add?: NoteInput[]; remove?: number[]; update?: NoteUpdate[] },
+  edits: {
+    add?: NoteInput[];
+    remove?: number[];
+    update?: NoteUpdate[];
+    cc?: { add?: CcInput[]; remove?: number[]; update?: CcUpdate[] };
+  },
 ) => ws.request("cmd/notes.edit", { clipId, ...edits });
 
 /** CC/pitch-bend/aftertouch batch — one undo entry for the whole batch (mirrors notes.edit). */

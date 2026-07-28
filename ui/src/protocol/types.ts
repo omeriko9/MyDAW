@@ -902,6 +902,12 @@ export interface NotesEditRequest {
   add?: NoteInput[];
   remove?: number[];
   update?: NoteUpdate[];
+  /** Optional controller edits committed in the SAME undo entry (mirrors cmd/cc.edit). */
+  cc?: {
+    add?: CcInput[];
+    remove?: number[];
+    update?: CcUpdate[];
+  };
 }
 
 /** CC point to add — the engine assigns the id. */

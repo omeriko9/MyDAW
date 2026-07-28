@@ -300,16 +300,37 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
           throw new UiOpError("invalid_arguments", `options.${key} is required for ${transform}`);
         return v ?? (fallback as number);
       };
+      const optNum = (key: string): number | undefined => asNumber(o[key]);
       let patch: MF.NotesPatch;
       switch (transform) {
         case "transpose": patch = MF.transpose(notes, num("semitones")); break;
         case "fixedLength": patch = MF.fixedLength(notes, num("lengthBeats")); break;
-        case "legato": patch = MF.legato(notes); break;
+        case "legato": patch = MF.legato(notes, num("overlapBeats", 0)); break;
         case "humanizeTiming": patch = MF.humanizeTiming(notes, num("maxBeats", 0.05)); break;
         case "humanizeVelocity": patch = MF.humanizeVelocity(notes, num("amount", 10)); break;
         case "scaleVelocity": patch = MF.scaleVelocity(notes, num("multiplier", 1), num("add", 0)); break;
         case "reverse": patch = MF.reverse(notes); break;
         case "deleteDoubles": patch = MF.deleteDoubles(notes); break;
+        case "deleteOverlapsMono": patch = MF.deleteOverlapsMono(notes); break;
+        case "deleteOverlapsPoly": patch = MF.deleteOverlapsPoly(notes); break;
+        case "fixedVelocity": patch = MF.fixedVelocity(notes, num("velocity")); break;
+        case "limitVelocity": patch = MF.limitVelocity(notes, num("min", 1), num("max", 127)); break;
+        case "compressVelocity": patch = MF.compressVelocity(notes, num("ratio"), num("center", 64)); break;
+        case "deleteNotes": {
+          const minLengthBeats = optNum("minLengthBeats");
+          const minVelocity = optNum("minVelocity");
+          if (minLengthBeats === undefined && minVelocity === undefined)
+            throw new UiOpError(
+              "invalid_arguments",
+              "deleteNotes needs options.minLengthBeats and/or options.minVelocity",
+            );
+          patch = MF.deleteNotes(notes, { minLengthBeats, minVelocity });
+          break;
+        }
+        case "mirror": patch = MF.mirror(notes, optNum("axisPitch")); break;
+        case "restrictPolyphony": patch = MF.restrictPolyphony(notes, num("maxVoices")); break;
+        case "rampVelocity": patch = MF.rampVelocity(notes, num("from"), num("to")); break;
+        case "smoothVelocity": patch = MF.smoothVelocity(notes); break;
         default:
           throw new UiOpError("invalid_arguments", `unknown transform: ${transform}`);
       }

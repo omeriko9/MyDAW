@@ -1,15 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Note } from "../protocol/types";
+import type { MidiCc, Note } from "../protocol/types";
 import {
+  compressVelocity,
+  deleteContinuousCc,
+  deleteControllers,
   deleteDoubles,
+  deleteNotes,
+  deleteOverlapsMono,
+  deleteOverlapsPoly,
   fixedLength,
+  fixedVelocity,
   humanizeTiming,
   humanizeVelocity,
   legato,
+  limitVelocity,
+  mirror,
+  pedalsToNoteLength,
   rampVelocity,
+  restrictPolyphony,
   reverse,
   scaleVelocity,
   smoothVelocity,
+  thinOutCc,
   transpose,
   type NotesPatch,
 } from "./midiFunctions";
@@ -373,5 +385,312 @@ describe("smoothVelocity", () => {
   it("needs at least three notes", () => {
     const notes = [note({ startBeat: 0 }), note({ startBeat: 1, velocity: 20 })];
     expect(smoothVelocity(notes)).toEqual({});
+  });
+});
+
+describe("legato overlap parameter", () => {
+  it("positive overlap reaches into the next note", () => {
+    const notes = [
+      note({ startBeat: 0, lengthBeats: 0.25 }),
+      note({ startBeat: 2, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, legato(notes, 0.5));
+    expect(out[0].lengthBeats).toBe(2.5);
+  });
+
+  it("negative overlap leaves a gap", () => {
+    const notes = [
+      note({ startBeat: 0, lengthBeats: 3 }),
+      note({ startBeat: 2, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, legato(notes, -0.5));
+    expect(out[0].lengthBeats).toBe(1.5);
+  });
+});
+
+describe("deleteOverlapsMono", () => {
+  it("trims a note that overlaps the next note of the same pitch", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 3 }),
+      note({ pitch: 60, startBeat: 2, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, deleteOverlapsMono(notes));
+    expect(out[0].lengthBeats).toBe(2);
+    expect(out[1].lengthBeats).toBe(1);
+  });
+
+  it("ignores overlaps between different pitches", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 4 }),
+      note({ pitch: 64, startBeat: 2, lengthBeats: 1 }),
+    ];
+    expect(deleteOverlapsMono(notes)).toEqual({});
+  });
+
+  it("treats channels separately", () => {
+    const notes = [
+      note({ pitch: 60, channel: 0, startBeat: 0, lengthBeats: 4 }),
+      note({ pitch: 60, channel: 1, startBeat: 2, lengthBeats: 1 }),
+    ];
+    expect(deleteOverlapsMono(notes)).toEqual({});
+  });
+
+  it("returns an empty patch when nothing overlaps", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 1 }),
+      note({ pitch: 60, startBeat: 2, lengthBeats: 1 }),
+    ];
+    expect(deleteOverlapsMono(notes)).toEqual({});
+  });
+});
+
+describe("deleteOverlapsPoly", () => {
+  it("trims any note reaching past the next distinct onset", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 4 }),
+      note({ pitch: 72, startBeat: 1.5, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, deleteOverlapsPoly(notes));
+    expect(out[0].lengthBeats).toBe(1.5);
+  });
+
+  it("keeps chords (equal starts) intact", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 2 }),
+      note({ pitch: 64, startBeat: 0, lengthBeats: 2 }),
+    ];
+    expect(deleteOverlapsPoly(notes)).toEqual({});
+  });
+
+  it("trims every member of a chord at the next onset", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 3 }),
+      note({ pitch: 64, startBeat: 0, lengthBeats: 4 }),
+      note({ pitch: 67, startBeat: 2, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, deleteOverlapsPoly(notes));
+    expect(out[0].lengthBeats).toBe(2);
+    expect(out[1].lengthBeats).toBe(2);
+    expect(out[2].lengthBeats).toBe(1);
+  });
+});
+
+describe("fixedVelocity", () => {
+  it("sets every note to the target velocity", () => {
+    const notes = [note({ velocity: 30 }), note({ velocity: 90 })];
+    const out = applyPatch(notes, fixedVelocity(notes, 100));
+    expect(out.map((n) => n.velocity)).toEqual([100, 100]);
+  });
+
+  it("returns an empty patch when all notes already match", () => {
+    expect(fixedVelocity([note({ velocity: 64 })], 64)).toEqual({});
+  });
+});
+
+describe("limitVelocity", () => {
+  it("clamps into [min, max] and leaves in-range notes alone", () => {
+    const notes = [note({ velocity: 10 }), note({ velocity: 64 }), note({ velocity: 120 })];
+    const p = limitVelocity(notes, 32, 112);
+    expect(p.update).toHaveLength(2);
+    expect(applyPatch(notes, p).map((n) => n.velocity)).toEqual([32, 64, 112]);
+  });
+
+  it("tolerates swapped bounds", () => {
+    const notes = [note({ velocity: 10 })];
+    expect(patchFor(limitVelocity(notes, 112, 32), notes[0].id)).toEqual({ velocity: 32 });
+  });
+});
+
+describe("compressVelocity", () => {
+  it("compresses toward the center with ratio < 1", () => {
+    const notes = [note({ velocity: 34 }), note({ velocity: 94 })];
+    const out = applyPatch(notes, compressVelocity(notes, 0.5, 64));
+    expect(out.map((n) => n.velocity)).toEqual([49, 79]);
+  });
+
+  it("expands away from the center with ratio > 1 (clamped)", () => {
+    const notes = [note({ velocity: 54 }), note({ velocity: 120 })];
+    const out = applyPatch(notes, compressVelocity(notes, 2, 64));
+    expect(out.map((n) => n.velocity)).toEqual([44, 127]);
+  });
+});
+
+describe("deleteNotes", () => {
+  it("removes notes below the velocity threshold", () => {
+    const quiet = note({ velocity: 10 });
+    const loud = note({ velocity: 100 });
+    expect(deleteNotes([quiet, loud], { minVelocity: 20 }).remove).toEqual([quiet.id]);
+  });
+
+  it("removes notes below the length threshold", () => {
+    const short = note({ lengthBeats: 0.05 });
+    const long = note({ lengthBeats: 1 });
+    expect(deleteNotes([short, long], { minLengthBeats: 0.125 }).remove).toEqual([short.id]);
+  });
+
+  it("either criterion removes (OR semantics)", () => {
+    const quiet = note({ velocity: 5, lengthBeats: 1 });
+    const short = note({ velocity: 100, lengthBeats: 0.01 });
+    const ok = note({ velocity: 100, lengthBeats: 1 });
+    const p = deleteNotes([quiet, short, ok], { minVelocity: 20, minLengthBeats: 0.1 });
+    expect(p.remove!.sort()).toEqual([quiet.id, short.id].sort());
+  });
+
+  it("a note exactly AT a threshold survives", () => {
+    const n = note({ velocity: 20, lengthBeats: 0.125 });
+    expect(deleteNotes([n], { minVelocity: 20, minLengthBeats: 0.125 })).toEqual({});
+  });
+});
+
+describe("mirror", () => {
+  it("swaps the outer voices around the default midpoint axis", () => {
+    const notes = [note({ pitch: 60 }), note({ pitch: 64 }), note({ pitch: 72 })];
+    const out = applyPatch(notes, mirror(notes));
+    expect(out.map((n) => n.pitch)).toEqual([72, 68, 60]);
+  });
+
+  it("is an involution (applying twice restores the input)", () => {
+    const notes = [note({ pitch: 55 }), note({ pitch: 67 }), note({ pitch: 62 })];
+    const once = applyPatch(notes, mirror(notes));
+    const twice = applyPatch(once, mirror(once));
+    expect(twice.map((n) => n.pitch)).toEqual(notes.map((n) => n.pitch));
+  });
+
+  it("honors an explicit axis", () => {
+    const notes = [note({ pitch: 62 })];
+    expect(patchFor(mirror(notes, 60), notes[0].id)).toEqual({ pitch: 58 });
+  });
+
+  it("returns an empty patch for symmetric material", () => {
+    expect(mirror([note({ pitch: 60 })])).toEqual({});
+  });
+});
+
+describe("restrictPolyphony", () => {
+  it("truncates the oldest sounding note when the limit is exceeded", () => {
+    const notes = [
+      note({ pitch: 60, startBeat: 0, lengthBeats: 4 }),
+      note({ pitch: 64, startBeat: 1, lengthBeats: 4 }),
+      note({ pitch: 67, startBeat: 2, lengthBeats: 1 }),
+    ];
+    const out = applyPatch(notes, restrictPolyphony(notes, 2));
+    expect(out[0].lengthBeats).toBe(2); // truncated at the third onset
+    expect(out[1].lengthBeats).toBe(4);
+    expect(out[2].lengthBeats).toBe(1);
+  });
+
+  it("removes a chord note that would be truncated to nothing", () => {
+    const weak = note({ pitch: 60, startBeat: 0, lengthBeats: 2, velocity: 30 });
+    const mid = note({ pitch: 64, startBeat: 0, lengthBeats: 2, velocity: 80 });
+    const strong = note({ pitch: 67, startBeat: 0, lengthBeats: 2, velocity: 120 });
+    const p = restrictPolyphony([weak, mid, strong], 2);
+    expect(p.remove).toEqual([weak.id]);
+  });
+
+  it("leaves material within the limit untouched", () => {
+    const notes = [
+      note({ startBeat: 0, lengthBeats: 1 }),
+      note({ pitch: 64, startBeat: 2, lengthBeats: 1 }),
+    ];
+    expect(restrictPolyphony(notes, 2)).toEqual({});
+  });
+});
+
+/* ---- controller-lane functions ---- */
+
+let nextCcId = 1000;
+function ccPoint(partial: Partial<MidiCc> = {}): MidiCc {
+  return { id: nextCcId++, controller: 1, beat: 0, value: 0.5, ...partial };
+}
+
+describe("thinOutCc", () => {
+  it("drops points on a straight line and keeps curve corners", () => {
+    const lane = [
+      ccPoint({ beat: 0, value: 0 }),
+      ccPoint({ beat: 1, value: 0.25 }), // exactly on the 0→2 line
+      ccPoint({ beat: 2, value: 0.5 }),
+      ccPoint({ beat: 3, value: 0.1 }), // sharp corner — must survive
+      ccPoint({ beat: 4, value: 0.1 }),
+    ];
+    const p = thinOutCc(lane, 0.02);
+    expect(p.remove).toEqual([lane[1].id]);
+  });
+
+  it("keeps endpoints and treats lanes independently", () => {
+    const a = [
+      ccPoint({ controller: 1, beat: 0, value: 0 }),
+      ccPoint({ controller: 1, beat: 1, value: 0.5 }),
+      ccPoint({ controller: 1, beat: 2, value: 1 }),
+    ];
+    const b = [
+      ccPoint({ controller: 7, beat: 0, value: 1 }),
+      ccPoint({ controller: 7, beat: 2, value: 0 }),
+    ];
+    const p = thinOutCc([...a, ...b], 0.02);
+    expect(p.remove).toEqual([a[1].id]); // only the collinear midpoint of lane 1
+  });
+
+  it("returns an empty patch when every point matters", () => {
+    const lane = [
+      ccPoint({ beat: 0, value: 0 }),
+      ccPoint({ beat: 1, value: 1 }),
+      ccPoint({ beat: 2, value: 0 }),
+    ];
+    expect(thinOutCc(lane, 0.02)).toEqual({});
+  });
+});
+
+describe("deleteControllers / deleteContinuousCc", () => {
+  it("deleteControllers removes everything", () => {
+    const cc = [ccPoint(), ccPoint({ controller: 64 }), ccPoint({ controller: 128 })];
+    expect(deleteControllers(cc).remove).toEqual(cc.map((c) => c.id));
+    expect(deleteControllers([])).toEqual({});
+  });
+
+  it("deleteContinuousCc keeps pedal switches (CC64–69), drops curves/bend/aftertouch", () => {
+    const mod = ccPoint({ controller: 1 });
+    const sustain = ccPoint({ controller: 64 });
+    const soft = ccPoint({ controller: 67 });
+    const bend = ccPoint({ controller: 128 });
+    const at = ccPoint({ controller: 129 });
+    const p = deleteContinuousCc([mod, sustain, soft, bend, at]);
+    expect(p.remove!.sort()).toEqual([mod.id, bend.id, at.id].sort());
+  });
+});
+
+describe("pedalsToNoteLength", () => {
+  it("extends a note released during a pedal-down span to the pedal-up point", () => {
+    const n = note({ startBeat: 0, lengthBeats: 1 });
+    const down = ccPoint({ controller: 64, beat: 0.5, value: 1 });
+    const up = ccPoint({ controller: 64, beat: 3, value: 0 });
+    const p = pedalsToNoteLength([n], [down, up], 8);
+    expect(p.notes!.update).toEqual([{ noteId: n.id, patch: { lengthBeats: 3 } }]);
+    expect(p.cc!.remove!.sort()).toEqual([down.id, up.id].sort());
+  });
+
+  it("leaves notes alone that end outside pedal spans, still deletes the pedal events", () => {
+    const n = note({ startBeat: 0, lengthBeats: 1 });
+    const down = ccPoint({ controller: 64, beat: 2, value: 1 });
+    const up = ccPoint({ controller: 64, beat: 3, value: 0 });
+    const p = pedalsToNoteLength([n], [down, up], 8);
+    expect(p.notes).toBeUndefined();
+    expect(p.cc!.remove).toHaveLength(2);
+  });
+
+  it("a never-released pedal extends to the clip end", () => {
+    const n = note({ startBeat: 0, lengthBeats: 2 });
+    const down = ccPoint({ controller: 64, beat: 1, value: 1 });
+    const p = pedalsToNoteLength([n], [down], 8);
+    expect(p.notes!.update).toEqual([{ noteId: n.id, patch: { lengthBeats: 8 } }]);
+  });
+
+  it("no pedal events → empty result", () => {
+    expect(pedalsToNoteLength([note()], [ccPoint({ controller: 1 })], 8)).toEqual({});
+  });
+
+  it("ignores non-CC64 controllers when building spans", () => {
+    const n = note({ startBeat: 0, lengthBeats: 1 });
+    const mod = ccPoint({ controller: 1, beat: 0.5, value: 1 });
+    expect(pedalsToNoteLength([n], [mod], 8)).toEqual({});
   });
 });

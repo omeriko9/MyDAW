@@ -2538,11 +2538,67 @@ json CommandProcessor::notesEdit(const json& p, CmdResult& r) {
             }
         }
     }
-    if (!any) {
+    // Optional controller edits in the SAME undo entry (mirrors cmd/cc.edit) — lets a
+    // mixed note+CC function (e.g. Pedals to Note Length) commit atomically.
+    bool ccTouched = false;
+    if (p.is_object() && p.contains("cc") && p["cc"].is_object()) {
+        const json& cb = p["cc"];
+        if (cb.contains("add") && cb["add"].is_array()) {
+            for (const json& cj : cb["add"]) {
+                if (!cj.is_object())
+                    continue;
+                MidiCc c;
+                c.id = m.nextId();
+                c.controller = clampi(getOr<int>(cj, "controller", 0), 0, 129);
+                c.beat = std::max(0.0, getOr<double>(cj, "beat", 0.0));
+                c.value = clampd(getOr<double>(cj, "value", 0.0), 0.0, 1.0);
+                mc->cc.push_back(c);
+                ccTouched = true;
+            }
+        }
+        if (cb.contains("remove") && cb["remove"].is_array()) {
+            for (const json& ij : cb["remove"]) {
+                if (!ij.is_number())
+                    continue;
+                const uint64_t cid = ij.get<uint64_t>();
+                for (auto it = mc->cc.begin(); it != mc->cc.end(); ++it) {
+                    if (it->id == cid) {
+                        mc->cc.erase(it);
+                        ccTouched = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (cb.contains("update") && cb["update"].is_array()) {
+            for (const json& uj : cb["update"]) {
+                if (!uj.is_object())
+                    continue;
+                const uint64_t cid = getOr<uint64_t>(uj, "ccId", 0);
+                if (!hasKey(uj, "patch"))
+                    continue;
+                const json& cp = *uj.find("patch");
+                for (MidiCc& c : mc->cc) {
+                    if (c.id != cid)
+                        continue;
+                    if (hasKey(cp, "beat"))
+                        c.beat = std::max(0.0, getOr<double>(cp, "beat", c.beat));
+                    if (hasKey(cp, "value"))
+                        c.value = clampd(getOr<double>(cp, "value", c.value), 0.0, 1.0);
+                    ccTouched = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!any && !ccTouched) {
         r.mutated = false;
         return json::object();
     }
-    sortNotes(*mc);
+    if (any)
+        sortNotes(*mc);
+    if (ccTouched)
+        sortCc(*mc);
     r.label = "Edit Notes"; // batch = ONE undo entry
     r.structural = true;
     r.scope = "clip";

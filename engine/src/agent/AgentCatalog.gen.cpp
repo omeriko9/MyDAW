@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "0bf87e2fbb80ac3f5d6e8a374aed236bc31de2f8ad05a18a6858c282ee6f5b56";
+const char kAgentCatalogSha256[] = "20b159e9415d16c9446bfc73f8638c28d074dcdddce17cc86f24df1d5bea8850";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2244,6 +2244,31 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "$ref": "#/schemas/NoteInput"
           },
           "type": "array"
+        },
+        "cc": {
+          "additionalProperties": false,
+          "description": "Optional controller edits committed in the SAME undo entry (mirrors cmd/cc.edit).",
+          "properties": {
+            "add": {
+              "items": {
+                "$ref": "#/schemas/CcInput"
+              },
+              "type": "array"
+            },
+            "remove": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "update": {
+              "items": {
+                "$ref": "#/schemas/CcUpdate"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "clipId": {
           "type": "number"
@@ -8906,7 +8931,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "ui/midi.transform",
       "category": "ui",
-      "description": "Run a pure high-level MIDI transformation (transpose, legato, humanize, scale/reverse, delete doubles) on explicit or selected notes; one undoable notes.edit.",
+      "description": "Run a pure MIDI function (transpose, legato, velocity ops, delete overlaps/doubles, mirror, polyphony) on explicit or selected notes; one undoable notes.edit.",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8948,7 +8973,17 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "humanizeVelocity",
               "scaleVelocity",
               "reverse",
-              "deleteDoubles"
+              "deleteDoubles",
+              "deleteOverlapsMono",
+              "deleteOverlapsPoly",
+              "fixedVelocity",
+              "limitVelocity",
+              "compressVelocity",
+              "deleteNotes",
+              "mirror",
+              "restrictPolyphony",
+              "rampVelocity",
+              "smoothVelocity"
             ]
           },
           "options": {
@@ -8975,6 +9010,73 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               },
               "add": {
                 "type": "number"
+              },
+              "overlapBeats": {
+                "description": "legato: positive overlaps into the next note, negative leaves a gap",
+                "type": "number"
+              },
+              "velocity": {
+                "description": "fixedVelocity: target velocity 1..127",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "min": {
+                "description": "limitVelocity: lower bound",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "max": {
+                "description": "limitVelocity: upper bound",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "ratio": {
+                "description": "compressVelocity: <1 compresses toward center, >1 expands",
+                "type": "number",
+                "minimum": 0
+              },
+              "center": {
+                "description": "compressVelocity: center velocity (default 64)",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "minLengthBeats": {
+                "description": "deleteNotes: remove notes shorter than this",
+                "type": "number",
+                "minimum": 0
+              },
+              "minVelocity": {
+                "description": "deleteNotes: remove notes quieter than this",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "axisPitch": {
+                "description": "mirror: reflection axis (default: selection pitch midpoint)",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 127
+              },
+              "maxVoices": {
+                "description": "restrictPolyphony: voice limit",
+                "type": "number",
+                "minimum": 1
+              },
+              "from": {
+                "description": "rampVelocity: start velocity",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "to": {
+                "description": "rampVelocity: end velocity",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
               }
             }
           }

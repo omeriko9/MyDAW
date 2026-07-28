@@ -179,6 +179,29 @@ async function main() {
   });
   report("midi clip + notes", !!mclip?.id);
 
+  // notes.edit optional cc block: note + controller edits land in ONE undo entry
+  {
+    const findClip = (proj) =>
+      proj.tracks.find((t) => t.id === midiT.id)?.clips?.find((c) => c.id === mclip.id);
+    await req("cmd/notes.edit", {
+      clipId: mclip.id,
+      add: [{ pitch: 62, velocity: 70, startBeat: 3, lengthBeats: 1 }],
+      cc: { add: [
+        { controller: 64, beat: 0.5, value: 1 },
+        { controller: 64, beat: 3, value: 0 },
+      ] },
+    });
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    let mc = findClip(proj);
+    const applied = mc?.notes?.length === 4 && (mc?.cc?.length ?? 0) === 2;
+    await req("edit/undo", {});
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    mc = findClip(proj);
+    const reverted = mc?.notes?.length === 3 && (mc?.cc?.length ?? 0) === 0;
+    report("notes.edit cc block (mixed edit, single undo entry)", applied && reverted,
+      `applied notes=4 cc=2 -> ${applied}; one undo reverts both -> ${reverted}`);
+  }
+
   // automation lane + deep track duplicate (fresh ids everywhere, counts preserved)
   await req("cmd/automation.set", { trackId: midiT.id, paramRef: "volume", add: [{ t: 0, v: 1 }, { t: 4, v: 0.5 }] });
   const snap = (await req("session/hello", { clientName: "smoke" })).project;

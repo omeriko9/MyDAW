@@ -19,6 +19,7 @@ import {
   exportMidi,
   exportTrackArchive,
   getImportFormats,
+  joinClips,
   panic,
   removeTrack,
 } from "../../store/actions";
@@ -260,6 +261,19 @@ function buildEditMenu(): MenuEntry[] {
       disabled: !hasClips,
       title: clipTitle,
       onClick: () => invokeEdit("duplicate"),
+    },
+    {
+      label: "Glue Clips",
+      icon: "glue",
+      disabled: s.selection.clipIds.length < 2,
+      title:
+        s.selection.clipIds.length < 2
+          ? "Select two or more clips on the same track"
+          : "Merge the selected clips into one (audio requires contiguous material)",
+      onClick: () =>
+        void joinClips(s.selection.clipIds).catch(() =>
+          showToast("Glue failed — clips must share one track and one type", "info"),
+        ),
     },
     {
       label: "Delete",

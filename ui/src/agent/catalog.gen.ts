@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "0bf87e2fbb80ac3f5d6e8a374aed236bc31de2f8ad05a18a6858c282ee6f5b56";
+export const AGENT_CATALOG_SHA256 = "20b159e9415d16c9446bfc73f8638c28d074dcdddce17cc86f24df1d5bea8850";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2264,6 +2264,31 @@ export const AGENT_CATALOG: AgentCatalog = {
             "$ref": "#/schemas/NoteInput"
           },
           "type": "array"
+        },
+        "cc": {
+          "additionalProperties": false,
+          "description": "Optional controller edits committed in the SAME undo entry (mirrors cmd/cc.edit).",
+          "properties": {
+            "add": {
+              "items": {
+                "$ref": "#/schemas/CcInput"
+              },
+              "type": "array"
+            },
+            "remove": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "update": {
+              "items": {
+                "$ref": "#/schemas/CcUpdate"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "clipId": {
           "type": "number"
@@ -8926,7 +8951,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "ui/midi.transform",
       "category": "ui",
-      "description": "Run a pure high-level MIDI transformation (transpose, legato, humanize, scale/reverse, delete doubles) on explicit or selected notes; one undoable notes.edit.",
+      "description": "Run a pure MIDI function (transpose, legato, velocity ops, delete overlaps/doubles, mirror, polyphony) on explicit or selected notes; one undoable notes.edit.",
       "target": "ui",
       "mode": "write",
       "traits": [
@@ -8968,7 +8993,17 @@ export const AGENT_CATALOG: AgentCatalog = {
               "humanizeVelocity",
               "scaleVelocity",
               "reverse",
-              "deleteDoubles"
+              "deleteDoubles",
+              "deleteOverlapsMono",
+              "deleteOverlapsPoly",
+              "fixedVelocity",
+              "limitVelocity",
+              "compressVelocity",
+              "deleteNotes",
+              "mirror",
+              "restrictPolyphony",
+              "rampVelocity",
+              "smoothVelocity"
             ]
           },
           "options": {
@@ -8995,6 +9030,73 @@ export const AGENT_CATALOG: AgentCatalog = {
               },
               "add": {
                 "type": "number"
+              },
+              "overlapBeats": {
+                "description": "legato: positive overlaps into the next note, negative leaves a gap",
+                "type": "number"
+              },
+              "velocity": {
+                "description": "fixedVelocity: target velocity 1..127",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "min": {
+                "description": "limitVelocity: lower bound",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "max": {
+                "description": "limitVelocity: upper bound",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "ratio": {
+                "description": "compressVelocity: <1 compresses toward center, >1 expands",
+                "type": "number",
+                "minimum": 0
+              },
+              "center": {
+                "description": "compressVelocity: center velocity (default 64)",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "minLengthBeats": {
+                "description": "deleteNotes: remove notes shorter than this",
+                "type": "number",
+                "minimum": 0
+              },
+              "minVelocity": {
+                "description": "deleteNotes: remove notes quieter than this",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "axisPitch": {
+                "description": "mirror: reflection axis (default: selection pitch midpoint)",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 127
+              },
+              "maxVoices": {
+                "description": "restrictPolyphony: voice limit",
+                "type": "number",
+                "minimum": 1
+              },
+              "from": {
+                "description": "rampVelocity: start velocity",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
+              },
+              "to": {
+                "description": "rampVelocity: end velocity",
+                "type": "number",
+                "minimum": 1,
+                "maximum": 127
               }
             }
           }
@@ -10168,7 +10270,7 @@ export interface UiOperationMap {
   "ui/focus.set": { req: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; }; reply: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/follow.set": { req: { "enabled": boolean; }; reply: { "enabled": boolean; } };
   "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); "bottomTab2"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); } };
-  "ui/midi.transform": { req: { "clipId"?: number; "noteIds"?: Array<number>; "transform": "transpose" | "fixedLength" | "legato" | "humanizeTiming" | "humanizeVelocity" | "scaleVelocity" | "reverse" | "deleteDoubles"; "options"?: { "semitones"?: number; "lengthBeats"?: number; "maxBeats"?: number; "amount"?: number; "multiplier"?: number; "add"?: number; }; }; reply: { "changedNoteIds": Array<number>; "removedNoteIds": Array<number>; } };
+  "ui/midi.transform": { req: { "clipId"?: number; "noteIds"?: Array<number>; "transform": "transpose" | "fixedLength" | "legato" | "humanizeTiming" | "humanizeVelocity" | "scaleVelocity" | "reverse" | "deleteDoubles" | "deleteOverlapsMono" | "deleteOverlapsPoly" | "fixedVelocity" | "limitVelocity" | "compressVelocity" | "deleteNotes" | "mirror" | "restrictPolyphony" | "rampVelocity" | "smoothVelocity"; "options"?: { "semitones"?: number; "lengthBeats"?: number; "maxBeats"?: number; "amount"?: number; "multiplier"?: number; "add"?: number; "overlapBeats"?: number; "velocity"?: number; "min"?: number; "max"?: number; "ratio"?: number; "center"?: number; "minLengthBeats"?: number; "minVelocity"?: number; "axisPitch"?: number; "maxVoices"?: number; "from"?: number; "to"?: number; }; }; reply: { "changedNoteIds": Array<number>; "removedNoteIds": Array<number>; } };
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };
   "ui/selection.get": { req: {  }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };
   "ui/selection.set": { req: { "selection": { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; }; "mode"?: "replace" | "add" | "toggle"; }; reply: { "trackIds": Array<number>; "clipIds": Array<number>; "noteIds": Array<number>; } };

@@ -49,6 +49,7 @@ import { openPieMenu, type PieItem } from "../common/PieMenu";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { ZoomPill } from "../common/ZoomPill";
 import { confirmDialog } from "../Dialogs/confirm";
+import { fieldsDialog } from "../Dialogs/fields";
 import * as M from "./prMath";
 import * as D from "./prDraw";
 import * as MF from "../../lib/midiFunctions";
@@ -1770,32 +1771,128 @@ function Editor({ track, clip }: EditorProps) {
       const notes = cc.notes.filter((n) => ids.has(n.id));
       if (notes.length === 0) return;
       const patch = fn(notes);
-      if ((patch.update?.length ?? 0) > 0 || (patch.remove?.length ?? 0) > 0) {
-        void editNotes(cc.id, patch);
-      }
+      if (!MF.notesPatchEmpty(patch)) void editNotes(cc.id, patch);
     };
+    // Controller functions see the WHOLE clip (CC data has no note-selection scope);
+    // mixed functions (pedals→length) also take all notes so pedal spans catch
+    // everything they sustained. Both commit as ONE cmd/notes.edit undo entry.
+    const applyCcFn = (fn: (cc: MidiCc[]) => MF.CcPatchOps): void => {
+      const c = clipRef.current;
+      const patch = fn(c.cc ?? []);
+      if (!MF.ccPatchEmpty(patch)) void editNotes(c.id, { cc: patch });
+    };
+    const applyClipFn = (
+      fn: (notes: Note[], cc: MidiCc[], clipLengthBeats: number) => MF.MidiClipPatch,
+    ): void => {
+      const c = clipRef.current;
+      const patch = fn(c.notes, c.cc ?? [], c.lengthBeats);
+      const notesEmpty = !patch.notes || MF.notesPatchEmpty(patch.notes);
+      const ccEmpty = !patch.cc || MF.ccPatchEmpty(patch.cc);
+      if (notesEmpty && ccEmpty) return;
+      void editNotes(c.id, { ...(patch.notes ?? {}), ...(ccEmpty ? {} : { cc: patch.cc }) });
+    };
+    const step = stepRef.current;
+    const stepLabel = M.lengthLabel(step);
     const fnItems: MenuEntry[] = [
-      { label: "Legato", title: "Extend each note to the next onset", onClick: () => applyFn(MF.legato) },
       {
-        label: "Fixed Length (grid step)",
-        onClick: () => applyFn((ns) => MF.fixedLength(ns, stepRef.current)),
+        label: "Legato",
+        title: "Extend each note to the next onset",
+        submenu: [
+          { label: "Tight (touching)", onClick: () => applyFn((ns) => MF.legato(ns, 0)) },
+          {
+            label: "Overlap ¼ grid step",
+            onClick: () => applyFn((ns) => MF.legato(ns, step / 4)),
+          },
+          { label: "Gap ¼ grid step", onClick: () => applyFn((ns) => MF.legato(ns, -step / 4)) },
+        ],
       },
-      { label: "Reverse", title: "Mirror the selection in time", onClick: () => applyFn(MF.reverse) },
-      { label: "Delete Doubles", title: "Remove notes with identical pitch + position", onClick: () => applyFn(MF.deleteDoubles) },
+      {
+        label: "Fixed Lengths",
+        title: "Every note gets the same length",
+        submenu: [
+          { label: `Grid step (${stepLabel})`, onClick: () => applyFn((ns) => MF.fixedLength(ns, step)) },
+          "separator",
+          ...([
+            ["1/1 note", 4],
+            ["1/2 note", 2],
+            ["1/4 note", 1],
+            ["1/8 note", 0.5],
+            ["1/16 note", 0.25],
+            ["1/32 note", 0.125],
+          ] as Array<[string, number]>).map(([label, beats]) => ({
+            label,
+            onClick: () => applyFn((ns) => MF.fixedLength(ns, beats)),
+          })),
+        ],
+      },
       "separator",
       {
-        label: "Humanize Timing",
-        title: "Random start offsets within ±⅛ grid step",
-        onClick: () => applyFn((ns) => MF.humanizeTiming(ns, stepRef.current / 8)),
+        label: "Velocity",
+        submenu: [
+          { label: "Velocity +10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, 10)) },
+          { label: "Velocity −10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, -10)) },
+          "separator",
+          {
+            label: "Add/Subtract…",
+            onClick: () => {
+              void fieldsDialog({
+                title: "Velocity — Add/Subtract",
+                fields: [
+                  { key: "amount", label: "Amount (±)", kind: "number", value: 10, min: -126, max: 126 },
+                ],
+              }).then((v) => {
+                if (v) applyFn((ns) => MF.scaleVelocity(ns, 1, v.amount as number));
+              });
+            },
+          },
+          {
+            label: "Compress/Expand…",
+            title: "Scale velocities around a center — ratio < 100% compresses, > 100% expands",
+            onClick: () => {
+              void fieldsDialog({
+                title: "Velocity — Compress/Expand",
+                fields: [
+                  { key: "ratio", label: "Ratio (%)", kind: "number", value: 50, min: 0, max: 300 },
+                  { key: "center", label: "Center velocity", kind: "number", value: 64, min: 1, max: 127 },
+                ],
+              }).then((v) => {
+                if (v) applyFn((ns) => MF.compressVelocity(ns, (v.ratio as number) / 100, v.center as number));
+              });
+            },
+          },
+          {
+            label: "Limit…",
+            title: "Clamp velocities into a range",
+            onClick: () => {
+              void fieldsDialog({
+                title: "Velocity — Limit",
+                fields: [
+                  { key: "min", label: "Minimum", kind: "number", value: 32, min: 1, max: 127 },
+                  { key: "max", label: "Maximum", kind: "number", value: 112, min: 1, max: 127 },
+                ],
+              }).then((v) => {
+                if (v) applyFn((ns) => MF.limitVelocity(ns, v.min as number, v.max as number));
+              });
+            },
+          },
+          "separator",
+          {
+            label: "Fixed Velocity",
+            title: "Every note gets the same velocity",
+            submenu: ([
+              ["pp (32)", 32],
+              ["p (48)", 48],
+              ["mf (64)", 64],
+              ["f (96)", 96],
+              ["ff (112)", 112],
+              ["Max (127)", 127],
+            ] as Array<[string, number]>).map(([label, v]) => ({
+              label,
+              onClick: () => applyFn((ns) => MF.fixedVelocity(ns, v)),
+            })),
+          },
+        ],
       },
-      {
-        label: "Humanize Velocity",
-        title: "Random velocity offsets within ±10",
-        onClick: () => applyFn((ns) => MF.humanizeVelocity(ns, 10)),
-      },
-      "separator",
-      { label: "Velocity +10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, 10)) },
-      { label: "Velocity −10", onClick: () => applyFn((ns) => MF.scaleVelocity(ns, 1, -10)) },
       {
         label: "Crescendo",
         title: "Ramp velocities 45 → 115 across the selection",
@@ -1812,8 +1909,104 @@ function Editor({ track, clip }: EditorProps) {
         onClick: () => applyFn(MF.smoothVelocity),
       },
       "separator",
+      { label: "Delete Doubles", title: "Remove notes with identical pitch + position", onClick: () => applyFn(MF.deleteDoubles) },
+      {
+        label: "Delete Overlaps (mono)",
+        title: "Trim notes that overlap the next note of the SAME pitch",
+        onClick: () => applyFn(MF.deleteOverlapsMono),
+      },
+      {
+        label: "Delete Overlaps (poly)",
+        title: "Trim notes that reach past the next onset of ANY pitch (chords survive)",
+        onClick: () => applyFn(MF.deleteOverlapsPoly),
+      },
+      {
+        label: "Delete Notes…",
+        title: "Remove notes below a length and/or velocity threshold",
+        onClick: () => {
+          void fieldsDialog({
+            title: "Delete Notes",
+            fields: [
+              { key: "byVel", label: "Below velocity", kind: "checkbox", value: true },
+              { key: "minVelocity", label: "Minimum velocity", kind: "number", value: 20, min: 1, max: 127, enabledBy: "byVel" },
+              { key: "byLen", label: "Below length", kind: "checkbox", value: false },
+              {
+                key: "minLength",
+                label: "Minimum length",
+                kind: "select",
+                value: "0.125",
+                enabledBy: "byLen",
+                options: [
+                  { value: "0.0625", label: "1/64 note" },
+                  { value: "0.125", label: "1/32 note" },
+                  { value: "0.25", label: "1/16 note" },
+                  { value: "0.5", label: "1/8 note" },
+                  { value: "1", label: "1/4 note" },
+                ],
+              },
+            ],
+            confirmLabel: "Delete",
+          }).then((v) => {
+            if (!v || (v.byVel !== true && v.byLen !== true)) return;
+            applyFn((ns) =>
+              MF.deleteNotes(ns, {
+                minVelocity: v.byVel === true ? (v.minVelocity as number) : undefined,
+                minLengthBeats: v.byLen === true ? parseFloat(v.minLength as string) : undefined,
+              }),
+            );
+          });
+        },
+      },
+      {
+        label: "Restrict Polyphony",
+        title: "Trim the oldest sounding note when the voice limit is exceeded",
+        submenu: [1, 2, 3, 4, 6, 8].map((n) => ({
+          label: n === 1 ? "1 voice (monophonic)" : `${n} voices`,
+          onClick: () => applyFn((ns) => MF.restrictPolyphony(ns, n)),
+        })),
+      },
+      "separator",
+      { label: "Reverse", title: "Mirror the selection in time", onClick: () => applyFn(MF.reverse) },
+      {
+        label: "Mirror (pitch)",
+        title: "Invert pitches around the selection's midpoint",
+        onClick: () => applyFn((ns) => MF.mirror(ns)),
+      },
       { label: "Transpose +12", shortcut: "Shift+↑", onClick: () => applyFn((ns) => MF.transpose(ns, 12)) },
       { label: "Transpose −12", shortcut: "Shift+↓", onClick: () => applyFn((ns) => MF.transpose(ns, -12)) },
+      "separator",
+      {
+        label: "Humanize Timing",
+        title: "Random start offsets within ±⅛ grid step",
+        onClick: () => applyFn((ns) => MF.humanizeTiming(ns, stepRef.current / 8)),
+      },
+      {
+        label: "Humanize Velocity",
+        title: "Random velocity offsets within ±10",
+        onClick: () => applyFn((ns) => MF.humanizeVelocity(ns, 10)),
+      },
+      "separator",
+      {
+        label: "Pedals to Note Length",
+        title: "Extend notes held by the sustain pedal (CC64) to the pedal-up point, then delete the pedal events (whole clip)",
+        onClick: () => applyClipFn((ns, cc, len) => MF.pedalsToNoteLength(ns, cc, len)),
+      },
+      {
+        label: "Thin Out CC Data",
+        title: "Remove controller points a straight line already reproduces (whole clip)",
+        onClick: () => applyCcFn((cc) => MF.thinOutCc(cc)),
+      },
+      {
+        label: "Delete Continuous Controllers",
+        title: "Remove CC curves, pitch bend, and aftertouch — pedal switches (CC64–69) survive (whole clip)",
+        onClick: () => applyCcFn(MF.deleteContinuousCc),
+      },
+      {
+        label: "Delete All Controllers",
+        title: "Remove every controller event in the clip",
+        danger: true,
+        onClick: () => applyCcFn(MF.deleteControllers),
+      },
     ];
     const items: MenuEntry[] = hit
       ? [
