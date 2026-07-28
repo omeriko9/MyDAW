@@ -76,6 +76,31 @@ json toJson(const AudioClip& c) {
             env.push_back(json{{"pos", p.pos}, {"value", p.value}});
         j["env"] = std::move(env);
     }
+    if (!c.processes.empty()) { // DOP chain + provenance (SPEC §6); omitted when empty
+        json procs = json::array();
+        for (const ClipProcess& pr : c.processes) {
+            json pj = {{"id", pr.id}, {"op", pr.op}};
+            if (!pr.enabled)
+                pj["enabled"] = false;
+            if (!pr.params.empty()) {
+                json pp = json::object();
+                for (const auto& [k, v] : pr.params)
+                    pp[k] = v;
+                pj["params"] = std::move(pp);
+            }
+            if (!pr.sparams.empty()) {
+                json sp = json::object();
+                for (const auto& [k, v] : pr.sparams)
+                    sp[k] = v;
+                pj["sparams"] = std::move(sp);
+            }
+            procs.push_back(std::move(pj));
+        }
+        j["processes"] = std::move(procs);
+        j["dopAssetId"] = c.dopAssetId;
+        j["dopOffsetSamples"] = c.dopOffsetSamples;
+        j["dopLengthSamples"] = c.dopLengthSamples;
+    }
     if (c.muted)
         j["muted"] = true;
     if (!c.color.empty())
@@ -774,6 +799,31 @@ bool fromJson(const json& j, Clip& out, std::string* err) {
             }
             std::sort(c.env.begin(), c.env.end(),
                       [](const ClipEnvPoint& a, const ClipEnvPoint& b) { return a.pos < b.pos; });
+        }
+        if (hasKey(j, "processes") && j.find("processes")->is_array()) { // DOP chain
+            for (const json& pj : *j.find("processes")) {
+                if (!pj.is_object())
+                    continue;
+                ClipProcess pr;
+                pr.id = getOr<uint64_t>(pj, "id", 0);
+                pr.op = getOr(pj, "op", "");
+                pr.enabled = getOr<bool>(pj, "enabled", true);
+                if (hasKey(pj, "params") && pj.find("params")->is_object())
+                    for (auto it = pj.find("params")->begin(); it != pj.find("params")->end();
+                         ++it)
+                        if (it.value().is_number())
+                            pr.params[it.key()] = it.value().get<double>();
+                if (hasKey(pj, "sparams") && pj.find("sparams")->is_object())
+                    for (auto it = pj.find("sparams")->begin();
+                         it != pj.find("sparams")->end(); ++it)
+                        if (it.value().is_string())
+                            pr.sparams[it.key()] = it.value().get<std::string>();
+                if (!pr.op.empty())
+                    c.processes.push_back(std::move(pr));
+            }
+            c.dopAssetId = getOr<uint64_t>(j, "dopAssetId", 0);
+            c.dopOffsetSamples = getOr<int64_t>(j, "dopOffsetSamples", 0);
+            c.dopLengthSamples = getOr<int64_t>(j, "dopLengthSamples", 0);
         }
         c.muted = getOr<bool>(j, "muted", false);
         c.color = getOr(j, "color", "");

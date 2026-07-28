@@ -237,6 +237,15 @@ Caveat: synchronous stretch stalls on long clips — acceptable v1 (bounce prece
 
 ### Swipe 7 — Direct Offline Processing framework + plug-ins as processes 🧪 — **Cost: XL (≈3w) · Value: ★★★★ · ROI: medium (flagship feature, do after quick wins)**
 
+> **STATUS: CORE SHIPPED 2026-07-28.** ClipProcess chain + provenance on AudioClip
+> (length-preserving contract keeps trims valid; splits copy the chain; length-changing bakes
+> collapse it), cmd/clip.processAudio now appends non-destructively, cmd/clip.processChain
+> (addPlugin/remove/toggle/reorder/setParams/clear/makePermanent — clear restores the original
+> without rendering), BUILT-IN effects as offline processes (block-pumped, tails truncated),
+> Offline Processes… dialog (live list, per-op param re-edit). Still open from this swipe:
+> VST/out-of-process plugins as offline processes (throwaway-instance route), async recompute
+> with progress for long clips, orphan derived-file GC on save, per-entry plugin param UI.
+
 The real Cubase differentiator: per-event, ordered, re-editable, non-destructive process history.
 
 | Task | Cost | Notes |

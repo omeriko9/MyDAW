@@ -164,6 +164,12 @@ private:
     json clipCrossfade(const json& p, CmdResult& r);
     json clipBounceSelection(const json& p, CmdResult& r);
     json clipResizeStretch(const json& p, CmdResult& r);
+    json clipProcessChain(const json& p, CmdResult& r);
+    // DOP helpers (SPEC §6): replay a clip's offline-process chain into a new derived
+    // asset / drop the chain keeping the current render (also used by length-changing
+    // bakes so trims keep meaning).
+    bool recomputeDop(AudioClip* ac, std::string& err);
+    static void collapseDop(AudioClip& ac);
     json clipDissolve(const json& p, CmdResult& r);
     json midiMergeLoop(const json& p, CmdResult& r);
     json trackRenderInPlace(const json& p, CmdResult& r);

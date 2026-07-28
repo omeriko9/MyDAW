@@ -92,6 +92,7 @@ import { extensionOf, projectOnlyExtensions } from "../Transport/projectFlows";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { confirmDialog } from "../Dialogs/confirm";
 import { fieldsDialog } from "../Dialogs/fields";
+import { openDopDialog } from "./DopDialog";
 import { FADE_CURVES, FADE_CURVE_LABELS } from "../../lib/fadeCurves";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
@@ -2366,10 +2367,20 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                 ),
             },
             {
+              label:
+                (clip.processes?.length ?? 0) > 0
+                  ? `Offline Processes… (${clip.processes!.length})`
+                  : "Offline Processes…",
+              icon: "sliders",
+              title:
+                "The clip's Direct-Offline-Processing chain — re-editable, replayed from the original audio",
+              onClick: () => openDopDialog(clip.id),
+            },
+            {
               label: "Process",
               icon: "audioWave",
               title:
-                "Destructive audio processing on this clip (Cubase-style) — writes an edit file; undoable",
+                "Non-destructive Cubase-style processing — each op joins the clip's offline-process chain (edit via Offline Processes…)",
               submenu: [
                 {
                   label: "Gain…",

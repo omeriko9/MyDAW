@@ -29,6 +29,7 @@ import type {
   FadeCurve,
   ClipPatch,
   ClipProcessAudioOp,
+  ClipProcessChainRequest,
   NormalizeMode,
   StereoFlipMode,
   DriverType,
@@ -189,6 +190,10 @@ export const processAudioClip = (
 ) => ws.request("cmd/clip.processAudio", { clipId, op, ...args });
 
 export const joinClips = (clipIds: number[]) => ws.request("cmd/clip.join", { clipIds });
+
+/** Edit a clip's Direct-Offline-Processing chain (SPEC §6). */
+export const processChain = (req: ClipProcessChainRequest) =>
+  ws.request("cmd/clip.processChain", req);
 
 /** Symmetric crossfade over the overlap of two audio clips on one track (X). */
 export const crossfadeClips = (clipIds: number[], curve?: FadeCurve) =>

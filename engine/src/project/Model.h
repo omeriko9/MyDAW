@@ -288,6 +288,22 @@ struct ClipEnvPoint {
     double value = 1.0;
 };
 
+// One entry in an audio clip's Direct-Offline-Processing chain (SPEC §6, DOP): a
+// LENGTH-PRESERVING process replayed from the clip's original material whenever the
+// chain changes. `op` is a clip.processAudio op (gain/normalize/fadeIn/fadeOut/
+// reverse/invert/silence/dcRemove/stereoFlip) or "plugin" (a built-in effect run
+// offline; `sparams["uid"]` = builtin uid, params = normalized 0..1 by param id).
+// Numeric params in `params`, enum/string params (mode/curve/flipMode/uid) in
+// `sparams`. Length-CHANGING ops (resample, stretch) stay destructive — they
+// collapse the chain first (makePermanent) so trims keep meaning.
+struct ClipProcess {
+    uint64_t id = 0;
+    std::string op;
+    bool enabled = true;
+    std::map<std::string, double> params;
+    std::map<std::string, std::string> sparams;
+};
+
 struct AudioClip {
     uint64_t id = 0;
     // type: "audio" (implied by alternative)
@@ -302,6 +318,14 @@ struct AudioClip {
     FadeCurve fadeInCurve = FadeCurve::Linear;   // optional in JSON ("linear" default)
     FadeCurve fadeOutCurve = FadeCurve::Linear;  // optional in JSON
     std::vector<ClipEnvPoint> env; // optional in JSON ([] default)
+    // DOP provenance (SPEC §6): when `processes` is non-empty, `assetId` points at the
+    // DERIVED render and these three remember the pre-chain material the chain replays
+    // from. srcOffsetSamples/lengthSamples index the DERIVED asset (chain ops preserve
+    // length, so trims keep meaning across recomputes). All omitted when chain empty.
+    uint64_t dopAssetId = 0;
+    int64_t dopOffsetSamples = 0;
+    int64_t dopLengthSamples = 0;
+    std::vector<ClipProcess> processes;
     bool muted = false;  // optional in JSON
     std::string color;   // optional, "" = inherit track color
 };

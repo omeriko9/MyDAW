@@ -467,6 +467,61 @@ async function main() {
       `mm=${JSON.stringify(mm)} audioErr=${audioErr ? "rejected" : "ACCEPTED?!"}`);
   }
 
+  // DOP chain: processAudio appends (non-destructive), processChain edits + restores
+  {
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const findA = (p) => p.tracks.find((t) => t.id === audioT.id).clips.find((c) => c.type === "audio");
+    const ac0 = findA(proj);
+    const origAsset = ac0.assetId;
+    const origLen = ac0.lengthSamples;
+    // 1) two chain ops + one builtin effect
+    await req("cmd/clip.processAudio", { clipId: ac0.id, op: "gain", gainDb: -6 });
+    await req("cmd/clip.processAudio", { clipId: ac0.id, op: "reverse" });
+    const addFx = await req("cmd/clip.processChain", { clipId: ac0.id, action: "addPlugin", uid: "builtin:delay" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    let ac = findA(proj);
+    const chained =
+      ac.processes?.length === 3 &&
+      ac.dopAssetId === origAsset &&
+      ac.assetId !== origAsset &&
+      ac.assetId === addFx.assetId &&
+      ac.lengthSamples === origLen; // chain is length-preserving
+    // 2) toggle the reverse off, re-edit the gain, remove the delay
+    const revId = ac.processes[1].id;
+    const gainId = ac.processes[0].id;
+    const fxId = ac.processes[2].id;
+    await req("cmd/clip.processChain", { clipId: ac.id, action: "toggle", processId: revId });
+    await req("cmd/clip.processChain", { clipId: ac.id, action: "setParams", processId: gainId, params: { gainDb: 3 } });
+    await req("cmd/clip.processChain", { clipId: ac.id, action: "remove", processId: fxId });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    ac = findA(proj);
+    const edited =
+      ac.processes?.length === 2 &&
+      ac.processes[0].params?.gainDb === 3 &&
+      ac.processes[1].enabled === false;
+    // 3) clear → back to the ORIGINAL asset without a render
+    await req("cmd/clip.processChain", { clipId: ac.id, action: "clear" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    ac = findA(proj);
+    const cleared =
+      (ac.processes?.length ?? 0) === 0 &&
+      ac.assetId === origAsset &&
+      ac.lengthSamples === origLen;
+    // 4) makePermanent keeps the render
+    await req("cmd/clip.processAudio", { clipId: ac.id, op: "invert" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const derived = findA(proj).assetId;
+    await req("cmd/clip.processChain", { clipId: ac.id, action: "makePermanent" });
+    proj = (await req("session/hello", { clientName: "smoke" })).project;
+    ac = findA(proj);
+    const permanent = (ac.processes?.length ?? 0) === 0 && ac.assetId === derived;
+    await req("edit/undo", {}); // undo makePermanent
+    await req("edit/undo", {}); // undo invert
+    report("DOP chain (append, edit, clear-restores-original, makePermanent)",
+      chained && edited && cleared && permanent,
+      `chained=${chained} edited=${edited} cleared=${cleared} permanent=${permanent}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

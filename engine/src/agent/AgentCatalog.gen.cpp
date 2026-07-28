@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "3020d9bd4a9c0c3cdbf0471fa965c1426d6508405b85315a1d6733b210af1f7d";
+const char kAgentCatalogSha256[] = "c95d48ca163f343d04404267e5be734b90498d4a652a6086dda34ca1db7d1b5a";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -238,10 +238,27 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "color": {
           "type": "string"
         },
+        "dopAssetId": {
+          "description": "DOP provenance: the pre-chain asset the process chain replays from (present only with processes)",
+          "type": "number"
+        },
+        "dopLengthSamples": {
+          "type": "number"
+        },
+        "dopOffsetSamples": {
+          "type": "number"
+        },
         "env": {
           "description": "non-destructive gain envelope: pos normalized 0..1 over the clip, value linear gain 0..2 (1 = unity); [] / absent = none",
           "items": {
             "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "processes": {
+          "description": "Direct-Offline-Processing chain (edit via cmd/clip.processChain); absent = none",
+          "items": {
+            "$ref": "#/schemas/ClipProcess"
           },
           "type": "array"
         },
@@ -1071,6 +1088,38 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "required": [
         "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipProcess": {
+      "additionalProperties": false,
+      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "number"
+        },
+        "op": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "sparams": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "op"
       ],
       "type": "object"
     },
@@ -5341,7 +5390,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "cmd/clip.processAudio",
       "category": "clips",
-      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove/stereoFlip/resample); writes a new edit asset.",
+      "description": "Audio process on a clip's span. Length-preserving ops append to the clip's NON-destructive DOP chain (edit via clip.processChain); resample bakes destructively.",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -5444,6 +5493,101 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "clipId": 21,
             "op": "normalize",
             "targetDb": -1
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.processChain",
+      "category": "clips",
+      "description": "Edit a clip's DOP chain: addPlugin (built-in fx), remove/toggle/reorder/setParams a process, clear, or makePermanent. Audible edits replay the chain.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "addPlugin",
+              "remove",
+              "toggle",
+              "reorder",
+              "setParams",
+              "clear",
+              "makePermanent"
+            ],
+            "type": "string"
+          },
+          "clipId": {
+            "type": "number"
+          },
+          "index": {
+            "description": "reorder: destination index",
+            "type": "number"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "addPlugin/setParams: numeric params (plugin entries: normalized 0..1 by param id)",
+            "type": "object"
+          },
+          "processId": {
+            "type": "number"
+          },
+          "sparams": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "setParams: string params (mode/curve/flipMode)",
+            "type": "object"
+          },
+          "uid": {
+            "description": "addPlugin: built-in effect uid (builtin:*)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clipId",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "assetId",
+          "lengthSamples"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "action": "addPlugin",
+            "uid": "builtin:reverb"
           }
         }
       ]

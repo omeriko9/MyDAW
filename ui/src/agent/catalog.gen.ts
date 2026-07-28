@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "3020d9bd4a9c0c3cdbf0471fa965c1426d6508405b85315a1d6733b210af1f7d";
+export const AGENT_CATALOG_SHA256 = "c95d48ca163f343d04404267e5be734b90498d4a652a6086dda34ca1db7d1b5a";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -258,10 +258,27 @@ export const AGENT_CATALOG: AgentCatalog = {
         "color": {
           "type": "string"
         },
+        "dopAssetId": {
+          "description": "DOP provenance: the pre-chain asset the process chain replays from (present only with processes)",
+          "type": "number"
+        },
+        "dopLengthSamples": {
+          "type": "number"
+        },
+        "dopOffsetSamples": {
+          "type": "number"
+        },
         "env": {
           "description": "non-destructive gain envelope: pos normalized 0..1 over the clip, value linear gain 0..2 (1 = unity); [] / absent = none",
           "items": {
             "$ref": "#/schemas/ClipEnvPoint"
+          },
+          "type": "array"
+        },
+        "processes": {
+          "description": "Direct-Offline-Processing chain (edit via cmd/clip.processChain); absent = none",
+          "items": {
+            "$ref": "#/schemas/ClipProcess"
           },
           "type": "array"
         },
@@ -1091,6 +1108,38 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "required": [
         "clipIds"
+      ],
+      "type": "object"
+    },
+    "ClipProcess": {
+      "additionalProperties": false,
+      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "number"
+        },
+        "op": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "sparams": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "op"
       ],
       "type": "object"
     },
@@ -5361,7 +5410,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "cmd/clip.processAudio",
       "category": "clips",
-      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove/stereoFlip/resample); writes a new edit asset.",
+      "description": "Audio process on a clip's span. Length-preserving ops append to the clip's NON-destructive DOP chain (edit via clip.processChain); resample bakes destructively.",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -5464,6 +5513,101 @@ export const AGENT_CATALOG: AgentCatalog = {
             "clipId": 21,
             "op": "normalize",
             "targetDb": -1
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/clip.processChain",
+      "category": "clips",
+      "description": "Edit a clip's DOP chain: addPlugin (built-in fx), remove/toggle/reorder/setParams a process, clear, or makePermanent. Audible edits replay the chain.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "asynchronous"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [
+        "assetId"
+      ],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "addPlugin",
+              "remove",
+              "toggle",
+              "reorder",
+              "setParams",
+              "clear",
+              "makePermanent"
+            ],
+            "type": "string"
+          },
+          "clipId": {
+            "type": "number"
+          },
+          "index": {
+            "description": "reorder: destination index",
+            "type": "number"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "addPlugin/setParams: numeric params (plugin entries: normalized 0..1 by param id)",
+            "type": "object"
+          },
+          "processId": {
+            "type": "number"
+          },
+          "sparams": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "setParams: string params (mode/curve/flipMode)",
+            "type": "object"
+          },
+          "uid": {
+            "description": "addPlugin: built-in effect uid (builtin:*)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clipId",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "assetId",
+          "lengthSamples"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21,
+            "action": "addPlugin",
+            "uid": "builtin:reverb"
           }
         }
       ]
@@ -10370,6 +10514,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/clip.join",
   "cmd/clip.move",
   "cmd/clip.processAudio",
+  "cmd/clip.processChain",
   "cmd/clip.resize",
   "cmd/clip.resizeStretch",
   "cmd/clip.set",
@@ -11022,6 +11167,10 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/clip.processAudio"
   },
+  "cmd/clip.processChain": {
+    "kind": "operation",
+    "operation": "cmd/clip.processChain"
+  },
   "cmd/take.create": {
     "kind": "operation",
     "operation": "cmd/take.create"
@@ -11327,6 +11476,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "clipId": 21,
       "op": "normalize",
       "targetDb": -1
+    }
+  ],
+  "cmd/clip.processChain": [
+    {
+      "clipId": 21,
+      "action": "addPlugin",
+      "uid": "builtin:reverb"
     }
   ],
   "cmd/clip.resize": [

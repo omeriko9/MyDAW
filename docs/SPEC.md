@@ -226,18 +226,28 @@ the entire drag.
   on transposition); `algorithm:"wsola"` selects the legacy in-house WSOLA. The clip is repointed
   at the derivative and resized. UI: audio-clip right-click ▸ Time-Stretch (Time Stretch… ratio
   dialog, Pitch Shift… semitones+cents+time-correction dialog, quick presets).
-- `cmd/clip.processAudio {clipId, op, …}` → `{assetId, lengthSamples}` (audio only): destructive
-  Cubase-style Audio ▸ Process on the clip's span. `op` = `gain` (`gainDb` −48..48) | `normalize`
-  (`targetDb` default −1; `mode` = `peak`|`rms`|`lufs` — LUFS via `media/Loudness`) |
-  `fadeIn`/`fadeOut` (full-span, optional `curve` FadeCurve shape; the clip's non-destructive
-  fade handles stay available on top) | `reverse` | `invert` (phase) | `silence` | `dcRemove`
-  (per-channel mean removed) | `stereoFlip` (`flipMode` = `swap`|`leftToBoth`|`rightToBoth`|
-  `merge`|`subtract` (side L−R); stereo clips only) | `resample` (`targetRate` 4000..192000 —
-  length scales by target/current, pitch by current/target, Cubase tape-style semantics; the only
-  op that changes the span). Same edit-asset mechanics as `cmd/clip.stretch` (`pcmToAssetHook` →
-  NEW derivative asset, clip repointed at offset 0; undoable — undo repoints back, the edit file
-  stays on disk). UI: audio-clip right-click ▸ Process (Gain…/Normalize… dialogs, Stereo Flip ▸,
-  Resample…, Fade In/Out (render) ▸ curves, Reverse, Invert Phase, Remove DC Offset, Silence).
+- **Direct Offline Processing** (DOP, Cubase-style): every audio clip carries an ordered,
+  re-editable `processes[]` chain (`ClipProcess {id, op, enabled, params, sparams}`) replayed
+  from provenance (`dopAssetId/dopOffsetSamples/dopLengthSamples` = the pre-chain material;
+  `srcOffsetSamples/lengthSamples` index the DERIVED render, and since chain ops are
+  length-preserving, trims survive every recompute — splits copy the chain to both halves).
+  Length-CHANGING bakes (resample, stretch, resizeStretch) call `collapseDop` first so the
+  current render becomes plain material. Chain replay = slice original → `applyClipDspOp`
+  (shared DSP for every processAudio op) / `applyBuiltinFxOffline` (built-in effects run
+  offline, block-pumped, tails truncated) → `pcmToAssetHook` new derived asset. Undo is the
+  ordinary snapshot; derived files stay on disk (no GC yet).
+- `cmd/clip.processAudio {clipId, op, …}` → `{assetId, lengthSamples}` (audio only): Cubase
+  Audio ▸ Process — every length-preserving op now APPENDS to the DOP chain (non-destructive).
+  `op` = `gain` (`gainDb` −48..48) | `normalize` (`targetDb`; `mode` = `peak`|`rms`|`lufs`) |
+  `fadeIn`/`fadeOut` (full-span, `curve`) | `reverse` | `invert` | `silence` | `dcRemove` |
+  `stereoFlip` (`flipMode`) | `resample` (`targetRate` — length-changing, so it collapses the
+  chain and bakes destructively as before).
+- `cmd/clip.processChain {clipId, action, …}` → `{assetId, lengthSamples}`: edit the chain —
+  `addPlugin {uid}` (built-in effects only, default params; params normalized 0..1 by id) |
+  `remove`/`toggle`/`reorder`/`setParams {processId, …}` | `clear` (drops the chain and
+  restores the ORIGINAL material mapping without rendering) | `makePermanent` (keeps the
+  render, forgets the chain). UI: audio-clip right-click ▸ Offline Processes… (live-updating
+  list: enable/edit/reorder/remove + add-effect buttons + Clear/Make Permanent).
 - `cmd/clip.delete {clipIds:[]}` ; `cmd/clip.duplicate {clipIds:[]}` → `{clips:[]}` ;
   `cmd/clip.set {clipId, patch:{name?,color?,gain?,fadeInSec?,fadeOutSec?,fadeInCurve?,
   fadeOutCurve?,env?,muted?}}` — fade curves are `linear|expo|log|sCurve|eqPower` (gain = f(t),

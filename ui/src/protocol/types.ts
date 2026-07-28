@@ -177,6 +177,19 @@ export interface ClipEnvPoint {
   value: number;
 }
 
+/** One Direct-Offline-Processing chain entry (SPEC §6): a length-preserving process
+ *  replayed from the clip's original material. op = a ClipProcessAudioOp (except
+ *  resample) or "plugin" (built-in effect — sparams.uid, params normalized 0..1 by
+ *  param id). Edited via cmd/clip.processChain. */
+export interface ClipProcess {
+  id: number;
+  op: string;
+  /** default true */
+  enabled?: boolean;
+  params?: Record<string, number>;
+  sparams?: Record<string, string>;
+}
+
 export interface AudioClip {
   id: number;
   type: "audio";
@@ -194,6 +207,12 @@ export interface AudioClip {
   fadeOutCurve?: FadeCurve;
   /** gain envelope points sorted by pos; absent/[] = none */
   env?: ClipEnvPoint[];
+  /** DOP chain (absent = none); assetId then points at the derived render and the
+   *  dop* fields remember the pre-chain material the chain replays from. */
+  processes?: ClipProcess[];
+  dopAssetId?: number;
+  dopOffsetSamples?: number;
+  dopLengthSamples?: number;
   muted?: boolean;
   color?: string;
 }
@@ -1529,6 +1548,21 @@ export interface ClipProcessAudioRequest {
   targetRate?: number;
 }
 
+/** Edit a clip's DOP chain; every audible change replays the chain (one undo entry). */
+export interface ClipProcessChainRequest {
+  clipId: number;
+  action: "addPlugin" | "remove" | "toggle" | "reorder" | "setParams" | "clear" | "makePermanent";
+  /** addPlugin: built-in effect uid (builtin:*) */
+  uid?: string;
+  processId?: number;
+  /** reorder: destination index */
+  index?: number;
+  /** addPlugin/setParams: numeric params (plugin entries: normalized 0..1 by param id) */
+  params?: Record<string, number>;
+  /** setParams: string params (mode/curve/flipMode) */
+  sparams?: Record<string, string>;
+}
+
 /** Omitted instanceIds = recreate ALL unresolved inserts. */
 export interface PluginsRecreateRequest {
   instanceIds?: number[];
@@ -1907,6 +1941,7 @@ export interface RequestMap {
   "cmd/vca.set": { req: { id: number; patch: { gain?: number; name?: string } }; reply: EmptyObject };
   "cmd/clip.stretch": { req: { clipId: number; ratio: number; transpose?: boolean; tape?: boolean; algorithm?: "spectral" | "wsola" }; reply: { assetId: number; lengthSamples: number } };
   "cmd/clip.processAudio": { req: ClipProcessAudioRequest; reply: { assetId: number; lengthSamples: number } };
+  "cmd/clip.processChain": { req: ClipProcessChainRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/take.create": { req: { trackId: number; clipIds: number[]; name?: string }; reply: { folder: TakeFolder } };
   "cmd/take.setComp": { req: { trackId: number; folderId: number; activeLane?: number; comp?: CompSegment[] }; reply: EmptyObject };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };

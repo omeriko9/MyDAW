@@ -19,6 +19,7 @@
 #include "agent/AgentCatalog.gen.h"
 #include "core/AudioGraph.h"      // E2
 #include "core/Transport.h"
+#include "core/effects/Effects.h" // built-ins as offline clip processes (DOP)
 #include "media/AssetStore.h"     // E4
 #include "media/Loudness.h"       // LUFS-mode normalize (clip.processAudio)
 #include "media/TimeStretch.h"    // WSOLA stretch / transpose
@@ -965,6 +966,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.resizeStretch") return clipResizeStretch(p, r);
     if (type == "cmd/clip.stretch")     return clipStretch(p, r);
     if (type == "cmd/clip.processAudio") return clipProcessAudio(p, r);
+    if (type == "cmd/clip.processChain") return clipProcessChain(p, r);
     if (type == "cmd/clip.split")       return clipSplit(p, r);
     if (type == "cmd/clip.join")        return clipJoin(p, r);
     if (type == "cmd/clip.crossfade")   return clipCrossfade(p, r);
@@ -2590,6 +2592,7 @@ json CommandProcessor::clipResizeStretch(const json& p, CmdResult& r) {
     ac->assetId = a.id;
     ac->srcOffsetSamples = 0;
     ac->lengthSamples = outLen;
+    collapseDop(*ac); // length changed — the stretch bake becomes the material
     if (edge == "l") // END anchored: place the start so the right edge stays put
         ac->startBeat = T.samplesToBeats(oldStartSample + len - outLen);
     sortClipsByStart(*ref.track);
@@ -2665,6 +2668,7 @@ json CommandProcessor::clipStretch(const json& p, CmdResult& r) {
     ac->assetId = a.id;
     ac->srcOffsetSamples = 0;
     ac->lengthSamples = newLen; // timeline length derives from this + tempo (a 2x stretch → 2x wide)
+    collapseDop(*ac); // length changed — the stretch bake becomes the material
 
     r.label = transpose ? "Transpose Clip" : "Time-Stretch Clip";
     r.structural = true;
@@ -2672,11 +2676,272 @@ json CommandProcessor::clipStretch(const json& p, CmdResult& r) {
     return json{{"assetId", a.id}, {"lengthSamples", newLen}};
 }
 
-// cmd/clip.processAudio — destructive Cubase-style Audio→Process on an audio clip's
-// span: gain / normalize / fadeIn / fadeOut / reverse / invert / silence / dcRemove.
-// The processed span is written as a NEW "edit" asset (pcmToAssetHook — project audio/
-// dir, fallback media dir for never-saved sessions) and the clip is repointed at offset
-// 0 with the same length; undo repoints back (the edit file stays on disk, like stretch).
+// ---------------------------------------------------------------------------
+// Direct Offline Processing (DOP, SPEC §6): per-clip process chain
+// ---------------------------------------------------------------------------
+
+// Applies one LENGTH-PRESERVING process op to `seg` in place. Param lookups go
+// through `num`/`str` so both the flat request json (clip.processAudio) and a
+// ClipProcess entry's maps (chain replay) drive the same DSP.
+static bool applyClipDspOp(std::vector<std::vector<float>>& seg, const std::string& op,
+                           const std::function<double(const char*, double)>& num,
+                           const std::function<std::string(const char*, const char*)>& str,
+                           int sampleRate, std::string& err) {
+    if (seg.empty() || seg[0].empty()) {
+        err = "empty audio segment";
+        return false;
+    }
+    const size_t n = seg[0].size();
+    const int nch = static_cast<int>(seg.size());
+    if (op == "gain") {
+        const float g = static_cast<float>(
+            std::pow(10.0, std::clamp(num("gainDb", 0.0), -48.0, 48.0) / 20.0));
+        for (auto& ch : seg)
+            for (float& s : ch) s *= g;
+        return true;
+    }
+    if (op == "normalize") {
+        // mode: peak (default) | rms | lufs (EBU R128 integrated via media/Loudness)
+        const double targetDb = std::clamp(num("targetDb", -1.0), -48.0, 0.0);
+        const std::string mode = str("mode", "peak");
+        double gain = 0.0; // 0 = leave untouched (silent / unmeasurable)
+        if (mode == "rms") {
+            double sum = 0.0;
+            size_t cnt = 0;
+            for (const auto& ch : seg) {
+                for (const float s : ch) sum += static_cast<double>(s) * s;
+                cnt += ch.size();
+            }
+            const double rms = cnt > 0 ? std::sqrt(sum / static_cast<double>(cnt)) : 0.0;
+            if (rms > 1e-9)
+                gain = std::pow(10.0, targetDb / 20.0) / rms;
+        } else if (mode == "lufs") {
+            LoudnessMeter meter(sampleRate);
+            std::vector<const float*> ptrs(seg.size());
+            for (size_t ch = 0; ch < seg.size(); ++ch) ptrs[ch] = seg[ch].data();
+            meter.process(ptrs.data(), nch, static_cast<int>(n));
+            const double lufs = meter.integratedLufs();
+            if (std::isfinite(lufs) && lufs > -70.0)
+                gain = std::pow(10.0, (targetDb - lufs) / 20.0);
+        } else { // peak
+            float peak = 0.f;
+            for (const auto& ch : seg)
+                for (const float s : ch) peak = std::max(peak, std::fabs(s));
+            if (peak > 1e-9f)
+                gain = std::pow(10.0, targetDb / 20.0) / static_cast<double>(peak);
+        }
+        if (gain > 0.0) {
+            const float g = static_cast<float>(gain);
+            for (auto& ch : seg)
+                for (float& s : ch) s *= g;
+        }
+        return true;
+    }
+    if (op == "fadeIn" || op == "fadeOut") {
+        // Full-span fade, curve shapes mirroring FadeCurve/fadeShapeRt (fadeOut
+        // evaluates the shape on the remaining fraction).
+        const bool in = op == "fadeIn";
+        const FadeCurve curve = fadeCurveFromName(str("curve", "linear"));
+        const auto shape = [curve](double t) {
+            switch (curve) {
+                case FadeCurve::Expo: return t * t;
+                case FadeCurve::Log: { const double u = 1.0 - t; return 1.0 - u * u; }
+                case FadeCurve::SCurve: return t * t * (3.0 - 2.0 * t);
+                case FadeCurve::EqPower: return std::sin(t * 1.5707963267948966);
+                default: return t;
+            }
+        };
+        const double denom = std::max<size_t>(1, n - 1);
+        for (auto& ch : seg)
+            for (size_t i = 0; i < n; ++i) {
+                const double t = static_cast<double>(i) / denom;
+                ch[i] *= static_cast<float>(shape(in ? t : 1.0 - t));
+            }
+        return true;
+    }
+    if (op == "stereoFlip") {
+        if (nch < 2) {
+            err = "stereo flip requires a stereo clip";
+            return false;
+        }
+        const std::string mode = str("flipMode", "swap");
+        auto& L = seg[0];
+        auto& R = seg[1];
+        if (mode == "swap") {
+            std::swap(L, R);
+        } else if (mode == "leftToBoth") {
+            R = L;
+        } else if (mode == "rightToBoth") {
+            L = R;
+        } else if (mode == "merge") {
+            for (size_t i = 0; i < n; ++i) {
+                const float mono = 0.5f * (L[i] + R[i]);
+                L[i] = mono;
+                R[i] = mono;
+            }
+        } else if (mode == "subtract") {
+            for (size_t i = 0; i < n; ++i) {
+                const float side = 0.5f * (L[i] - R[i]);
+                L[i] = side;
+                R[i] = side;
+            }
+        } else {
+            err = "unknown flipMode: " + mode;
+            return false;
+        }
+        return true;
+    }
+    if (op == "reverse") {
+        for (auto& ch : seg)
+            std::reverse(ch.begin(), ch.end());
+        return true;
+    }
+    if (op == "invert") {
+        for (auto& ch : seg)
+            for (float& s : ch) s = -s;
+        return true;
+    }
+    if (op == "silence") {
+        for (auto& ch : seg)
+            std::fill(ch.begin(), ch.end(), 0.f);
+        return true;
+    }
+    if (op == "dcRemove") {
+        for (auto& ch : seg) {
+            double mean = 0.0;
+            for (const float s : ch) mean += s;
+            mean /= static_cast<double>(n);
+            const float dc = static_cast<float>(mean);
+            for (float& s : ch) s -= dc;
+        }
+        return true;
+    }
+    err = "unknown op: " + op;
+    return false;
+}
+
+// Runs a BUILT-IN effect offline over `seg` in place (block loop, tail truncated —
+// the chain is length-preserving by contract). params = normalized 0..1 by param id.
+static bool applyBuiltinFxOffline(std::vector<std::vector<float>>& seg, const std::string& uid,
+                                  const std::map<std::string, double>& params, int sampleRate,
+                                  std::string& err) {
+    auto fx = makeBuiltinEffect(uid);
+    if (!fx) {
+        err = "unknown built-in effect: " + uid;
+        return false;
+    }
+    if (fx->isInstrument()) {
+        err = "instruments cannot run as offline clip processes: " + uid;
+        return false;
+    }
+    constexpr int kBlock = 2048;
+    fx->prepare(sampleRate, kBlock);
+    fx->reset();
+    for (const auto& [key, value] : params) {
+        char* endp = nullptr;
+        const long pid = std::strtol(key.c_str(), &endp, 10);
+        if (endp && *endp == '\0' && pid >= 0)
+            fx->setParamNorm(static_cast<uint32_t>(pid),
+                             static_cast<float>(std::clamp(value, 0.0, 1.0)));
+    }
+    const int nch = std::min<int>(2, static_cast<int>(seg.size()));
+    const int64_t frames = static_cast<int64_t>(seg[0].size());
+    const MidiBuffer noMidi;
+    float* io[2] = {nullptr, nullptr};
+    for (int64_t pos = 0; pos < frames; pos += kBlock) {
+        const int nthis = static_cast<int>(std::min<int64_t>(kBlock, frames - pos));
+        for (int c = 0; c < nch; ++c)
+            io[c] = seg[static_cast<size_t>(c)].data() + pos;
+        fx->process(io, nch, nthis, noMidi);
+    }
+    return true;
+}
+
+// Drops the chain + provenance, keeping the current (derived) render as the clip's
+// plain material — Cubase "Make Direct Offline Processing Permanent". Also called by
+// every length-CHANGING bake (resample/stretch) so trims keep meaning.
+void CommandProcessor::collapseDop(AudioClip& ac) {
+    ac.processes.clear();
+    ac.dopAssetId = 0;
+    ac.dopOffsetSamples = 0;
+    ac.dopLengthSamples = 0;
+}
+
+// Replays the clip's whole chain from its DOP provenance into a NEW derived asset and
+// repoints assetId at it. srcOffsetSamples/lengthSamples are left untouched — chain
+// ops preserve length, so post-chain trims survive every recompute.
+bool CommandProcessor::recomputeDop(AudioClip* ac, std::string& err) {
+    Model& m = model();
+    if (!ctx_.assetStore || !pcmToAssetHook) {
+        err = "audio processing is not wired";
+        return false;
+    }
+    const PcmData* pcm = ctx_.assetStore->pcm(ac->dopAssetId);
+    if (!pcm || pcm->planes.empty()) {
+        err = "original clip audio not loaded";
+        return false;
+    }
+    const int nch = static_cast<int>(pcm->planes.size());
+    const int64_t total = pcm->frames;
+    const int64_t off = std::clamp<int64_t>(ac->dopOffsetSamples, 0, total);
+    const int64_t len = std::clamp<int64_t>(ac->dopLengthSamples, 0, total - off);
+    if (len < 1) {
+        err = "original clip span is empty";
+        return false;
+    }
+    std::vector<std::vector<float>> seg(static_cast<size_t>(nch));
+    for (int ch = 0; ch < nch; ++ch)
+        seg[static_cast<size_t>(ch)].assign(pcm->planes[static_cast<size_t>(ch)].begin() + off,
+                                            pcm->planes[static_cast<size_t>(ch)].begin() + off +
+                                                len);
+    for (const ClipProcess& pr : ac->processes) {
+        if (!pr.enabled)
+            continue;
+        const auto num = [&pr](const char* k, double d) {
+            const auto it = pr.params.find(k);
+            return it != pr.params.end() ? it->second : d;
+        };
+        const auto str = [&pr](const char* k, const char* d) -> std::string {
+            const auto it = pr.sparams.find(k);
+            return it != pr.sparams.end() ? it->second : std::string(d);
+        };
+        if (pr.op == "plugin") {
+            if (!applyBuiltinFxOffline(seg, str("uid", ""), pr.params, m.project.sampleRate,
+                                       err))
+                return false;
+        } else if (!applyClipDspOp(seg, pr.op, num, str, m.project.sampleRate, err)) {
+            return false;
+        }
+    }
+    Asset a;
+    if (!pcmToAssetHook(seg, (ac->name.empty() ? std::string("clip") : ac->name) + "-dop", a,
+                        err))
+        return false;
+    a.id = m.nextId();
+    a.missing = false;
+    m.project.assets.push_back(a);
+    ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+    ctx_.assetStore->ensurePeaks(a);
+    ac->assetId = a.id;
+    return true;
+}
+
+// First chain entry: remember the pre-chain material and re-anchor the trim into the
+// (about to exist) derived render, which contains exactly the provenance span.
+static void ensureDopProvenance(AudioClip& ac) {
+    if (!ac.processes.empty())
+        return;
+    ac.dopAssetId = ac.assetId;
+    ac.dopOffsetSamples = ac.srcOffsetSamples;
+    ac.dopLengthSamples = ac.lengthSamples;
+    ac.srcOffsetSamples = 0;
+}
+
+// cmd/clip.processAudio — Cubase-style Audio→Process, now NON-DESTRUCTIVE for every
+// length-preserving op: the op is appended to the clip's DOP chain and the chain is
+// replayed from the original material (edit/reorder/remove later via
+// cmd/clip.processChain). `resample` changes the span length, so it first makes any
+// chain permanent and then bakes destructively (the pre-DOP behavior).
 json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
     Model& m = model();
     const uint64_t id = getOr<uint64_t>(p, "clipId", 0);
@@ -2702,160 +2967,186 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
         return r.fail("bad_request", "unknown op: " + op);
     if (!ctx_.assetStore || !pcmToAssetHook)
         return r.fail("not_supported", "audio processing is not wired");
-    const PcmData* pcm = ctx_.assetStore->pcm(ac->assetId);
-    if (!pcm || pcm->planes.empty())
-        return r.fail("bad_request", "clip audio not loaded");
 
-    const int nch = static_cast<int>(pcm->planes.size());
-    const int64_t total = pcm->frames;
-    const int64_t off = std::clamp<int64_t>(ac->srcOffsetSamples, 0, total);
-    const int64_t len = std::clamp<int64_t>(ac->lengthSamples, 0, total - off);
-    if (len < 1)
-        return r.fail("bad_request", "clip span is empty");
-    std::vector<std::vector<float>> seg(static_cast<size_t>(nch));
-    for (int ch = 0; ch < nch; ++ch)
-        seg[static_cast<size_t>(ch)].assign(pcm->planes[static_cast<size_t>(ch)].begin() + off,
-                                            pcm->planes[static_cast<size_t>(ch)].begin() + off + len);
-
-    const auto n = static_cast<size_t>(len);
-    if (op == "gain") {
-        const float g = static_cast<float>(
-            std::pow(10.0, std::clamp(getOr<double>(p, "gainDb", 0.0), -48.0, 48.0) / 20.0));
-        for (auto& ch : seg)
-            for (float& s : ch) s *= g;
-    } else if (op == "normalize") {
-        // mode: peak (default) | rms | lufs (EBU R128 integrated via media/Loudness)
-        const double targetDb = std::clamp(getOr<double>(p, "targetDb", -1.0), -48.0, 0.0);
-        const std::string mode = getOr(p, "mode", "peak");
-        double gain = 0.0; // 0 = leave untouched (silent / unmeasurable)
-        if (mode == "rms") {
-            double sum = 0.0;
-            size_t cnt = 0;
-            for (const auto& ch : seg) {
-                for (const float s : ch) sum += static_cast<double>(s) * s;
-                cnt += ch.size();
-            }
-            const double rms = cnt > 0 ? std::sqrt(sum / static_cast<double>(cnt)) : 0.0;
-            if (rms > 1e-9)
-                gain = std::pow(10.0, targetDb / 20.0) / rms;
-        } else if (mode == "lufs") {
-            LoudnessMeter meter(m.project.sampleRate);
-            std::vector<const float*> ptrs(seg.size());
-            for (size_t ch = 0; ch < seg.size(); ++ch) ptrs[ch] = seg[ch].data();
-            meter.process(ptrs.data(), nch, static_cast<int>(n));
-            const double lufs = meter.integratedLufs();
-            if (std::isfinite(lufs) && lufs > -70.0)
-                gain = std::pow(10.0, (targetDb - lufs) / 20.0);
-        } else { // peak
-            float peak = 0.f;
-            for (const auto& ch : seg)
-                for (const float s : ch) peak = std::max(peak, std::fabs(s));
-            if (peak > 1e-9f)
-                gain = std::pow(10.0, targetDb / 20.0) / static_cast<double>(peak);
-        }
-        if (gain > 0.0) {
-            const float g = static_cast<float>(gain);
-            for (auto& ch : seg)
-                for (float& s : ch) s *= g;
-        }
-    } else if (op == "fadeIn" || op == "fadeOut") {
-        // Full-span fade with an optional curve shape (Cubase Process semantics; the
-        // clip's non-destructive fade handles remain available on top). Shapes mirror
-        // FadeCurve/fadeShapeRt: fadeOut evaluates the shape on the remaining fraction.
-        const bool in = op == "fadeIn";
-        const FadeCurve curve = fadeCurveFromName(getOr(p, "curve", "linear"));
-        const auto shape = [curve](double t) {
-            switch (curve) {
-                case FadeCurve::Expo: return t * t;
-                case FadeCurve::Log: { const double u = 1.0 - t; return 1.0 - u * u; }
-                case FadeCurve::SCurve: return t * t * (3.0 - 2.0 * t);
-                case FadeCurve::EqPower: return std::sin(t * 1.5707963267948966);
-                default: return t;
-            }
-        };
-        const double denom = std::max<size_t>(1, n - 1);
-        for (auto& ch : seg)
-            for (size_t i = 0; i < n; ++i) {
-                const double t = static_cast<double>(i) / denom;
-                ch[i] *= static_cast<float>(shape(in ? t : 1.0 - t));
-            }
-    } else if (op == "stereoFlip") {
-        // mode: swap | leftToBoth | rightToBoth | merge | subtract (side signal)
-        if (nch < 2)
-            return r.fail("bad_request", "stereo flip requires a stereo clip");
-        const std::string mode = getOr(p, "flipMode", "swap");
-        auto& L = seg[0];
-        auto& R = seg[1];
-        if (mode == "swap") {
-            std::swap(L, R);
-        } else if (mode == "leftToBoth") {
-            R = L;
-        } else if (mode == "rightToBoth") {
-            L = R;
-        } else if (mode == "merge") {
-            for (size_t i = 0; i < n; ++i) {
-                const float mono = 0.5f * (L[i] + R[i]);
-                L[i] = mono;
-                R[i] = mono;
-            }
-        } else if (mode == "subtract") {
-            for (size_t i = 0; i < n; ++i) {
-                const float side = 0.5f * (L[i] - R[i]);
-                L[i] = side;
-                R[i] = side;
-            }
-        } else {
-            return r.fail("bad_request", "unknown flipMode: " + mode);
-        }
-    } else if (op == "resample") {
-        // Cubase Resample semantics: re-render the span as if tagged at targetRate but
-        // played at the project rate — length scales by target/current, pitch by
-        // current/target (lower target = shorter + faster + higher).
+    if (op == "resample") {
+        // Length-changing: bake the chain (it replayed into the current asset already),
+        // then slice + resample destructively.
+        collapseDop(*ac);
+        const PcmData* pcm = ctx_.assetStore->pcm(ac->assetId);
+        if (!pcm || pcm->planes.empty())
+            return r.fail("bad_request", "clip audio not loaded");
+        const int nch = static_cast<int>(pcm->planes.size());
+        const int64_t total = pcm->frames;
+        const int64_t off = std::clamp<int64_t>(ac->srcOffsetSamples, 0, total);
+        const int64_t len = std::clamp<int64_t>(ac->lengthSamples, 0, total - off);
+        if (len < 1)
+            return r.fail("bad_request", "clip span is empty");
+        std::vector<std::vector<float>> seg(static_cast<size_t>(nch));
+        for (int ch = 0; ch < nch; ++ch)
+            seg[static_cast<size_t>(ch)].assign(
+                pcm->planes[static_cast<size_t>(ch)].begin() + off,
+                pcm->planes[static_cast<size_t>(ch)].begin() + off + len);
         const int cur = m.project.sampleRate;
         const int target = std::clamp(getOr<int>(p, "targetRate", cur), 4000, 192000);
         if (target != cur) {
             const double ratio = static_cast<double>(cur) / static_cast<double>(target);
             seg = resampleLinear(seg, len, ratio);
         }
-    } else if (op == "reverse") {
-        for (auto& ch : seg)
-            std::reverse(ch.begin(), ch.end());
-    } else if (op == "invert") {
-        for (auto& ch : seg)
-            for (float& s : ch) s = -s;
-    } else if (op == "silence") {
-        for (auto& ch : seg)
-            std::fill(ch.begin(), ch.end(), 0.f);
-    } else { // dcRemove
-        for (auto& ch : seg) {
-            double mean = 0.0;
-            for (const float s : ch) mean += s;
-            mean /= static_cast<double>(n);
-            const float dc = static_cast<float>(mean);
-            for (float& s : ch) s -= dc;
-        }
+        Asset a;
+        std::string err;
+        if (!pcmToAssetHook(seg, (ac->name.empty() ? std::string("clip") : ac->name) + "-" + op,
+                            a, err))
+            return r.fail("render_failed", err.empty() ? "edit write failed" : err);
+        a.id = m.nextId();
+        a.missing = false;
+        m.project.assets.push_back(a);
+        ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
+        ctx_.assetStore->ensurePeaks(a);
+        ac->assetId = a.id;
+        ac->srcOffsetSamples = 0;
+        ac->lengthSamples = seg.empty() ? len : static_cast<int64_t>(seg[0].size());
+        r.label = std::string("Process: ") + label;
+        r.structural = true;
+        r.fullEvent = true;
+        return json{{"assetId", a.id}, {"lengthSamples", ac->lengthSamples}};
     }
 
-    Asset a;
+    const AudioClip before = *ac; // rollback snapshot for a failed recompute
+    ensureDopProvenance(*ac);
+    ClipProcess pr;
+    pr.id = m.nextId();
+    pr.op = op;
+    if (op == "gain")
+        pr.params["gainDb"] = std::clamp(getOr<double>(p, "gainDb", 0.0), -48.0, 48.0);
+    if (op == "normalize") {
+        pr.params["targetDb"] = std::clamp(getOr<double>(p, "targetDb", -1.0), -48.0, 0.0);
+        pr.sparams["mode"] = getOr(p, "mode", "peak");
+    }
+    if (op == "fadeIn" || op == "fadeOut")
+        pr.sparams["curve"] = getOr(p, "curve", "linear");
+    if (op == "stereoFlip")
+        pr.sparams["flipMode"] = getOr(p, "flipMode", "swap");
+    ac->processes.push_back(std::move(pr));
     std::string err;
-    if (!pcmToAssetHook(seg, (ac->name.empty() ? std::string("clip") : ac->name) + "-" + op,
-                        a, err))
-        return r.fail("render_failed", err.empty() ? "edit write failed" : err);
-    a.id = m.nextId();
-    a.missing = false;
-    m.project.assets.push_back(a);
-    ctx_.assetStore->loadAsync(a, std::function<void(bool)>());
-    ctx_.assetStore->ensurePeaks(a);
-
-    ac->assetId = a.id;
-    ac->srcOffsetSamples = 0;
-    // Span (and timeline length) unchanged for in-place ops; resample scales it.
-    ac->lengthSamples = seg.empty() ? len : static_cast<int64_t>(seg[0].size());
+    if (!recomputeDop(ac, err)) {
+        *ac = before;
+        return r.fail("render_failed", err.empty() ? "process failed" : err);
+    }
 
     r.label = std::string("Process: ") + label;
     r.structural = true;
     r.fullEvent = true; // asset list changed → full snapshot
-    return json{{"assetId", a.id}, {"lengthSamples", ac->lengthSamples}};
+    return json{{"assetId", ac->assetId}, {"lengthSamples", ac->lengthSamples}};
+}
+
+// cmd/clip.processChain — edit the DOP chain: {clipId, action, ...} with action =
+// addPlugin {uid, params?} | remove {processId} | toggle {processId} |
+// reorder {processId, index} | setParams {processId, params?, sparams?} |
+// clear | makePermanent. Every audible change replays the chain (one undo entry).
+json CommandProcessor::clipProcessChain(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t id = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(id);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    AudioClip* ac = asAudio(ref.clip);
+    if (!ac)
+        return r.fail("bad_request", "processChain requires an audio clip");
+    const std::string action = getOr(p, "action", "");
+    const AudioClip before = *ac;
+    const auto ok = [&](const char* lbl) {
+        r.label = lbl;
+        r.structural = true;
+        r.fullEvent = true;
+        return json{{"assetId", ac->assetId}, {"lengthSamples", ac->lengthSamples}};
+    };
+    const auto recomputeOrRollback = [&](const char* lbl) -> json {
+        std::string err;
+        if (!recomputeDop(ac, err)) {
+            *ac = before;
+            return r.fail("render_failed", err.empty() ? "recompute failed" : err);
+        }
+        return ok(lbl);
+    };
+    // Restore the pre-chain material mapping without rendering: a trim S in the
+    // derived render maps to provenance offset + S in the original asset.
+    const auto restoreOriginal = [&]() {
+        ac->assetId = ac->dopAssetId;
+        ac->srcOffsetSamples = ac->dopOffsetSamples + ac->srcOffsetSamples;
+        collapseDop(*ac);
+    };
+
+    if (action == "addPlugin") {
+        const std::string uid = getOr(p, "uid", "");
+        if (!isBuiltinUid(uid))
+            return r.fail("bad_request", "offline effects must be built-ins (builtin:*)");
+        ensureDopProvenance(*ac);
+        ClipProcess pr;
+        pr.id = m.nextId();
+        pr.op = "plugin";
+        pr.sparams["uid"] = uid;
+        if (p.contains("params") && p["params"].is_object())
+            for (auto it = p["params"].begin(); it != p["params"].end(); ++it)
+                if (it.value().is_number())
+                    pr.params[it.key()] = it.value().get<double>();
+        ac->processes.push_back(std::move(pr));
+        return recomputeOrRollback("Add Offline Effect");
+    }
+    if (action == "clear") {
+        if (ac->processes.empty())
+            return r.fail("bad_request", "the clip has no offline processes");
+        restoreOriginal();
+        return ok("Clear Offline Processes");
+    }
+    if (action == "makePermanent") {
+        if (ac->processes.empty())
+            return r.fail("bad_request", "the clip has no offline processes");
+        collapseDop(*ac);
+        return ok("Make Processing Permanent");
+    }
+
+    const uint64_t processId = getOr<uint64_t>(p, "processId", 0);
+    int idx = -1;
+    for (size_t i = 0; i < ac->processes.size(); ++i)
+        if (ac->processes[i].id == processId)
+            idx = static_cast<int>(i);
+    if (idx < 0)
+        return r.fail("not_found", "unknown processId");
+
+    if (action == "remove") {
+        ac->processes.erase(ac->processes.begin() + idx);
+        if (ac->processes.empty()) {
+            restoreOriginal();
+            return ok("Remove Offline Process");
+        }
+        return recomputeOrRollback("Remove Offline Process");
+    }
+    if (action == "toggle") {
+        ac->processes[static_cast<size_t>(idx)].enabled =
+            !ac->processes[static_cast<size_t>(idx)].enabled;
+        return recomputeOrRollback("Toggle Offline Process");
+    }
+    if (action == "reorder") {
+        const int to = clampi(getOr<int>(p, "index", idx), 0,
+                              static_cast<int>(ac->processes.size()) - 1);
+        ClipProcess moved = std::move(ac->processes[static_cast<size_t>(idx)]);
+        ac->processes.erase(ac->processes.begin() + idx);
+        ac->processes.insert(ac->processes.begin() + to, std::move(moved));
+        return recomputeOrRollback("Reorder Offline Processes");
+    }
+    if (action == "setParams") {
+        ClipProcess& pr = ac->processes[static_cast<size_t>(idx)];
+        if (p.contains("params") && p["params"].is_object())
+            for (auto it = p["params"].begin(); it != p["params"].end(); ++it)
+                if (it.value().is_number())
+                    pr.params[it.key()] = it.value().get<double>();
+        if (p.contains("sparams") && p["sparams"].is_object())
+            for (auto it = p["sparams"].begin(); it != p["sparams"].end(); ++it)
+                if (it.value().is_string())
+                    pr.sparams[it.key()] = it.value().get<std::string>();
+        return recomputeOrRollback("Edit Offline Process");
+    }
+    return r.fail("bad_request", "unknown action: " + action);
 }
 
 json CommandProcessor::clipSplit(const json& p, CmdResult& r) {
