@@ -628,6 +628,7 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
 
         // ---- automation lanes ------------------------------------------------------
         std::map<int, std::vector<AutomationPoint>> sendAuto;
+        bool ccLanesAdded = false;
         for (const AutomationLane& lane : t.automation) {
             if (lane.points.empty())
                 continue;
@@ -664,9 +665,47 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                     }
                     break;
                 }
+                case ParamRef::Kind::Cc: {
+                    // Track-level MIDI CC automation (SPEC §7 "cc:<n>"): each point
+                    // bakes to one CC event (same wire bytes as clip CC — discrete
+                    // points, chase table handles locate/loop wraps). MIDI/Instrument
+                    // tracks only; frozen playback carries the rendered audio already.
+                    if (frozen || busLike ||
+                        (t.kind != TrackKind::Midi && t.kind != TrackKind::Instrument))
+                        break;
+                    for (const AutomationPoint& ap : pts) {
+                        const double v = std::clamp(ap.value, 0.0, 1.0);
+                        TrackNode::CcEvent ce;
+                        ce.sample = map.beatsToSamples(std::max(0.0, ap.beat));
+                        ce.controller = static_cast<uint8_t>(ref.controller);
+                        if (ref.controller == 128) { // pitch bend (0.5 = center)
+                            const int raw = static_cast<int>(std::lround(v * 16383.0));
+                            ce.data[0] = 0xE0;
+                            ce.data[1] = static_cast<uint8_t>(raw & 0x7F);
+                            ce.data[2] = static_cast<uint8_t>((raw >> 7) & 0x7F);
+                        } else if (ref.controller == 129) { // channel aftertouch
+                            ce.data[0] = 0xD0;
+                            ce.data[1] = static_cast<uint8_t>(std::lround(v * 127.0));
+                            ce.size = 2;
+                        } else {
+                            ce.data[0] = 0xB0;
+                            ce.data[1] = static_cast<uint8_t>(ref.controller);
+                            ce.data[2] = static_cast<uint8_t>(std::lround(v * 127.0));
+                        }
+                        cfg.ccEvents.push_back(ce);
+                        ccLanesAdded = true;
+                    }
+                    break;
+                }
                 case ParamRef::Kind::Invalid:
                     break;
             }
+        }
+        if (ccLanesAdded) { // clip-CC events were sorted before this section — re-sort
+            std::stable_sort(cfg.ccEvents.begin(), cfg.ccEvents.end(),
+                             [](const TrackNode::CcEvent& a, const TrackNode::CcEvent& b) {
+                                 return a.sample < b.sample;
+                             });
         }
 
         // ---- routing ----------------------------------------------------------------

@@ -1862,6 +1862,7 @@ export interface RequestMap {
   "cmd/clip.bounceSelection": { req: { clipIds: number[] }; reply: { clipId: number; assetId: number } };
   "cmd/clip.dissolve": { req: { clipId: number; by?: "channel" | "pitch" }; reply: { trackIds: number[] } };
   "cmd/midi.mergeLoop": { req: { trackIds?: number[] }; reply: { trackId: number; clipId: number; sourceTracks: number } };
+  "cmd/midi.extractAutomation": { req: { clipId: number }; reply: { points: number; lanes: number } };
   "cmd/clip.delete": { req: ClipDeleteRequest; reply: EmptyObject };
   "cmd/clip.duplicate": { req: ClipDuplicateRequest; reply: ClipDuplicateReply };
   "cmd/clip.set": { req: ClipSetRequest; reply: EmptyObject };

@@ -28,6 +28,16 @@ ParamRef parseParamRef(const std::string& ref) {
         }
         return r;
     }
+    if (ref.rfind("cc:", 0) == 0) {
+        const char* s = ref.c_str() + 3;
+        char* end = nullptr;
+        const long ctl = std::strtol(s, &end, 10);
+        if (end != s && *end == '\0' && ctl >= 0 && ctl <= 129) {
+            r.kind = ParamRef::Kind::Cc;
+            r.controller = static_cast<int>(ctl);
+        }
+        return r;
+    }
     if (ref.rfind("plugin:", 0) == 0) {
         const char* s = ref.c_str() + 7;
         char* end = nullptr;

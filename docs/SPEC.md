@@ -301,6 +301,14 @@ the entire drag.
   active MIDI clip (whole clip when nothing selected); edits commit as ONE cmd/notes.edit.
   UI: piano-roll Functions ▸ Logical Editor… + MIDI menu (palette). Agent:
   `ui/midi.logicalEditor {clipId?, noteIds?, program}` runs arbitrary programs.
+- **CC automation lanes** (`paramRef` grammar gains `"cc:<n>"`, n = 0..127 CC / 128 pitch bend /
+  129 aftertouch — the MidiCc convention): on MIDI/Instrument tracks, each lane point bakes to
+  one CC event (same wire bytes as clip CC, discrete points, chase-table covered) merged into
+  the track's ccEvents at rebuild. `cmd/midi.extractAutomation {clipId}` → `{points, lanes}` is
+  Cubase Extract MIDI Automation: moves the clip's controller data onto `cc:` lanes at absolute
+  beats and clears the clip's cc — playback identical, curves lane-editable. UI: piano-roll
+  Functions ▸ Extract MIDI Automation; `cc:` lanes get named specs (CC1 Mod, Pitch Bend…) with
+  0..127 / bend-percent formatting.
 - **Piano-roll note clipboard**: the pianoRoll key context now implements copy/cut/paste/
   duplicate over selected NOTES (module-level clipboard, offsets relative to the earliest
   onset; paste lands at the grid-snapped playhead inside the active clip, else at clip start).

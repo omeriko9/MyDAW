@@ -21,7 +21,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import type { CcUpdate, MidiCc, MidiClip, Note, NoteInput, NoteUpdate, Project, Track, TransportEvent } from "../../protocol/types";
 import { transportBus, useStore } from "../../store/store";
 import type { Tool } from "../../store/store";
-import { addMidiClip, editCc, editNotes, locate, previewNote, quantizeNotes, redo, undo } from "../../store/actions";
+import { addMidiClip, editCc, editNotes, extractMidiAutomation, locate, previewNote, quantizeNotes, redo, undo } from "../../store/actions";
 import { paneVisible, registerKeyContext, zoomToFitPane } from "../../lib/keyboard";
 import {
   isBool,
@@ -51,6 +51,7 @@ import { ZoomPill } from "../common/ZoomPill";
 import { confirmDialog } from "../Dialogs/confirm";
 import { fieldsDialog } from "../Dialogs/fields";
 import { openLogicalEditor } from "./LogicalEditorDialog";
+import { showToast } from "../common/ToastHost";
 import * as M from "./prMath";
 import * as D from "./prDraw";
 import * as MF from "../../lib/midiFunctions";
@@ -2059,6 +2060,22 @@ function Editor({ track, clip }: EditorProps) {
         label: "Thin Out CC Data",
         title: "Remove controller points a straight line already reproduces (whole clip)",
         onClick: () => applyCcFn((cc) => MF.thinOutCc(cc)),
+      },
+      {
+        label: "Extract MIDI Automation",
+        title:
+          "Move this clip's controller data onto track automation lanes (cc:<n>) — playback stays identical, curves become lane-editable",
+        onClick: () => {
+          const c = clipRef.current;
+          void extractMidiAutomation(c.id).catch((e) =>
+            showToast(
+              e instanceof Error && e.message.includes("no controller")
+                ? "The clip has no controller data to extract"
+                : "Extract MIDI Automation failed",
+              "info",
+            ),
+          );
+        },
       },
       {
         label: "Delete Continuous Controllers",

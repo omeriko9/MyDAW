@@ -389,6 +389,7 @@ export type ParsedParamRef =
   | { kind: "pan" }
   | { kind: "send"; index: number }
   | { kind: "plugin"; instanceId: number; paramId: number }
+  | { kind: "cc"; controller: number }
   | { kind: "other" };
 
 export function parseParamRef(ref: string): ParsedParamRef {
@@ -406,7 +407,24 @@ export function parseParamRef(ref: string): ParsedParamRef {
       return { kind: "plugin", instanceId, paramId };
     }
   }
+  if (ref.startsWith("cc:")) {
+    const controller = Number(ref.slice(3));
+    if (Number.isFinite(controller) && controller >= 0 && controller <= 129)
+      return { kind: "cc", controller };
+  }
   return { kind: "other" };
+}
+
+/** Display name for a "cc:<n>" lane — mirrors the piano roll's CC lane names. */
+export function ccLaneLabel(controller: number): string {
+  if (controller === 128) return "Pitch Bend";
+  if (controller === 129) return "Aftertouch";
+  const names: Record<number, string> = {
+    1: "Mod", 2: "Breath", 7: "Volume", 10: "Pan", 11: "Expression",
+    64: "Sustain", 71: "Resonance", 74: "Cutoff", 91: "Reverb", 93: "Chorus",
+  };
+  const nm = names[controller];
+  return nm ? `CC${controller} ${nm}` : `CC${controller}`;
 }
 
 export function formatPan(v: number): string {
@@ -453,6 +471,17 @@ export function paramSpecFor(paramRef: string, track: Track): ParamSpec {
         fmt: (v) => `${Math.round(v * 100)}%`,
       };
     }
+    case "cc":
+      return {
+        min: 0,
+        max: 1,
+        def: p.controller === 128 ? 0.5 : 0, // bend rests at center
+        label: ccLaneLabel(p.controller),
+        fmt:
+          p.controller === 128
+            ? (v) => `${v >= 0.5 ? "+" : ""}${Math.round((v - 0.5) * 2 * 100)}%`
+            : (v) => `${Math.round(v * 127)}`,
+      };
     default:
       return { min: 0, max: 1, def: 0, label: paramRef, fmt: (v) => v.toFixed(2) };
   }
@@ -473,6 +502,8 @@ export function laneCurrentValue(track: Track, paramRef: string): number {
       const v = ins?.paramValues?.[String(p.paramId)];
       return typeof v === "number" ? v : 0.5;
     }
+    case "cc":
+      return p.controller === 128 ? 0.5 : 0; // bend rests at center
     default:
       return 0;
   }

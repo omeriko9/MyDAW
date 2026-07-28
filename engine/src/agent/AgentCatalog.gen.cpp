@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "9ffabcbbcea01a6aeae5a0012f5ea2c898f6e2a48885d4ac1dc56bff9d9cf917";
+const char kAgentCatalogSha256[] = "208b06eacb7cd45b2ff6124fc2da91995a1259acfef0ba7bd7e939ac0813de51";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -6092,6 +6092,61 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/midi.extractAutomation",
+      "category": "controllers",
+      "description": "Cubase Extract MIDI Automation: move a MIDI clip's controller data onto track \"cc:<n>\" automation lanes (absolute beats) and clear the clip's cc list.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "lanes": {
+            "type": "number"
+          },
+          "points": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "points",
+          "lanes"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/midi.mergeLoop",
       "category": "clips",
       "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
@@ -10713,6 +10768,7 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/marker.add",
     "cmd/marker.remove",
     "cmd/marker.set",
+    "cmd/midi.extractAutomation",
     "cmd/midi.mergeLoop",
     "cmd/notes.edit",
     "cmd/notes.quantize",

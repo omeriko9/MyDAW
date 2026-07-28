@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "9ffabcbbcea01a6aeae5a0012f5ea2c898f6e2a48885d4ac1dc56bff9d9cf917";
+export const AGENT_CATALOG_SHA256 = "208b06eacb7cd45b2ff6124fc2da91995a1259acfef0ba7bd7e939ac0813de51";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -6112,6 +6112,61 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/midi.extractAutomation",
+      "category": "controllers",
+      "description": "Cubase Extract MIDI Automation: move a MIDI clip's controller data onto track \"cc:<n>\" automation lanes (absolute beats) and clear the clip's cc list.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "lanes": {
+            "type": "number"
+          },
+          "points": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "points",
+          "lanes"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/midi.mergeLoop",
       "category": "clips",
       "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",
@@ -10598,6 +10653,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/marker.remove",
   "cmd/marker.set",
   "cmd/media.removeUnused",
+  "cmd/midi.extractAutomation",
   "cmd/midi.mergeLoop",
   "cmd/notes.edit",
   "cmd/notes.quantize",
@@ -10737,6 +10793,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/marker.add",
   "cmd/marker.remove",
   "cmd/marker.set",
+  "cmd/midi.extractAutomation",
   "cmd/midi.mergeLoop",
   "cmd/notes.edit",
   "cmd/notes.quantize",
@@ -10944,6 +11001,10 @@ export const REQUEST_COVERAGE = {
   "cmd/midi.mergeLoop": {
     "kind": "operation",
     "operation": "cmd/midi.mergeLoop"
+  },
+  "cmd/midi.extractAutomation": {
+    "kind": "operation",
+    "operation": "cmd/midi.extractAutomation"
   },
   "cmd/clip.delete": {
     "kind": "operation",
@@ -11638,6 +11699,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
   "cmd/media.removeUnused": [
     {
       "preview": true
+    }
+  ],
+  "cmd/midi.extractAutomation": [
+    {
+      "clipId": 21
     }
   ],
   "cmd/midi.mergeLoop": [

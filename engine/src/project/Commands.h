@@ -170,6 +170,7 @@ private:
     json clipResizeStretch(const json& p, CmdResult& r);
     json clipProcessChain(const json& p, CmdResult& r);
     json mediaRemoveUnused(const json& p, CmdResult& r);
+    json midiExtractAutomation(const json& p, CmdResult& r);
     // DOP helpers (SPEC §6): replay a clip's offline-process chain into a new derived
     // asset / drop the chain keeping the current render (also used by length-changing
     // bakes so trims keep meaning).

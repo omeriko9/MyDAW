@@ -17,13 +17,16 @@
 
 namespace mydaw {
 
-// Parsed paramRef: "volume" | "pan" | "send:<index>" | "plugin:<instanceId>:<paramId>".
+// Parsed paramRef: "volume" | "pan" | "send:<index>" | "plugin:<instanceId>:<paramId>"
+// | "cc:<controller>" (0..127 = MIDI CC, 128 = pitch bend, 129 = channel aftertouch —
+// the MidiCc convention; baked to CC events on MIDI/Instrument tracks, SPEC §7).
 struct ParamRef {
-    enum class Kind { Volume, Pan, Send, Plugin, Invalid };
+    enum class Kind { Volume, Pan, Send, Plugin, Cc, Invalid };
     Kind kind = Kind::Invalid;
     int sendIndex = -1;      // Kind::Send
     uint64_t instanceId = 0; // Kind::Plugin
     uint32_t paramId = 0;    // Kind::Plugin
+    int controller = -1;     // Kind::Cc
 };
 
 // Main thread (rebuild). Returns Kind::Invalid for malformed refs.

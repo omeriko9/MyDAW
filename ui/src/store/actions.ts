@@ -224,6 +224,10 @@ export const createSamplerTrack = (clipId: number) =>
 export const dissolveClip = (clipId: number, by: "channel" | "pitch") =>
   ws.request("cmd/clip.dissolve", { clipId, by });
 
+/** Cubase Extract MIDI Automation: clip CC lanes → track "cc:<n>" automation lanes. */
+export const extractMidiAutomation = (clipId: number) =>
+  ws.request("cmd/midi.extractAutomation", { clipId });
+
 /** Cubase Merge MIDI in Loop: loop-region events from MIDI tracks → one new clip/track. */
 export const mergeMidiLoop = (trackIds?: number[]) =>
   ws.request("cmd/midi.mergeLoop", {

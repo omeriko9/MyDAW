@@ -6084,6 +6084,61 @@
       ]
     },
     {
+      "name": "cmd/midi.extractAutomation",
+      "category": "controllers",
+      "description": "Cubase Extract MIDI Automation: move a MIDI clip's controller data onto track \"cc:<n>\" automation lanes (absolute beats) and clear the clip's cc list.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "midi-clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "lanes": {
+            "type": "number"
+          },
+          "points": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "points",
+          "lanes"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/midi.mergeLoop",
       "category": "clips",
       "description": "Cubase Merge MIDI in Loop: gather notes/CC inside the loop region from MIDI/instrument tracks (default all unmuted) into ONE clip on a new MIDI track.",

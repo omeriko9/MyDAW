@@ -542,6 +542,38 @@ async function main() {
       `unused=${pv.count} removed=${run.count} cleanAfter=${clean} undoRestored=${restored}`);
   }
 
+  // Extract MIDI Automation: clip CC → track "cc:<n>" automation lanes
+  {
+    // give the midi clip some CC data (2 lanes) via the notes.edit cc block
+    await req("cmd/cc.edit", { clipId: mclip.id, add: [
+      { controller: 1, beat: 0.5, value: 0.2 },
+      { controller: 1, beat: 1.5, value: 0.8 },
+      { controller: 128, beat: 1.0, value: 0.75 },
+    ]});
+    const ex = await req("cmd/midi.extractAutomation", { clipId: mclip.id });
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const mt2 = proj.tracks.find((t) => t.id === midiT.id);
+    const mc2 = mt2.clips.find((c) => c.id === mclip.id);
+    const ccLane = mt2.automation?.find((l) => l.paramRef === "cc:1");
+    const bendLane = mt2.automation?.find((l) => l.paramRef === "cc:128");
+    const clipStart = mc2.startBeat;
+    const ok =
+      ex.points === 3 && ex.lanes === 2 &&
+      (mc2.cc?.length ?? 0) === 0 &&
+      ccLane?.points?.length === 2 &&
+      Math.abs(ccLane.points[0].beat - (clipStart + 0.5)) < 1e-9 &&
+      Math.abs(ccLane.points[1].value - 0.8) < 1e-9 &&
+      bendLane?.points?.length === 1;
+    // a second extract must fail (nothing left)
+    const again = await req("cmd/midi.extractAutomation", { clipId: mclip.id })
+      .then(() => null).catch((e) => e.message);
+    await req("edit/undo", {}); // undo extract
+    await req("edit/undo", {}); // undo cc add
+    report("midi.extractAutomation (cc → track lanes, absolute beats)",
+      ok && typeof again === "string" && again.includes("no controller"),
+      `points=${ex.points} lanes=${ex.lanes} cc:1=${ccLane?.points?.length} cc:128=${bendLane?.points?.length} secondRun=${again ? "rejected" : "ACCEPTED?!"}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

@@ -973,6 +973,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.bounceSelection") return clipBounceSelection(p, r);
     if (type == "cmd/clip.dissolve")        return clipDissolve(p, r);
     if (type == "cmd/midi.mergeLoop")       return midiMergeLoop(p, r);
+    if (type == "cmd/midi.extractAutomation") return midiExtractAutomation(p, r);
     if (type == "cmd/media.removeUnused")   return mediaRemoveUnused(p, r);
     if (type == "cmd/track.renderInPlace")  return trackRenderInPlace(p, r);
     if (type == "cmd/track.createSampler")  return trackCreateSampler(p, r);
@@ -2055,6 +2056,52 @@ json CommandProcessor::midiMergeLoop(const json& p, CmdResult& r) {
     r.structural = true;
     r.fullEvent = true;
     return json{{"trackId", newTrackId}, {"clipId", newClipId}, {"sourceTracks", sourceTracks}};
+}
+
+// cmd/midi.extractAutomation {clipId} — Cubase Extract MIDI Automation: move the
+// clip's controller data onto track automation lanes ("cc:<n>" refs, absolute beats)
+// and clear the clip's cc list. Playback is equivalent (cc: lanes bake to the same
+// CC events); the curves become editable in the track's automation lanes.
+json CommandProcessor::midiExtractAutomation(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t clipIdv = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(clipIdv);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    MidiClip* mc = asMidi(ref.clip);
+    if (!mc)
+        return r.fail("bad_request", "extractAutomation requires a MIDI clip");
+    if (mc->cc.empty())
+        return r.fail("bad_request", "the clip has no controller data to extract");
+
+    std::set<int> controllers;
+    const size_t points = mc->cc.size();
+    for (const MidiCc& pt : mc->cc) {
+        AutomationLane* lane =
+            m.automationLane(ref.track->id, "cc:" + std::to_string(pt.controller), true);
+        AutomationPoint ap;
+        ap.id = m.nextId();
+        ap.beat = mc->startBeat + pt.beat;
+        ap.value = std::clamp(pt.value, 0.0, 1.0);
+        ap.curve = 0.0;
+        lane->points.push_back(ap);
+        controllers.insert(pt.controller);
+    }
+    for (const int ctl : controllers) {
+        AutomationLane* lane =
+            m.automationLane(ref.track->id, "cc:" + std::to_string(ctl), false);
+        if (lane)
+            std::sort(lane->points.begin(), lane->points.end(),
+                      [](const AutomationPoint& a, const AutomationPoint& b) {
+                          return a.beat < b.beat;
+                      });
+    }
+    mc->cc.clear();
+
+    r.label = "Extract MIDI Automation";
+    r.structural = true;
+    r.fullEvent = true; // clip + automation lanes changed together
+    return json{{"points", points}, {"lanes", controllers.size()}};
 }
 
 // cmd/media.removeUnused {preview?, deleteFiles?} — Cubase "Remove Unused Media".

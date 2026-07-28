@@ -268,8 +268,9 @@ Depends on Swipe 3 (parameterized ops become chain entries verbatim).
 > velocityCompress} — bake-time application (both regular + comp-path note bakes, stacked with
 > the Transpose track) + live/injected thru via TrackNode::applyMidiModRt; Inspector Modifiers
 > row; partial-merge cmd/track.set patch with clamps, midi/instrument-only. Random/range
-> filters and CPR modifier import remain open. Extract MIDI Automation (deferred here from
-> Swipe 1) still needs a CC automation target — goes with tier 2.
+> filters and CPR modifier import remain open. **Extract MIDI Automation SHIPPED 2026-07-28**:
+> the automation grammar gained "cc:<n>" targets (baked to CC events on MIDI/Instrument
+> tracks) and cmd/midi.extractAutomation moves clip CC onto them (piano-roll Functions entry).
 
 Tier 1 (**do**): Cubase "MIDI Modifiers" as a Track section — transpose, velocity shift/compress, random, range filter. Applied at bake time (`AudioGraph.cpp:399` next to the transpose-track hook) + in the live-thru path (`applyOutChannelRt` neighbor). No plugin infrastructure needed; playback-only, like Cubase. Cost M, value ★★★ (also improves CPR import fidelity — modifiers exist in .cpr).
 
