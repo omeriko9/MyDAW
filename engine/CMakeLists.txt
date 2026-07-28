@@ -20,6 +20,10 @@ add_custom_target(mydaw-agent-catalog-check
   VERBATIM)
 add_dependencies(mydaw-engine mydaw-agent-catalog-check)
 
+# Vendored spectral time-stretch/pitch-shift (MIT) — media/TimeStretch.cpp
+target_include_directories(mydaw-engine PRIVATE
+  "${CMAKE_SOURCE_DIR}/third_party/signalsmith")
+
 target_link_libraries(mydaw-engine PRIVATE
   mydaw_common
   ws2_32        # Winsock HTTP/WS server

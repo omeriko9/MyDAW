@@ -155,6 +155,14 @@ Gotcha: fade edits are `structural` and rebuild the graph per drag message (`Com
 
 ### Swipe 3 — Offline processes: parameters, missing DSP, real Pitch Shift dialog 🎚 — **Cost: M–L (≈1w) · Value: ★★★★ · ROI: high**
 
+> **STATUS: SHIPPED 2026-07-28.** Gain/Normalize dialogs (peak/RMS/LUFS), Stereo Flip (5 modes),
+> Resample (tape semantics, the only span-changing op), render-fades with curve shapes, Time
+> Stretch ratio dialog, Pitch Shift dialog (semitones+cents+time-correction → tape varispeed when
+> off), and **signalsmith-stretch vendored** (third_party/signalsmith, MIT) as the default
+> stretch/pitch engine (8 kHz tonality limit; `algorithm:"wsola"` keeps the legacy path).
+> Deferred: in-dialog audition/preview (needs a preview render path — revisit with DOP in
+> Swipe 7); selection-range (partial-event) processing stays in the backlog.
+
 Why together: one new `ProcessDialog` component + extensions to a single engine handler (`clipProcessAudio`).
 
 | Task | Cost | Notes |

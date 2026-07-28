@@ -131,7 +131,7 @@ import {
   type Row,
   type TrackRowL,
 } from "./layout";
-import type { AudioClip, AutomationPoint, Clip, ClipEdge, FadeCurve, Project, Track } from "../../protocol/types";
+import type { AudioClip, AutomationPoint, Clip, ClipEdge, FadeCurve, NormalizeMode, Project, StereoFlipMode, Track } from "../../protocol/types";
 
 const MIN_CLIP_BEATS = 1 / 16;
 const MOVE_THRESHOLD_PX = 3;
@@ -2329,21 +2329,107 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
               title:
                 "Destructive audio processing on this clip (Cubase-style) — writes an edit file; undoable",
               submenu: [
-                { label: "Fade In", onClick: () => fire(processAudioClip(clip.id, "fadeIn")) },
-                { label: "Fade Out", onClick: () => fire(processAudioClip(clip.id, "fadeOut")) },
+                {
+                  label: "Gain…",
+                  onClick: () => {
+                    void fieldsDialog({
+                      title: "Process — Gain",
+                      fields: [
+                        { key: "db", label: "Gain (dB)", kind: "number", value: 3, min: -48, max: 48, step: 0.5 },
+                      ],
+                    }).then((v) => {
+                      if (v) fire(processAudioClip(clip.id, "gain", { gainDb: v.db as number }));
+                    });
+                  },
+                },
+                {
+                  label: "Normalize…",
+                  onClick: () => {
+                    void fieldsDialog({
+                      title: "Process — Normalize",
+                      fields: [
+                        {
+                          key: "mode",
+                          label: "Measure",
+                          kind: "select",
+                          value: "peak",
+                          options: [
+                            { value: "peak", label: "Peak (dBFS)" },
+                            { value: "rms", label: "RMS (dB)" },
+                            { value: "lufs", label: "Loudness (LUFS)" },
+                          ],
+                        },
+                        { key: "db", label: "Target", kind: "number", value: -1, min: -48, max: 0, step: 0.5 },
+                      ],
+                    }).then((v) => {
+                      if (v)
+                        fire(
+                          processAudioClip(clip.id, "normalize", {
+                            targetDb: v.db as number,
+                            mode: v.mode as NormalizeMode,
+                          }),
+                        );
+                    });
+                  },
+                },
                 "separator",
                 {
-                  label: "Gain",
-                  submenu: [6, 3, 1, -1, -3, -6].map((db) => ({
-                    label: `${db > 0 ? "+" : ""}${db} dB`,
-                    onClick: () => fire(processAudioClip(clip.id, "gain", { gainDb: db })),
+                  label: "Stereo Flip",
+                  submenu: (
+                    [
+                      ["Swap Channels", "swap"],
+                      ["Left → Both", "leftToBoth"],
+                      ["Right → Both", "rightToBoth"],
+                      ["Merge to Mono", "merge"],
+                      ["Keep Side (L−R)", "subtract"],
+                    ] as Array<[string, StereoFlipMode]>
+                  ).map(([label, flipMode]) => ({
+                    label,
+                    onClick: () =>
+                      void processAudioClip(clip.id, "stereoFlip", { flipMode }).catch(() =>
+                        showToast("Stereo Flip needs a stereo clip", "info"),
+                      ),
                   })),
                 },
                 {
-                  label: "Normalize",
-                  submenu: [0, -1, -3, -6].map((db) => ({
-                    label: `to ${db} dBFS`,
-                    onClick: () => fire(processAudioClip(clip.id, "normalize", { targetDb: db })),
+                  label: "Resample…",
+                  title: "Re-render as if tagged at another rate — length and pitch shift (tape-style)",
+                  onClick: () => {
+                    void fieldsDialog({
+                      title: "Process — Resample",
+                      fields: [
+                        {
+                          key: "rate",
+                          label: "Target rate (Hz)",
+                          kind: "select",
+                          value: "22050",
+                          options: ["8000", "11025", "16000", "22050", "32000", "44100", "48000", "88200", "96000"].map(
+                            (r) => ({ value: r, label: r }),
+                          ),
+                        },
+                      ],
+                    }).then((v) => {
+                      if (v)
+                        fire(
+                          processAudioClip(clip.id, "resample", { targetRate: parseInt(v.rate as string, 10) }),
+                        );
+                    });
+                  },
+                },
+                "separator",
+                {
+                  label: "Fade In (render)",
+                  title: "Bake a full-span fade into the audio (the clip fade handles stay separate)",
+                  submenu: FADE_CURVES.map((cv) => ({
+                    label: FADE_CURVE_LABELS[cv],
+                    onClick: () => fire(processAudioClip(clip.id, "fadeIn", { curve: cv })),
+                  })),
+                },
+                {
+                  label: "Fade Out (render)",
+                  submenu: FADE_CURVES.map((cv) => ({
+                    label: FADE_CURVE_LABELS[cv],
+                    onClick: () => fire(processAudioClip(clip.id, "fadeOut", { curve: cv })),
                   })),
                 },
                 "separator",
@@ -2356,13 +2442,48 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             {
               label: "Time-Stretch",
               submenu: [
+                {
+                  label: "Time Stretch…",
+                  title: "Stretch the clip's duration (WSOLA, pitch preserved)",
+                  onClick: () => {
+                    void fieldsDialog({
+                      title: "Time Stretch",
+                      message: "Ratio > 1 is longer/slower, < 1 shorter/faster (0.25–4).",
+                      fields: [
+                        { key: "ratio", label: "Ratio", kind: "number", value: 1.5, min: 0.25, max: 4, step: 0.05 },
+                      ],
+                    }).then((v) => {
+                      if (v && (v.ratio as number) !== 1) fire(stretchClip(clip.id, v.ratio as number));
+                    });
+                  },
+                },
+                {
+                  label: "Pitch Shift…",
+                  title: "Shift pitch in semitones + cents; time correction keeps the length",
+                  onClick: () => {
+                    void fieldsDialog({
+                      title: "Pitch Shift",
+                      fields: [
+                        { key: "semitones", label: "Semitones", kind: "number", value: 0, min: -24, max: 24, step: 1 },
+                        { key: "cents", label: "Fine (cents)", kind: "number", value: 0, min: -100, max: 100, step: 1 },
+                        { key: "timeCorrection", label: "Time correction (keep length)", kind: "checkbox", value: true },
+                      ],
+                    }).then((v) => {
+                      if (!v) return;
+                      const st = (v.semitones as number) + (v.cents as number) / 100;
+                      if (st === 0) return;
+                      const ratio = Math.pow(2, st / 12);
+                      fire(stretchClip(clip.id, ratio, true, v.timeCorrection !== true));
+                    });
+                  },
+                },
+                "separator",
                 { label: "½× (faster)", onClick: () => fire(stretchClip(clip.id, 0.5)) },
-                { label: "2× (slower)", onClick: () => fire(stretchClip(clip.id, 2.0)) },
                 { label: "1.5× (slower)", onClick: () => fire(stretchClip(clip.id, 1.5)) },
+                { label: "2× (slower)", onClick: () => fire(stretchClip(clip.id, 2.0)) },
                 "separator",
                 { label: "Transpose +12 st", onClick: () => fire(stretchClip(clip.id, 2.0, true)) },
                 { label: "Transpose −12 st", onClick: () => fire(stretchClip(clip.id, 0.5, true)) },
-                { label: "Transpose +7 st", onClick: () => fire(stretchClip(clip.id, 1.4983, true)) },
               ],
             },
           ] as MenuEntry[])

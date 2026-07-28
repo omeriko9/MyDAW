@@ -20,6 +20,7 @@
 #include "core/AudioGraph.h"      // E2
 #include "core/Transport.h"
 #include "media/AssetStore.h"     // E4
+#include "media/Loudness.h"       // LUFS-mode normalize (clip.processAudio)
 #include "media/TimeStretch.h"    // WSOLA stretch / transpose
 #include "core/effects/BuiltinEffectManager.h" // in-engine stock effects
 #include "plugins/HostProcess.h"  // E7
@@ -2026,12 +2027,26 @@ json CommandProcessor::clipStretch(const json& p, CmdResult& r) {
                                             pcm->planes[static_cast<size_t>(ch)].begin() + off + len);
 
     const int sr = m.project.sampleRate;
+    // tape: pitch shift WITHOUT time correction (Cubase's unchecked Time Correction) —
+    // a plain varispeed resample: pitch × ratio, length ÷ ratio.
+    const bool tape = getOr<bool>(p, "tape", false);
+    // Default algorithm is the vendored spectral engine (signalsmith-stretch); pass
+    // algorithm:"wsola" for the legacy in-house path.
+    const bool wsola = getOr(p, "algorithm", "spectral") == std::string("wsola");
     std::vector<std::vector<float>> outPcm;
-    if (transpose) {
-        auto stretched = wsolaStretch(seg, len, ratio, sr); // longer, same pitch
-        outPcm = resampleLinear(stretched, static_cast<int64_t>(stretched[0].size()), ratio); // back to len, pitch*ratio
+    if (transpose && tape) {
+        outPcm = resampleLinear(seg, len, ratio);
+    } else if (transpose) {
+        if (wsola) {
+            auto stretched = wsolaStretch(seg, len, ratio, sr); // longer, same pitch
+            outPcm = resampleLinear(stretched, static_cast<int64_t>(stretched[0].size()),
+                                    ratio); // back to len, pitch*ratio
+        } else {
+            outPcm = spectralStretch(seg, len, 1.0, 12.0 * std::log2(ratio), sr);
+        }
     } else {
-        outPcm = wsolaStretch(seg, len, ratio, sr);
+        outPcm = wsola ? wsolaStretch(seg, len, ratio, sr)
+                       : spectralStretch(seg, len, ratio, 0.0, sr);
     }
     const int64_t newLen = static_cast<int64_t>(outPcm.empty() ? 0 : outPcm[0].size());
 
@@ -2070,15 +2085,17 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
     if (!ac)
         return r.fail("bad_request", "audio processing requires an audio clip");
     const std::string op = getOr(p, "op", "");
-    const char* label = op == "gain"        ? "Gain"
-                        : op == "normalize" ? "Normalize"
-                        : op == "fadeIn"    ? "Fade In"
-                        : op == "fadeOut"   ? "Fade Out"
-                        : op == "reverse"   ? "Reverse"
-                        : op == "invert"    ? "Invert Phase"
-                        : op == "silence"   ? "Silence"
-                        : op == "dcRemove"  ? "Remove DC Offset"
-                                            : nullptr;
+    const char* label = op == "gain"         ? "Gain"
+                        : op == "normalize"  ? "Normalize"
+                        : op == "fadeIn"     ? "Fade In"
+                        : op == "fadeOut"    ? "Fade Out"
+                        : op == "reverse"    ? "Reverse"
+                        : op == "invert"     ? "Invert Phase"
+                        : op == "silence"    ? "Silence"
+                        : op == "dcRemove"   ? "Remove DC Offset"
+                        : op == "stereoFlip" ? "Stereo Flip"
+                        : op == "resample"   ? "Resample"
+                                             : nullptr;
     if (!label)
         return r.fail("bad_request", "unknown op: " + op);
     if (!ctx_.assetStore || !pcmToAssetHook)
@@ -2105,25 +2122,99 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
         for (auto& ch : seg)
             for (float& s : ch) s *= g;
     } else if (op == "normalize") {
+        // mode: peak (default) | rms | lufs (EBU R128 integrated via media/Loudness)
         const double targetDb = std::clamp(getOr<double>(p, "targetDb", -1.0), -48.0, 0.0);
-        float peak = 0.f;
-        for (const auto& ch : seg)
-            for (const float s : ch) peak = std::max(peak, std::fabs(s));
-        if (peak > 1e-9f) {
-            const float g = static_cast<float>(std::pow(10.0, targetDb / 20.0)) / peak;
+        const std::string mode = getOr(p, "mode", "peak");
+        double gain = 0.0; // 0 = leave untouched (silent / unmeasurable)
+        if (mode == "rms") {
+            double sum = 0.0;
+            size_t cnt = 0;
+            for (const auto& ch : seg) {
+                for (const float s : ch) sum += static_cast<double>(s) * s;
+                cnt += ch.size();
+            }
+            const double rms = cnt > 0 ? std::sqrt(sum / static_cast<double>(cnt)) : 0.0;
+            if (rms > 1e-9)
+                gain = std::pow(10.0, targetDb / 20.0) / rms;
+        } else if (mode == "lufs") {
+            LoudnessMeter meter(m.project.sampleRate);
+            std::vector<const float*> ptrs(seg.size());
+            for (size_t ch = 0; ch < seg.size(); ++ch) ptrs[ch] = seg[ch].data();
+            meter.process(ptrs.data(), nch, static_cast<int>(n));
+            const double lufs = meter.integratedLufs();
+            if (std::isfinite(lufs) && lufs > -70.0)
+                gain = std::pow(10.0, (targetDb - lufs) / 20.0);
+        } else { // peak
+            float peak = 0.f;
+            for (const auto& ch : seg)
+                for (const float s : ch) peak = std::max(peak, std::fabs(s));
+            if (peak > 1e-9f)
+                gain = std::pow(10.0, targetDb / 20.0) / static_cast<double>(peak);
+        }
+        if (gain > 0.0) {
+            const float g = static_cast<float>(gain);
             for (auto& ch : seg)
                 for (float& s : ch) s *= g;
         }
     } else if (op == "fadeIn" || op == "fadeOut") {
-        // Full-span linear fade (Cubase Process semantics; the clip's non-destructive
-        // fade handles remain available on top).
+        // Full-span fade with an optional curve shape (Cubase Process semantics; the
+        // clip's non-destructive fade handles remain available on top). Shapes mirror
+        // FadeCurve/fadeShapeRt: fadeOut evaluates the shape on the remaining fraction.
         const bool in = op == "fadeIn";
+        const FadeCurve curve = fadeCurveFromName(getOr(p, "curve", "linear"));
+        const auto shape = [curve](double t) {
+            switch (curve) {
+                case FadeCurve::Expo: return t * t;
+                case FadeCurve::Log: { const double u = 1.0 - t; return 1.0 - u * u; }
+                case FadeCurve::SCurve: return t * t * (3.0 - 2.0 * t);
+                case FadeCurve::EqPower: return std::sin(t * 1.5707963267948966);
+                default: return t;
+            }
+        };
         const double denom = std::max<size_t>(1, n - 1);
         for (auto& ch : seg)
             for (size_t i = 0; i < n; ++i) {
                 const double t = static_cast<double>(i) / denom;
-                ch[i] *= static_cast<float>(in ? t : 1.0 - t);
+                ch[i] *= static_cast<float>(shape(in ? t : 1.0 - t));
             }
+    } else if (op == "stereoFlip") {
+        // mode: swap | leftToBoth | rightToBoth | merge | subtract (side signal)
+        if (nch < 2)
+            return r.fail("bad_request", "stereo flip requires a stereo clip");
+        const std::string mode = getOr(p, "flipMode", "swap");
+        auto& L = seg[0];
+        auto& R = seg[1];
+        if (mode == "swap") {
+            std::swap(L, R);
+        } else if (mode == "leftToBoth") {
+            R = L;
+        } else if (mode == "rightToBoth") {
+            L = R;
+        } else if (mode == "merge") {
+            for (size_t i = 0; i < n; ++i) {
+                const float mono = 0.5f * (L[i] + R[i]);
+                L[i] = mono;
+                R[i] = mono;
+            }
+        } else if (mode == "subtract") {
+            for (size_t i = 0; i < n; ++i) {
+                const float side = 0.5f * (L[i] - R[i]);
+                L[i] = side;
+                R[i] = side;
+            }
+        } else {
+            return r.fail("bad_request", "unknown flipMode: " + mode);
+        }
+    } else if (op == "resample") {
+        // Cubase Resample semantics: re-render the span as if tagged at targetRate but
+        // played at the project rate — length scales by target/current, pitch by
+        // current/target (lower target = shorter + faster + higher).
+        const int cur = m.project.sampleRate;
+        const int target = std::clamp(getOr<int>(p, "targetRate", cur), 4000, 192000);
+        if (target != cur) {
+            const double ratio = static_cast<double>(cur) / static_cast<double>(target);
+            seg = resampleLinear(seg, len, ratio);
+        }
     } else if (op == "reverse") {
         for (auto& ch : seg)
             std::reverse(ch.begin(), ch.end());
@@ -2156,12 +2247,13 @@ json CommandProcessor::clipProcessAudio(const json& p, CmdResult& r) {
 
     ac->assetId = a.id;
     ac->srcOffsetSamples = 0;
-    ac->lengthSamples = len; // span (and timeline length) unchanged
+    // Span (and timeline length) unchanged for in-place ops; resample scales it.
+    ac->lengthSamples = seg.empty() ? len : static_cast<int64_t>(seg[0].size());
 
     r.label = std::string("Process: ") + label;
     r.structural = true;
     r.fullEvent = true; // asset list changed → full snapshot
-    return json{{"assetId", a.id}};
+    return json{{"assetId", a.id}, {"lengthSamples", ac->lengthSamples}};
 }
 
 json CommandProcessor::clipSplit(const json& p, CmdResult& r) {

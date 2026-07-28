@@ -15,7 +15,17 @@ namespace mydaw {
 std::vector<std::vector<float>> wsolaStretch(const std::vector<std::vector<float>>& in,
                                              int64_t frames, double ratio, int sampleRate);
 
-// Linear-interpolating resample by `ratio` (out ≈ frames/ratio; ratio>1 = shorter+higher).
+// High-quality spectral stretch/shift (vendored signalsmith-stretch, MIT): duration ×
+// `ratio` (clamped [0.25, 4.0]) AND pitch × 2^(semitones/12) in ONE pass — so
+// (ratio=2, semitones=0) = slower same pitch; (ratio=1, semitones=+12) = pitch-up at
+// constant length. Transposition uses an 8 kHz tonality limit (formant-friendlier than
+// naive resampling). Falls back to WSOLA below 64 frames.
+std::vector<std::vector<float>> spectralStretch(const std::vector<std::vector<float>>& in,
+                                                int64_t frames, double ratio,
+                                                double semitones, int sampleRate);
+
+// Linear-interpolating resample by `ratio` (out ≈ frames/ratio; ratio>1 = shorter+higher;
+// clamped [1/16, 16] — wide enough for Resample-process rate conversions).
 std::vector<std::vector<float>> resampleLinear(const std::vector<std::vector<float>>& in,
                                                int64_t frames, double ratio);
 

@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "bc7c5c2c0360952ee106bc855c86eefc9b51a93a39011d03ee24383af89ce28c";
+export const AGENT_CATALOG_SHA256 = "7ba14eff87cf2acc3d98eb1365b6208536143949b400c9579f7024eb77c83549";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -5169,7 +5169,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "cmd/clip.processAudio",
       "category": "clips",
-      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove); writes a new edit asset and repoints the clip.",
+      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove/stereoFlip/resample); writes a new edit asset.",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -5200,7 +5200,9 @@ export const AGENT_CATALOG: AgentCatalog = {
               "reverse",
               "invert",
               "silence",
-              "dcRemove"
+              "dcRemove",
+              "stereoFlip",
+              "resample"
             ],
             "type": "string"
           },
@@ -5209,7 +5211,36 @@ export const AGENT_CATALOG: AgentCatalog = {
             "type": "number"
           },
           "targetDb": {
-            "description": "op \"normalize\": peak target in dBFS (default -1).",
+            "description": "op \"normalize\": target in dBFS/LUFS (default -1).",
+            "type": "number"
+          },
+          "mode": {
+            "description": "op \"normalize\": measurement mode (default peak).",
+            "enum": [
+              "peak",
+              "rms",
+              "lufs"
+            ],
+            "type": "string"
+          },
+          "curve": {
+            "$ref": "#/schemas/FadeCurve"
+          },
+          "flipMode": {
+            "description": "op \"stereoFlip\": what to do with L/R (default swap).",
+            "enum": [
+              "swap",
+              "leftToBoth",
+              "rightToBoth",
+              "merge",
+              "subtract"
+            ],
+            "type": "string"
+          },
+          "targetRate": {
+            "description": "op \"resample\": target rate 4000..192000 — length scales by target/current, pitch by current/target.",
+            "maximum": 192000,
+            "minimum": 4000,
             "type": "number"
           }
         },
@@ -5224,10 +5255,14 @@ export const AGENT_CATALOG: AgentCatalog = {
         "properties": {
           "assetId": {
             "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
           }
         },
         "required": [
-          "assetId"
+          "assetId",
+          "lengthSamples"
         ],
         "type": "object"
       },
@@ -5382,6 +5417,18 @@ export const AGENT_CATALOG: AgentCatalog = {
           },
           "transpose": {
             "type": "boolean"
+          },
+          "tape": {
+            "description": "with transpose: skip time correction (varispeed — pitch x ratio, length / ratio)",
+            "type": "boolean"
+          },
+          "algorithm": {
+            "description": "spectral (default, signalsmith-stretch) or the legacy wsola path",
+            "enum": [
+              "spectral",
+              "wsola"
+            ],
+            "type": "string"
           }
         },
         "required": [

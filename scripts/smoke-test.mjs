@@ -307,6 +307,35 @@ async function main() {
     report("clip.crossfade + fade curves + env round-trip", ok, detail);
   }
 
+  // processAudio new ops: stereoFlip keeps the span, resample scales it by target/current
+  {
+    let proj = (await req("session/hello", { clientName: "smoke" })).project;
+    let aud = proj.tracks.find((t) => t.id === audioT.id);
+    const pc = aud?.clips?.find((c) => c.type === "audio");
+    let ok = false;
+    let detail = "no audio clip";
+    if (pc) {
+      const before = pc.lengthSamples;
+      await req("cmd/clip.processAudio", { clipId: pc.id, op: "stereoFlip", flipMode: "swap" });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      const afterFlip = proj.tracks.find((t) => t.id === audioT.id)
+        .clips.find((c) => c.id === pc.id).lengthSamples;
+      const half = Math.round(proj.sampleRate / 2);
+      const rr = await req("cmd/clip.processAudio", { clipId: pc.id, op: "resample", targetRate: half });
+      proj = (await req("session/hello", { clientName: "smoke" })).project;
+      const afterRs = proj.tracks.find((t) => t.id === audioT.id)
+        .clips.find((c) => c.id === pc.id).lengthSamples;
+      ok =
+        afterFlip === before &&
+        Math.abs(afterRs - before / 2) <= 2 &&
+        rr.lengthSamples === afterRs;
+      detail = `len ${before} -> flip ${afterFlip} -> resample(${half}) ${afterRs}`;
+      await req("edit/undo", {}); // undo resample so later renders keep the original span
+      await req("edit/undo", {}); // undo flip
+    }
+    report("processAudio stereoFlip + resample", ok, detail);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

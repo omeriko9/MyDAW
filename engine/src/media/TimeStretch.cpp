@@ -1,7 +1,10 @@
 // MyDAW — media/TimeStretch.cpp — see TimeStretch.h. Classic WSOLA (windowed overlap-add with
-// waveform-similarity alignment) + linear resample. Textbook, non-RT.
+// waveform-similarity alignment) + linear resample, plus the vendored signalsmith-stretch
+// spectral engine (third_party/signalsmith, MIT) for high-quality stretch/pitch. Non-RT.
 
 #include "media/TimeStretch.h"
+
+#include "signalsmith-stretch.h" // third_party/signalsmith (MIT)
 
 #include <algorithm>
 #include <cmath>
@@ -80,10 +83,40 @@ std::vector<std::vector<float>> wsolaStretch(const std::vector<std::vector<float
     return out;
 }
 
+std::vector<std::vector<float>> spectralStretch(const std::vector<std::vector<float>>& in,
+                                                int64_t frames, double ratio,
+                                                double semitones, int sampleRate) {
+    const int nch = static_cast<int>(in.size());
+    ratio = std::clamp(ratio, 0.25, 4.0);
+    if (nch <= 0 || frames < 64) // too short for a spectral frame — WSOLA copes better
+        return wsolaStretch(in, frames, ratio, sampleRate);
+    const int64_t outLen =
+        std::max<int64_t>(1, static_cast<int64_t>(std::llround(frames * ratio)));
+    std::vector<std::vector<float>> out(
+        static_cast<size_t>(nch), std::vector<float>(static_cast<size_t>(outLen), 0.f));
+
+    signalsmith::stretch::SignalsmithStretch<float> stretch;
+    stretch.presetDefault(nch, static_cast<float>(sampleRate));
+    if (semitones != 0.0) {
+        // 8 kHz tonality limit keeps formants/tone bearable on vocal material.
+        stretch.setTransposeSemitones(static_cast<float>(semitones),
+                                      8000.0f / static_cast<float>(sampleRate));
+    }
+    std::vector<const float*> inPtrs(static_cast<size_t>(nch));
+    std::vector<float*> outPtrs(static_cast<size_t>(nch));
+    for (int ch = 0; ch < nch; ++ch) {
+        inPtrs[static_cast<size_t>(ch)] = in[static_cast<size_t>(ch)].data();
+        outPtrs[static_cast<size_t>(ch)] = out[static_cast<size_t>(ch)].data();
+    }
+    stretch.exact(inPtrs.data(), static_cast<int>(frames), outPtrs.data(),
+                  static_cast<int>(outLen));
+    return out;
+}
+
 std::vector<std::vector<float>> resampleLinear(const std::vector<std::vector<float>>& in,
                                                int64_t frames, double ratio) {
     const int nch = static_cast<int>(in.size());
-    ratio = std::clamp(ratio, 0.25, 4.0);
+    ratio = std::clamp(ratio, 1.0 / 16.0, 16.0);
     const int64_t outLen = std::max<int64_t>(1, static_cast<int64_t>(std::llround(frames / ratio)));
     std::vector<std::vector<float>> out(std::max(1, nch), std::vector<float>(static_cast<size_t>(outLen), 0.f));
     if (nch <= 0 || frames < 2)

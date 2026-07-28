@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "bc7c5c2c0360952ee106bc855c86eefc9b51a93a39011d03ee24383af89ce28c";
+const char kAgentCatalogSha256[] = "7ba14eff87cf2acc3d98eb1365b6208536143949b400c9579f7024eb77c83549";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -5149,7 +5149,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "cmd/clip.processAudio",
       "category": "clips",
-      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove); writes a new edit asset and repoints the clip.",
+      "description": "Destructive audio process on a clip's span (gain/normalize/fades/reverse/invert/silence/dcRemove/stereoFlip/resample); writes a new edit asset.",
       "target": "command",
       "mode": "write",
       "traits": [
@@ -5180,7 +5180,9 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "reverse",
               "invert",
               "silence",
-              "dcRemove"
+              "dcRemove",
+              "stereoFlip",
+              "resample"
             ],
             "type": "string"
           },
@@ -5189,7 +5191,36 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "type": "number"
           },
           "targetDb": {
-            "description": "op \"normalize\": peak target in dBFS (default -1).",
+            "description": "op \"normalize\": target in dBFS/LUFS (default -1).",
+            "type": "number"
+          },
+          "mode": {
+            "description": "op \"normalize\": measurement mode (default peak).",
+            "enum": [
+              "peak",
+              "rms",
+              "lufs"
+            ],
+            "type": "string"
+          },
+          "curve": {
+            "$ref": "#/schemas/FadeCurve"
+          },
+          "flipMode": {
+            "description": "op \"stereoFlip\": what to do with L/R (default swap).",
+            "enum": [
+              "swap",
+              "leftToBoth",
+              "rightToBoth",
+              "merge",
+              "subtract"
+            ],
+            "type": "string"
+          },
+          "targetRate": {
+            "description": "op \"resample\": target rate 4000..192000 — length scales by target/current, pitch by current/target.",
+            "maximum": 192000,
+            "minimum": 4000,
             "type": "number"
           }
         },
@@ -5204,10 +5235,14 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "properties": {
           "assetId": {
             "type": "number"
+          },
+          "lengthSamples": {
+            "type": "number"
           }
         },
         "required": [
-          "assetId"
+          "assetId",
+          "lengthSamples"
         ],
         "type": "object"
       },
@@ -5362,6 +5397,18 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           },
           "transpose": {
             "type": "boolean"
+          },
+          "tape": {
+            "description": "with transpose: skip time correction (varispeed — pitch x ratio, length / ratio)",
+            "type": "boolean"
+          },
+          "algorithm": {
+            "description": "spectral (default, signalsmith-stretch) or the legacy wsola path",
+            "enum": [
+              "spectral",
+              "wsola"
+            ],
+            "type": "string"
           }
         },
         "required": [

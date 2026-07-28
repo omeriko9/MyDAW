@@ -208,21 +208,28 @@ the entire drag.
   newStartBeat?, newLengthBeats?}` (audio: trims srcOffset/len; no stretch in v1)
 - `cmd/clip.split {clipIds:[], atBeat}` → `{newClipIds:[]}` ; `cmd/clip.join {clipIds:[]}` → `{clip}`
   (midi only in v1; audio join only if contiguous same-asset)
-- `cmd/clip.stretch {clipId, ratio, transpose?}` → `{assetId, lengthSamples}` (audio only): offline
-  WSOLA time-stretch (`media/TimeStretch`) of the clip's source segment by `ratio` (out ≈ in×ratio,
+- `cmd/clip.stretch {clipId, ratio, transpose?, tape?, algorithm?}` → `{assetId, lengthSamples}`
+  (audio only): offline time-stretch of the clip's source segment by `ratio` (out ≈ in×ratio,
   pitch preserved) into a NEW derivative asset (`pcmToAssetHook` writes it under the project audio
   dir → persists like any asset). `transpose:true` instead shifts pitch by `ratio` at constant
-  length (WSOLA-stretch then resample). The clip is repointed at the derivative and resized. UI:
-  audio-clip right-click ▸ Time-Stretch (½×/2×/1.5×, Transpose ±12/+7 st).
-- `cmd/clip.processAudio {clipId, op, gainDb?, targetDb?}` → `{assetId}` (audio only): destructive
+  length; `tape:true` with transpose skips time correction (varispeed: pitch×ratio, length÷ratio).
+  Default algorithm is the vendored **signalsmith-stretch** spectral engine
+  (`third_party/signalsmith`, MIT; `spectralStretch` in `media/TimeStretch`, 8 kHz tonality limit
+  on transposition); `algorithm:"wsola"` selects the legacy in-house WSOLA. The clip is repointed
+  at the derivative and resized. UI: audio-clip right-click ▸ Time-Stretch (Time Stretch… ratio
+  dialog, Pitch Shift… semitones+cents+time-correction dialog, quick presets).
+- `cmd/clip.processAudio {clipId, op, …}` → `{assetId, lengthSamples}` (audio only): destructive
   Cubase-style Audio ▸ Process on the clip's span. `op` = `gain` (`gainDb` −48..48) | `normalize`
-  (peak to `targetDb` dBFS, default −1) | `fadeIn`/`fadeOut` (full-span linear; the clip's
-  non-destructive fade handles stay available on top) | `reverse` | `invert` (phase) | `silence` |
-  `dcRemove` (per-channel mean removed). Same edit-asset mechanics as `cmd/clip.stretch`
-  (`pcmToAssetHook` → NEW derivative asset, clip repointed at offset 0, span length unchanged;
-  undoable — undo repoints back, the edit file stays on disk). UI: audio-clip right-click ▸
-  Process (Fade In/Out, Gain ±1/3/6 dB, Normalize 0/−1/−3/−6 dBFS, Reverse, Invert Phase,
-  Remove DC Offset, Silence).
+  (`targetDb` default −1; `mode` = `peak`|`rms`|`lufs` — LUFS via `media/Loudness`) |
+  `fadeIn`/`fadeOut` (full-span, optional `curve` FadeCurve shape; the clip's non-destructive
+  fade handles stay available on top) | `reverse` | `invert` (phase) | `silence` | `dcRemove`
+  (per-channel mean removed) | `stereoFlip` (`flipMode` = `swap`|`leftToBoth`|`rightToBoth`|
+  `merge`|`subtract` (side L−R); stereo clips only) | `resample` (`targetRate` 4000..192000 —
+  length scales by target/current, pitch by current/target, Cubase tape-style semantics; the only
+  op that changes the span). Same edit-asset mechanics as `cmd/clip.stretch` (`pcmToAssetHook` →
+  NEW derivative asset, clip repointed at offset 0; undoable — undo repoints back, the edit file
+  stays on disk). UI: audio-clip right-click ▸ Process (Gain…/Normalize… dialogs, Stereo Flip ▸,
+  Resample…, Fade In/Out (render) ▸ curves, Reverse, Invert Phase, Remove DC Offset, Silence).
 - `cmd/clip.delete {clipIds:[]}` ; `cmd/clip.duplicate {clipIds:[]}` → `{clips:[]}` ;
   `cmd/clip.set {clipId, patch:{name?,color?,gain?,fadeInSec?,fadeOutSec?,fadeInCurve?,
   fadeOutCurve?,env?,muted?}}` — fade curves are `linear|expo|log|sCurve|eqPower` (gain = f(t),

@@ -1474,15 +1474,29 @@ export type ClipProcessAudioOp =
   | "reverse"
   | "invert"
   | "silence"
-  | "dcRemove";
+  | "dcRemove"
+  | "stereoFlip"
+  | "resample";
+
+export type NormalizeMode = "peak" | "rms" | "lufs";
+export type StereoFlipMode = "swap" | "leftToBoth" | "rightToBoth" | "merge" | "subtract";
 
 export interface ClipProcessAudioRequest {
   clipId: number;
   op: ClipProcessAudioOp;
   /** op "gain": dB to apply (−48..48). */
   gainDb?: number;
-  /** op "normalize": peak target in dBFS (default −1). */
+  /** op "normalize": target in dBFS/LUFS (default −1). */
   targetDb?: number;
+  /** op "normalize": measurement mode (default "peak"). */
+  mode?: NormalizeMode;
+  /** op "fadeIn"/"fadeOut": curve shape (default "linear"). */
+  curve?: FadeCurve;
+  /** op "stereoFlip": what to do with L/R (default "swap"). */
+  flipMode?: StereoFlipMode;
+  /** op "resample": target sample rate 4000..192000 — length scales by target/current,
+   *  pitch by current/target (Cubase Resample semantics). */
+  targetRate?: number;
 }
 
 /** Omitted instanceIds = recreate ALL unresolved inserts. */
@@ -1855,8 +1869,8 @@ export interface RequestMap {
   "cmd/vca.add": { req: { name?: string }; reply: { vca: Vca } };
   "cmd/vca.remove": { req: { id: number }; reply: EmptyObject };
   "cmd/vca.set": { req: { id: number; patch: { gain?: number; name?: string } }; reply: EmptyObject };
-  "cmd/clip.stretch": { req: { clipId: number; ratio: number; transpose?: boolean }; reply: { assetId: number; lengthSamples: number } };
-  "cmd/clip.processAudio": { req: ClipProcessAudioRequest; reply: { assetId: number } };
+  "cmd/clip.stretch": { req: { clipId: number; ratio: number; transpose?: boolean; tape?: boolean; algorithm?: "spectral" | "wsola" }; reply: { assetId: number; lengthSamples: number } };
+  "cmd/clip.processAudio": { req: ClipProcessAudioRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/take.create": { req: { trackId: number; clipIds: number[]; name?: string }; reply: { folder: TakeFolder } };
   "cmd/take.setComp": { req: { trackId: number; folderId: number; activeLane?: number; comp?: CompSegment[] }; reply: EmptyObject };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };

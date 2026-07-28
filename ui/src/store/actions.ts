@@ -29,6 +29,8 @@ import type {
   FadeCurve,
   ClipPatch,
   ClipProcessAudioOp,
+  NormalizeMode,
+  StereoFlipMode,
   DriverType,
   ExportCprRequest,
   ExportMidiRequest,
@@ -150,14 +152,26 @@ export const resizeClip = (
 export const splitClips = (clipIds: number[], atBeat: number) =>
   ws.request("cmd/clip.split", { clipIds, atBeat });
 
-export const stretchClip = (clipId: number, ratio: number, transpose?: boolean) =>
-  ws.request("cmd/clip.stretch", { clipId, ratio, ...(transpose ? { transpose: true } : {}) });
+export const stretchClip = (clipId: number, ratio: number, transpose?: boolean, tape?: boolean) =>
+  ws.request("cmd/clip.stretch", {
+    clipId,
+    ratio,
+    ...(transpose ? { transpose: true } : {}),
+    ...(tape ? { tape: true } : {}),
+  });
 
 /** Destructive Audio→Process (Cubase-style): writes a new edit asset, repoints the clip. */
 export const processAudioClip = (
   clipId: number,
   op: ClipProcessAudioOp,
-  args?: { gainDb?: number; targetDb?: number },
+  args?: {
+    gainDb?: number;
+    targetDb?: number;
+    mode?: NormalizeMode;
+    curve?: FadeCurve;
+    flipMode?: StereoFlipMode;
+    targetRate?: number;
+  },
 ) => ws.request("cmd/clip.processAudio", { clipId, op, ...args });
 
 export const joinClips = (clipIds: number[]) => ws.request("cmd/clip.join", { clipIds });
