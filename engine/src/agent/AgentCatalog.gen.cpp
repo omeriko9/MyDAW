@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "e40c7d4c075a364e561ea5c5fc3190e5829c14a9e9b119da80e7c05a2e3c94f1";
+const char kAgentCatalogSha256[] = "321b2a169036296fc7bd7a680c8f40a476851391260e3d7606560d26bbcef0fc";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2191,6 +2191,36 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "MidiModifiers": {
+      "additionalProperties": false,
+      "description": "Cubase-style MIDI Modifiers (playback-only): transpose + velocity shaping applied at bake time and to live thru — never written into clips or SMF exports.",
+      "properties": {
+        "transpose": {
+          "description": "semitones, -24..24",
+          "maximum": 24,
+          "minimum": -24,
+          "type": "number"
+        },
+        "velocityCompress": {
+          "description": "velocity multiplier 0.25..4 (1 = off), applied before shift",
+          "maximum": 4,
+          "minimum": 0.25,
+          "type": "number"
+        },
+        "velocityShift": {
+          "description": "added to velocity after compression, -63..63",
+          "maximum": 63,
+          "minimum": -63,
+          "type": "number"
+        }
+      },
+      "required": [
+        "transpose",
+        "velocityShift",
+        "velocityCompress"
+      ],
+      "type": "object"
+    },
     "MidiPreviewRequest": {
       "additionalProperties": false,
       "description": "Live note audition — NOT undoable, no projectChanged; injected into the track's live MIDI path (audible while stopped, regardless of arm).",
@@ -3626,6 +3656,9 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "kind": {
           "$ref": "#/schemas/TrackKind"
         },
+        "midiMod": {
+          "$ref": "#/schemas/MidiModifiers"
+        },
         "midiOutChannel": {
           "description": "MIDI output channel (kind \"midi\"/\"instrument\"): 0/absent = as played (events keep their own channel), 1..16 = force this track's MIDI onto that channel — how several MIDI tracks drive one multitimbral instrument (SPEC §6).",
           "type": "number"
@@ -3881,6 +3914,28 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "inputDevice": {
           "type": "string"
+        },
+        "midiMod": {
+          "additionalProperties": false,
+          "description": "kind \"midi\"/\"instrument\" — partial MIDI-modifiers patch; absent fields keep their values.",
+          "properties": {
+            "transpose": {
+              "maximum": 24,
+              "minimum": -24,
+              "type": "number"
+            },
+            "velocityCompress": {
+              "maximum": 4,
+              "minimum": 0.25,
+              "type": "number"
+            },
+            "velocityShift": {
+              "maximum": 63,
+              "minimum": -63,
+              "type": "number"
+            }
+          },
+          "type": "object"
         },
         "midiOutChannel": {
           "description": "kind \"midi\"/\"instrument\" — force this track's MIDI onto channel 1..16 (for multitimbral instruments); 0 = as played.",

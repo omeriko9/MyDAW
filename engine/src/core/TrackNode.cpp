@@ -503,6 +503,7 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
         for (MidiEvent e : *liveMidi) {
             if (cfg_.liveMidi || e.isNoteOff() || e.isAllNotesOff() || e.isAllSoundOff()) {
                 applyOutChannelRt(e); // play what the track plays, keyboard channel or not
+                applyMidiModRt(e);    // thru speaks the same modifiers as playback
                 if (midiScratch_.add(e))
                     trackLiveNoteRt(e);
                 else if (e.isNoteOff())
@@ -515,6 +516,7 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
         for (MidiEvent e : injectedMidi_) {
             e.sampleOffset = 0;
             applyOutChannelRt(e);
+            applyMidiModRt(e); // audition sounds exactly like playback would
             if (midiScratch_.add(e))
                 trackLiveNoteRt(e);
             else if (e.isNoteOff())

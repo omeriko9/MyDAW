@@ -109,6 +109,17 @@ struct AutomationLane {
     std::vector<AutomationPoint> points; // kept sorted by beat
 };
 
+// Cubase-style MIDI Modifiers (playback-only, SPEC §6): applied at bake time and to
+// live thru on MIDI/Instrument tracks — never written into clips or SMF exports.
+struct MidiModifiers {
+    int transpose = 0;             // semitones, clamped ±24
+    int velocityShift = 0;         // added after compression, clamped ±63
+    double velocityCompress = 1.0; // multiplier, clamped 0.25..4
+    bool isDefault() const {
+        return transpose == 0 && velocityShift == 0 && velocityCompress == 1.0;
+    }
+};
+
 struct Send {
     uint64_t destTrackId = 0; // must reference a bus track
     double level = 1.0;       // linear
@@ -459,6 +470,10 @@ struct Track {
     // that channel. This is what lets several MIDI tracks drive ONE multitimbral
     // instrument, each on its own channel (SPEC §6).
     int midiOutChannel = 0;
+
+    // MIDI Modifiers (MIDI/Instrument tracks; playback-only). Omitted from JSON when
+    // default. See MidiModifiers above.
+    MidiModifiers midiMod;
 
     // VCA group membership (0 = none). The VCA's gain multiplies this track's fader.
     uint64_t vcaId = 0;

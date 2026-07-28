@@ -448,6 +448,25 @@ async function main() {
       `midi len ${mcNow.lengthBeats}->${mcAfter.lengthBeats} note ${firstNote.lengthBeats}->${nAfter?.lengthBeats}; audio off ${ac.srcOffsetSamples}->${acAfter.srcOffsetSamples} len ${ac.lengthSamples}->${acAfter.lengthSamples}`);
   }
 
+  // MIDI Modifiers: partial patch + clamps round-trip on a midi track, rejected on audio
+  {
+    await req("cmd/track.set", { trackId: midiT.id, patch: { midiMod: { transpose: 40, velocityShift: -10 } } });
+    await req("cmd/track.set", { trackId: midiT.id, patch: { midiMod: { velocityCompress: 0.5 } } });
+    const proj = (await req("session/hello", { clientName: "smoke" })).project;
+    const mm = proj.tracks.find((t) => t.id === midiT.id)?.midiMod;
+    const audioErr = await req("cmd/track.set", { trackId: audioT.id, patch: { midiMod: { transpose: 5 } } })
+      .then(() => null).catch((e) => e.message);
+    const ok =
+      mm?.transpose === 24 && // clamped from 40
+      mm?.velocityShift === -10 && // survived the second (partial) patch
+      mm?.velocityCompress === 0.5 &&
+      typeof audioErr === "string" && audioErr.includes("bad_request");
+    await req("edit/undo", {});
+    await req("edit/undo", {});
+    report("track.set midiMod (partial patch, clamps, midi-only)", ok,
+      `mm=${JSON.stringify(mm)} audioErr=${audioErr ? "rejected" : "ACCEPTED?!"}`);
+  }
+
   // save / load roundtrip
   const projDir = path.join(TMP, "Smoke.mydaw");
   await req("project/saveAs", { path: projDir });

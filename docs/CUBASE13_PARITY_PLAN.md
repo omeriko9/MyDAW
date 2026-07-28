@@ -253,6 +253,13 @@ Depends on Swipe 3 (parameterized ops become chain entries verbatim).
 
 ### Swipe 8 — MIDI FX: track modifiers first, real inserts later 🎛 — **Cost: M for tier 1, XL for tier 2 · Value: ★★★ · ROI: tier 1 good, tier 2 low-until-asked**
 
+> **TIER 1 STATUS: SHIPPED 2026-07-28.** Track.midiMod {transpose, velocityShift,
+> velocityCompress} — bake-time application (both regular + comp-path note bakes, stacked with
+> the Transpose track) + live/injected thru via TrackNode::applyMidiModRt; Inspector Modifiers
+> row; partial-merge cmd/track.set patch with clamps, midi/instrument-only. Random/range
+> filters and CPR modifier import remain open. Extract MIDI Automation (deferred here from
+> Swipe 1) still needs a CC automation target — goes with tier 2.
+
 Tier 1 (**do**): Cubase "MIDI Modifiers" as a Track section — transpose, velocity shift/compress, random, range filter. Applied at bake time (`AudioGraph.cpp:399` next to the transpose-track hook) + in the live-thru path (`applyOutChannelRt` neighbor). No plugin infrastructure needed; playback-only, like Cubase. Cost M, value ★★★ (also improves CPR import fidelity — modifiers exist in .cpr).
 
 Tier 2 (**defer until demanded**): real MIDI insert chain (MIDI-out from `IInsertNode`, `Track.midiInserts`, RT scheduling rework in `TrackNode.cpp:275-340`) + starter effects (Arpache-style arpeggiator, Chorder, MIDI Echo, live Quantizer, StepDesigner). Cost XL. Alternative cheap path: implement Chorder/arp/echo as **offline** Functions first (Swipe 1's `add`-capable patch makes these one-liners) — 80% of the musical value at 5% of the cost.

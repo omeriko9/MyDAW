@@ -340,6 +340,19 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
         // stale value on a converted track can't silently re-stamp anything.
         if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
             cfg.midiOutChannel = std::clamp(t.midiOutChannel, 0, 16);
+        // MIDI Modifiers (playback-only, SPEC §6): folded into the baked note events
+        // below and applied to live thru in TrackNode. MIDI/Instrument tracks only.
+        const MidiModifiers mm = (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
+                                     ? t.midiMod
+                                     : MidiModifiers{};
+        cfg.midiTranspose = mm.transpose;
+        cfg.midiVelShift = mm.velocityShift;
+        cfg.midiVelCompress = static_cast<float>(mm.velocityCompress);
+        const auto modVel = [&mm](int v) {
+            return static_cast<uint8_t>(std::clamp(
+                static_cast<int>(std::lround(v * mm.velocityCompress)) + mm.velocityShift, 1,
+                127));
+        };
 
         // ---- clip sources (audio + baked MIDI) ----------------------------------
         const bool frozen = !busLike && t.frozen && t.frozenAssetId != 0;
@@ -404,14 +417,13 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                             if (off <= on)
                                 off = on + 1;
                             TrackNode::NoteEvent ev;
-                            ev.pitch = static_cast<uint8_t>(
-                                std::clamp(note.pitch + transposeAt(onB), 0, 127));
+                            ev.pitch = static_cast<uint8_t>(std::clamp(
+                                note.pitch + transposeAt(onB) + mm.transpose, 0, 127));
                             ev.channel =
                                 static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                             ev.sample = on;
                             ev.on = 1;
-                            ev.velocity =
-                                static_cast<uint8_t>(std::clamp(note.velocity, 1, 127));
+                            ev.velocity = modVel(note.velocity);
                             cfg.noteEvents.push_back(ev);
                             ev.sample = off;
                             ev.on = 0;
@@ -538,14 +550,13 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                     if (off <= on)
                                         off = on + 1;
                                     TrackNode::NoteEvent ev;
-                                    ev.pitch = static_cast<uint8_t>(
-                                        std::clamp(note.pitch + transposeAt(onB), 0, 127));
+                                    ev.pitch = static_cast<uint8_t>(std::clamp(
+                                        note.pitch + transposeAt(onB) + mm.transpose, 0, 127));
                                     ev.channel =
                                         static_cast<uint8_t>(std::clamp(note.channel, 0, 15));
                                     ev.sample = on;
                                     ev.on = 1;
-                                    ev.velocity =
-                                        static_cast<uint8_t>(std::clamp(note.velocity, 1, 127));
+                                    ev.velocity = modVel(note.velocity);
                                     cfg.noteEvents.push_back(ev);
                                     ev.sample = off;
                                     ev.on = 0;

@@ -39,6 +39,7 @@ import {
   errText,
 } from "./fields";
 import { TextInput } from "../common/TextInput";
+import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import type { SelectOption } from "../common/Select";
 import { Toggle } from "../common/Toggle";
@@ -320,6 +321,49 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
             options={midiChannelOptions}
             onChange={(v) => void setTrack(id, { midiOutChannel: Number(v) })}
             title="MIDI output channel — force this track's notes onto one channel of a multitimbral instrument"
+          />
+        </div>
+      )}
+
+      {(isMidi || isInstrument) && (
+        <div className="insp-row">
+          <span className="insp-label" title="Cubase-style MIDI Modifiers — playback-only, never written into clips or exports">
+            Modifiers
+          </span>
+          <NumberDrag
+            value={track.midiMod?.transpose ?? 0}
+            min={-24}
+            max={24}
+            step={1}
+            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)} st`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { transpose: Math.round(v) } })}
+            width={52}
+            title="Transpose (playback-only, ±24 semitones)"
+          />
+          <NumberDrag
+            value={track.midiMod?.velocityShift ?? 0}
+            min={-63}
+            max={63}
+            step={1}
+            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v)} vel`}
+            onChange={() => undefined}
+            onCommit={(v) => void setTrack(id, { midiMod: { velocityShift: Math.round(v) } })}
+            width={56}
+            title="Velocity shift (added after compression, ±63)"
+          />
+          <NumberDrag
+            value={(track.midiMod?.velocityCompress ?? 1) * 100}
+            min={25}
+            max={400}
+            step={5}
+            format={(v) => `${Math.round(v)}%`}
+            onChange={() => undefined}
+            onCommit={(v) =>
+              void setTrack(id, { midiMod: { velocityCompress: Math.round(v) / 100 } })
+            }
+            width={48}
+            title="Velocity compression (multiplier, 100% = off)"
           />
         </div>
       )}

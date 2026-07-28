@@ -1347,6 +1347,29 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         any = true;
         mixerOnly = false;
     }
+    if (hasKey(patch, "midiMod") && patch["midiMod"].is_object()) {
+        if (t->kind != TrackKind::Midi && t->kind != TrackKind::Instrument)
+            return r.fail("bad_request",
+                          "MIDI modifiers apply to MIDI/Instrument tracks only");
+        const json& mm = patch["midiMod"];
+        MidiModifiers next = t->midiMod; // partial patch — absent fields keep values
+        if (hasKey(mm, "transpose"))
+            next.transpose = std::clamp(getOr<int>(mm, "transpose", next.transpose), -24, 24);
+        if (hasKey(mm, "velocityShift"))
+            next.velocityShift =
+                std::clamp(getOr<int>(mm, "velocityShift", next.velocityShift), -63, 63);
+        if (hasKey(mm, "velocityCompress"))
+            next.velocityCompress = std::clamp(
+                getOr<double>(mm, "velocityCompress", next.velocityCompress), 0.25, 4.0);
+        if (next.transpose != t->midiMod.transpose ||
+            next.velocityShift != t->midiMod.velocityShift ||
+            next.velocityCompress != t->midiMod.velocityCompress) {
+            t->midiMod = next;
+            r.structural = true; // modifiers are baked into the graph's note events
+        }
+        any = true;
+        mixerOnly = false;
+    }
     if (hasTarget) {
         t->outputTarget = newTarget;
         any = true;

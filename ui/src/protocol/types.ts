@@ -131,6 +131,16 @@ export interface PluginInstance {
   sidechainSource?: number;
 }
 
+/** Cubase-style MIDI Modifiers (Track.midiMod, playback-only, SPEC §6). */
+export interface MidiModifiers {
+  /** semitones, ±24 */
+  transpose: number;
+  /** added after compression, ±63 */
+  velocityShift: number;
+  /** multiplier 0.25..4 (1 = off) */
+  velocityCompress: number;
+}
+
 export interface Note {
   id: number;
   /** 0..127 */
@@ -346,6 +356,9 @@ export interface Track {
    * MIDI tracks drive one multitimbral instrument (SPEC §6).
    */
   midiOutChannel?: number;
+  /** Cubase-style MIDI Modifiers (kind "midi"/"instrument"): playback-only transpose +
+   *  velocity shaping — never written into clips or SMF exports. Absent = defaults. */
+  midiMod?: MidiModifiers;
   /** VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader. */
   vcaId?: number;
   /** Channel EQ — absent/empty bands and not bypassed => no EQ (SPEC §6). */
@@ -716,6 +729,8 @@ export interface TrackPatch {
   midiTarget?: number;
   /** kind "midi"/"instrument" — force this track's MIDI onto channel 1..16; 0 = as played. */
   midiOutChannel?: number;
+  /** Partial MIDI-modifiers patch (kind "midi"/"instrument"): absent fields keep values. */
+  midiMod?: Partial<MidiModifiers>;
   /** VCA-group id this track belongs to; 0 clears. */
   vcaId?: number;
 }

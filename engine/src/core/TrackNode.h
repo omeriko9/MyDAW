@@ -141,6 +141,12 @@ public:
         // this track ORIGINATES onto that channel. Feeder-delivered events are exempt —
         // each feeder already stamped its own channel, which is the point of the routing.
         int midiOutChannel = 0;
+        // MIDI Modifiers (Track::midiMod, playback-only): the baked note events already
+        // carry them; these apply the SAME transform to live/injected events at RT time
+        // so thru matches playback. Feeder-delivered events are exempt (origin applies).
+        int midiTranspose = 0;
+        int midiVelShift = 0;
+        float midiVelCompress = 1.0f;
     };
 
     explicit TrackNode(Config&& cfg);
@@ -253,6 +259,22 @@ private:
         if (cfg_.midiOutChannel > 0 && e.data[0] >= 0x80 && e.data[0] < 0xF0)
             e.data[0] = static_cast<uint8_t>((e.data[0] & 0xF0) |
                                              static_cast<uint8_t>(cfg_.midiOutChannel - 1));
+    }
+
+    /// MIDI Modifiers on live/injected events (baked events got them at bake time):
+    /// transpose pitch on note-on AND note-off identically (so the ledger's release
+    /// matches), compress+shift velocity on note-ons only.
+    void applyMidiModRt(MidiEvent& e) const noexcept {
+        if (cfg_.midiTranspose != 0 && (e.isNoteOn() || e.isNoteOff())) {
+            const int p = e.data[1] + cfg_.midiTranspose;
+            e.data[1] = static_cast<uint8_t>(p < 0 ? 0 : (p > 127 ? 127 : p));
+        }
+        if (e.isNoteOn() && e.data[2] > 0 &&
+            (cfg_.midiVelShift != 0 || cfg_.midiVelCompress != 1.0f)) {
+            const int v =
+                static_cast<int>(e.data[2] * cfg_.midiVelCompress + 0.5f) + cfg_.midiVelShift;
+            e.data[2] = static_cast<uint8_t>(v < 1 ? 1 : (v > 127 ? 127 : v));
+        }
     }
 
     Config cfg_;
