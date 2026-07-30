@@ -127,6 +127,8 @@ export interface KeyContextHandlers {
   nudge?: (dx: -1 | 0 | 1, dy: -1 | 0 | 1, big: boolean) => boolean | void;
   /** F — fit the selection (or all content) into view. Return true to consume. */
   zoomToFit?: () => boolean | void;
+  /** Q — the pane's OWN quantize (its toolbar grid/strength/swing), else project grid. */
+  quantize?: () => void;
 }
 
 export type KeyContextName = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic";
@@ -412,9 +414,10 @@ function soloSelectedTracks(): void {
 }
 
 /**
- * "Q" / transport Q button (PINNED name — TransportBar imports this): quantize the
- * piano roll's selected notes (or the whole active clip) when it is visible, else the
- * notes of every selected MIDI clip. Grid step/swing come from project.grid.
+ * Transport Q button, and Q from panes with no quantize handler of their own (PINNED
+ * name — TransportBar imports this): quantize the piano roll's selected notes (or the
+ * whole active clip) when it is visible, else the notes of every selected MIDI clip.
+ * Grid step/swing come from project.grid.
  */
 export function quantizeSelection(): void {
   const s = useStore.getState();
@@ -511,7 +514,13 @@ function onKeyDown(e: KeyboardEvent): void {
   if (isEditableTarget(e.target)) return;
   // Menus/modals own the keyboard (incl. their Esc) — except transport keys inside
   // modals that opt in (Room View): play/stop/locate must work in every view.
-  if (uiBlocked() && !(blockedButTransportAllowed() && isTransportKey(e))) return;
+  if (uiBlocked() && !(blockedButTransportAllowed() && isTransportKey(e))) {
+    // Space must not reach the browser here: the focused control is usually a button
+    // (Modal auto-focuses the title-bar X), and its default activation would let the
+    // transport reflex dismiss the dialog and discard everything typed into it.
+    if (e.key === " ") e.preventDefault();
+    return;
+  }
 
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -710,7 +719,12 @@ function onKeyDown(e: KeyboardEvent): void {
     }
     case "q":
       consume();
-      if (!e.repeat) quantizeSelection();
+      // The piano roll advertises Q for ITS quantize button (own grid/strength/swing);
+      // panes without a handler fall back to the project-grid quantize below.
+      if (!e.repeat) {
+        if (ctx?.quantize) ctx.quantize();
+        else quantizeSelection();
+      }
       return;
     case "p":
       consume();

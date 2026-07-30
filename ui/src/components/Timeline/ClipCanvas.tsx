@@ -244,6 +244,8 @@ type Drag =
       kind: "resize";
       clipId: number;
       edge: ClipEdge;
+      /** Press position, for the click-vs-drag threshold (the edge is off-grid in general). */
+      grabBeat: number;
       origStart: number;
       origLen: number;
       start: number;
@@ -1250,6 +1252,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           kind: "resize",
           clipId: clip.id,
           edge: hit.zone,
+          grabBeat: rawBeat,
           origStart: clip.startBeat,
           origLen: len,
           start: clip.startBeat,
@@ -1423,6 +1426,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         return;
       }
       case "resize": {
+        // A 1-2 px twitch on the edge is a click, not a resize: without a threshold the
+        // very first move snaps an off-grid edge onto the grid and silently re-quantizes
+        // the clip. Same gate (and unit: beats × zoomX = px) as the "move" branch.
+        if (!d.moved && Math.abs((rawBeat - d.grabBeat) * st.vp.zoomX) <= MOVE_THRESHOLD_PX)
+          return;
         d.moved = true;
         if (d.edge === "l") {
           const ns = clamp(
@@ -1678,6 +1686,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
               showToast("Could not create a track for the dropped clip");
             }
           })();
+          break;
+        }
+        // A drop the UI rejected (red ghost + "· incompatible track" HUD) cancels the WHOLE
+        // gesture: committing only its horizontal half would contradict the feedback the
+        // user just saw, and with Alt it would leave a stray copy on the source track.
+        if (d.targetTrackId !== null && !d.valid) {
+          showToast("That track can't hold this clip");
           break;
         }
         const tgt =

@@ -646,6 +646,8 @@ export interface HelloReply {
   automationWrite?: boolean;
   /** MIDI control-surface maps + learn-arm — absent on older engines */
   midiMaps?: MidiMapsState;
+  /** engine-side unsaved-changes flag — absent on older engines */
+  dirty?: boolean;
 }
 
 export interface ProjectLoadRequest {

@@ -217,13 +217,28 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
     const int64_t ls = loopStart_.load(std::memory_order_acquire);
     const int64_t le = loopEnd_.load(std::memory_order_acquire);
 
-    if (loop && le > ls && pos < le && pos + frames > le) {
-        const int first = static_cast<int>(le - pos);
-        const int rest = frames - first;
-        out[0] = BlockSpan{pos, first, false};
-        out[1] = BlockSpan{ls, rest, true};
-        playhead_.store(ls + rest, std::memory_order_release);
-        return 2;
+    if (loop && le > ls) {
+        if (pos < le && pos + frames > le) {
+            const int first = static_cast<int>(le - pos);
+            const int rest = frames - first;
+            out[0] = BlockSpan{pos, first, false};
+            out[1] = BlockSpan{ls, rest, true};
+            playhead_.store(ls + rest, std::memory_order_release);
+            return 2;
+        }
+        if (pos == le) {
+            // Boundary landed EXACTLY on a block edge, so the split above never fired:
+            // the previous block ended ON le (pos + frames > le was false) and this one
+            // starts there (pos < le is false), which used to skip the wrap forever. A
+            // whole-bar cycle at an integer tempo hits this every time — 8 beats at
+            // 120 bpm / 48 kHz is 192000 frames, exactly 3000 64-frame blocks. Same
+            // shape as the arranger's block-edge jump above.
+            // Only pos == le wraps: a playhead located BEYOND the right locator keeps
+            // playing linearly, as it does in Cubase.
+            out[0] = BlockSpan{ls, frames, true};
+            playhead_.store(ls + frames, std::memory_order_release);
+            return 1;
+        }
     }
 
     out[0] = BlockSpan{pos, frames, false};

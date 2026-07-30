@@ -9,15 +9,28 @@ browser live in [DEBUGGING_UI.md](DEBUGGING_UI.md), which you should read first.
 | | |
 |---|---|
 | Cases authored | 196 (14 areas × 14) — [ui-cases.json](../scripts/ui-cases.json) |
-| Executed as an automated pass | **none yet** — the case file is a work list, not a green suite |
-| Executed by hand during authoring | ~20, in the live UI |
-| Bug hypotheses raised | 161 (45 high-confidence) |
+| Executed in a real browser | **196 / 196** — 161 PASS, 34 FAIL, 1 BLOCKED |
+| Bugs found by execution | **46 app bugs** (2 high, 16 medium, 25 low, 3 cosmetic) + 26 cases that were themselves wrong |
+| Bug hypotheses raised by source review | 161 (45 high-confidence) |
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
-| Fixed and re-verified | see the ledger below |
+| Fixed and verified | 60+ — see the ledger below |
 
-The cases were written by reading each area's source, so they cite real selectors
-and real aria labels, but **an unexecuted case is not evidence of anything**. Treat
-the file as a backlog: execute an area, record what happened, fix what breaks.
+That "26 cases were themselves wrong" number is the important one: better than a
+quarter of the failures were the *case* being mistaken, not the app. A case authored
+from source and never run is a hypothesis, not evidence — which is exactly why the
+execution pass mattered, and why anyone re-running these should keep separating "the
+app is wrong" from "the case is wrong".
+
+## Running it in parallel
+
+The first full pass ran through the Chrome DevTools MCP, which exposes one browser with
+one selected page — so areas had to run one at a time: **3.4 hours, 2,075 tool calls**,
+almost all of it serialization. Use [ui-drive.mjs](../scripts/ui-drive.mjs) instead
+(documented in [DEBUGGING_UI.md](DEBUGGING_UI.md#running-many-browsers-at-once-scriptsui-drivemjs)):
+each agent gets its own slot — own engine, own Chrome, own throwaway `APPDATA` — so a
+pass costs roughly the slowest area rather than the sum of all of them. Its input also
+goes through CDP's Input domain, so keyboard events carry what a real layout sends;
+synthetic events silently pass shortcuts that are dead in real use.
 
 ## Why there is no `npm run test:ui`
 

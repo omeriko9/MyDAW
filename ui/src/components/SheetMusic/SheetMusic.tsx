@@ -113,6 +113,11 @@ function pitchFromStep(step: number, fifths: number, transpose: number): number 
   return Math.max(0, Math.min(127, written - transpose));
 }
 
+/** A key signature moved by `semis`, folded back onto the circle of fifths (fewest accidentals). */
+function fifthsShifted(fifths: number, semis: number): number {
+  return ((((fifths + semis * 7 + 6) % 12) + 12) % 12) - 6;
+}
+
 interface Sourced {
   track: Track | null;
   clips: MidiClip[];
@@ -398,11 +403,17 @@ export default function SheetMusic() {
     }
     const wrap = pageRefs.current[pos.page];
     const top = wrap ? wrap.offsetTop : 0;
-    const y = top + marginRef.current + (pos.page === 0 ? headerRef.current : 0) + pos.system.y;
+    // The layout is in viewBox user units, but max-width:100% shrinks the SVG in a narrow
+    // pane while the playhead is a plain DOM element in CSS pixels — so every user-unit
+    // value has to be scaled, the inverse of what pageCoords does to a click.
+    const svg = wrap?.querySelector("svg.sm-page") as SVGSVGElement | null;
+    const cssW = svg ? svg.getBoundingClientRect().width : 0;
+    const pxPerUnit = svg && cssW > 0 ? cssW / Math.max(1, svg.viewBox.baseVal.width) : 1;
+    const y = top + (marginRef.current + (pos.page === 0 ? headerRef.current : 0) + pos.system.y) * pxPerUnit;
     ph.style.opacity = "1";
-    ph.style.height = `${pos.system.height + lay.sp * 2.4}px`;
-    ph.style.transform = `translate(${pos.x + marginRef.current + leftPadRef.current}px, ${
-      y - lay.sp * 1.2
+    ph.style.height = `${(pos.system.height + lay.sp * 2.4) * pxPerUnit}px`;
+    ph.style.transform = `translate(${(pos.x + marginRef.current + leftPadRef.current) * pxPerUnit}px, ${
+      y - lay.sp * 1.2 * pxPerUnit
     }px)`;
 
     const next = new Set<number>();
@@ -973,17 +984,51 @@ export default function SheetMusic() {
   }, []);
 
   const doExport = useCallback(() => {
-    const xml = toMusicXml(measures, {
+    // MusicXML <pitch> is what SOUNDS unless an <attributes><transpose> says otherwise, and we
+    // emit none — so a transposed view has to be re-engraved at concert pitch (key included),
+    // or MuseScore/Dorico would play the part in the wrong key.
+    const outFifths = transpose === 0 ? fifths : fifthsShifted(fifths, -transpose);
+    const outMeasures =
+      transpose === 0
+        ? measures
+        : buildScore(allNotes, {
+            meter: gathered.meter,
+            fifths: outFifths,
+            quantize,
+            // the hands divide by WRITTEN pitch — shift the split so the staves keep their notes
+            splitPitch: splitPitch === null ? null : splitPitch - transpose,
+            transpose: 0,
+            minMeasures: gathered.minMeasures,
+          });
+    const xml = toMusicXml(outMeasures, {
       title: project?.name || "Untitled",
       partName: track?.name || "Music",
       clefs: CLEFS_FOR[clefMode],
-      fifths,
+      fifths: outFifths,
       tempo: project ? bpmAtBeat(gathered.originBeat, project.tempoMap) : undefined,
     });
     const base = `${project?.name || "score"}${track ? ` - ${track.name}` : ""}`.replace(/[\\/:*?"<>|]/g, "_");
     downloadMusicXml(xml, base);
-    showToast("MusicXML exported — open it in MuseScore, Dorico or Sibelius.", "success");
-  }, [measures, project, track, clefMode, fifths, gathered.originBeat]);
+    showToast(
+      transpose === 0
+        ? "MusicXML exported — open it in MuseScore, Dorico or Sibelius."
+        : "MusicXML exported at concert pitch — open it in MuseScore, Dorico or Sibelius.",
+      "success",
+    );
+  }, [
+    allNotes,
+    measures,
+    project,
+    track,
+    clefMode,
+    fifths,
+    gathered.meter,
+    gathered.minMeasures,
+    gathered.originBeat,
+    quantize,
+    splitPitch,
+    transpose,
+  ]);
 
   const hasMusic = allNotes.length > 0;
   // A clip with no notes yet still engraves as empty bars, and that staff is the only place edit

@@ -131,6 +131,11 @@ export function Fader({
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || e.button !== 0) return;
     e.preventDefault();
+    // preventDefault above also suppresses the browser's focus-on-press, so take focus
+    // by hand — otherwise the arrow-key stepping below is unreachable with a mouse and
+    // the presses fall through to the global shortcut layer. preventScroll: focusing must
+    // not yank the mixer's scroller when a partly visible strip is clicked.
+    e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
     const y = localY(e.clientY);
     const pos = gainToPos(value);

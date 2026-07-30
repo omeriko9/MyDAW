@@ -238,9 +238,10 @@ function FadeModal({ opts, onClose }: { opts: FadeProcessDialogOptions; onClose:
               step={0.05}
               defaultValue={Math.round(lengthSec * 1000) / 1000}
               onChange={(e) => {
+                // an emptied (or unparseable) field reads as "no fade" — keeping the
+                // previous state would silently apply the prefill the user just cleared
                 const v = parseFloat(e.target.value);
-                if (Number.isFinite(v))
-                  setLengthSec(Math.max(0, Math.min(opts.length!.maxSec, v)));
+                setLengthSec(Number.isFinite(v) ? Math.max(0, Math.min(opts.length!.maxSec, v)) : 0);
               }}
               // onChange already clamped into state; since the field is uncontrolled, an
               // out-of-range entry would keep showing while Apply used the clamped value.

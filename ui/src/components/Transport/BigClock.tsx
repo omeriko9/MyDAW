@@ -26,10 +26,12 @@ export default function BigClock() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const barsRef = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef<HTMLDivElement | null>(null);
+  // The default lives HERE, not in the render below: 0 is a legal coordinate (parked
+  // against the left/top edge), so it must never be mistaken for "no saved position".
   const posRef = useRef(
     loadPref<{ x: number; y: number }>(
       POS_PREF,
-      { x: 0, y: 0 },
+      { x: Math.max(0, window.innerWidth - 300), y: 64 },
       shapeOf({ x: isFiniteNumber, y: isFiniteNumber }),
     ),
   );
@@ -84,7 +86,7 @@ export default function BigClock() {
 
   if (!open || !hasProject) return null;
 
-  const pos = clampPos(posRef.current.x || window.innerWidth - 300, posRef.current.y || 64);
+  const pos = clampPos(posRef.current.x, posRef.current.y);
 
   return (
     <div

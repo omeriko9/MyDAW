@@ -15,6 +15,7 @@ import { setTempoMap, setTimeSigMap } from "../../store/actions";
 import { bpmAtBeat, formatBarsBeats, parseBarsBeats } from "../../lib/time";
 import type { TempoPoint, TimeSigEntry } from "../../protocol/types";
 import { IconButton } from "../common/IconButton";
+import { showToast } from "../common/ToastHost";
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import { TextInput } from "../common/TextInput";
@@ -105,7 +106,12 @@ export default function TempoMapEditor() {
 
   const addTempoAtPlayhead = () => {
     const beat = Math.max(0, transportBus.last?.beat ?? 0);
-    if (tempoMap.some((e) => Math.abs(e.beat - beat) < 1e-6)) return; // entry already there
+    if (tempoMap.some((e) => Math.abs(e.beat - beat) < 1e-6)) {
+      // Entry 0 is pinned to beat 0, so at the project start this fires on a fresh project —
+      // the engine wants strictly ascending beats, so say why instead of doing nothing.
+      showToast("There is already a tempo change at the playhead", "info");
+      return;
+    }
     commitTempo([...tempoMap, { beat, bpm: bpmAtBeat(beat, tempoMap) }]);
   };
 
@@ -156,7 +162,12 @@ export default function TempoMapEditor() {
           )}
         </div>
       ))}
-      <button type="button" className="btn" onClick={addTempoAtPlayhead}>
+      <button
+        type="button"
+        className="btn"
+        title="Add a tempo change at the playhead"
+        onClick={addTempoAtPlayhead}
+      >
         + Add at playhead
       </button>
 

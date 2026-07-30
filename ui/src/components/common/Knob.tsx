@@ -123,6 +123,11 @@ export function Knob({
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (disabled || e.button !== 0) return;
     e.preventDefault();
+    // preventDefault above also suppresses the browser's focus-on-press, so take focus by
+    // hand — otherwise the arrow-key stepping below is unreachable with a mouse and the
+    // presses fall through to the global shortcut layer. preventScroll: focusing must not
+    // yank the surrounding scroller when a partly visible control is clicked.
+    e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { lastY: e.clientY, acc: value, startVal: value, moved: false };
     setDragging(true);

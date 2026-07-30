@@ -79,6 +79,45 @@ and CrUX reporting are disabled.
 Memory-debugging and extension tools are opt-in behind `--memoryDebugging` and
 `--categoryExtensions`; add them to the args array if you need them.
 
+## Running many browsers at once (`scripts/ui-drive.mjs`)
+
+The MCP server hands out ONE browser with one "selected page". Two agents driving it
+concurrently clobber each other's page selection mid-action, so an MCP-driven test pass
+has to run strictly sequentially — a 14-area pass took 3.4 hours and 2,075 tool calls,
+almost all of it waiting.
+
+[ui-drive.mjs](../scripts/ui-drive.mjs) removes that limit. Each **slot** is a fully
+isolated world — its own engine port (`8620+slot`), its own throwaway `APPDATA`, its own
+Chrome with its own `--user-data-dir` and debug port (`9230+slot`) — so N agents run in
+parallel. It uses only Node built-ins (Node 22's global `fetch` + `WebSocket`); no
+puppeteer/playwright dependency is added to the repo.
+
+```bash
+node scripts/ui-drive.mjs up    --slot 2 --fixture   # engine + Chrome + 4 tracks, MIDI clip, audio clip, marker
+node scripts/ui-drive.mjs eval  --slot 2 --code "document.title"
+node scripts/ui-drive.mjs eval  --slot 2 --file snippet.js      # multi-line
+node scripts/ui-drive.mjs key   --slot 2 --key "Control+Alt+Shift+1"
+node scripts/ui-drive.mjs click --slot 2 --x 640 --y 285 [--button right] [--clicks 2]
+node scripts/ui-drive.mjs drag  --slot 2 --from 100,200 --to 300,200 [--steps 12]
+node scripts/ui-drive.mjs shot  --slot 2 --out shot.png
+node scripts/ui-drive.mjs down  --slot 2                        # always, even on failure
+```
+
+Each command prints one JSON line. `eval` evaluates an *expression* and awaits promises,
+so wrap async work as `(async () => { ... })()`.
+
+**Input goes through CDP's Input domain, so events are TRUSTED and carry what a real
+layout would send.** This is not a nicety — `Control+Alt+Shift+1` arrives as `key:"!"`,
+`code:"Digit1"`, exactly like a physical US keyboard. The MCP's `press_key` delivers
+`key:"1"` for the same combo, which silently *passes* shortcuts that are dead in real
+use; that difference hid a broken save-layout shortcut here. Note the same class of trap
+inside the harness itself: space must be sent as `key:" "` with `code:"Space"`, not
+`key:"Space"`, or every Space-driven check is a silent no-op.
+
+Two operational notes: `--user-data-dir` is mandatory (see the warning below), and you
+must not rebuild `ui/dist` or the engine binary while slots are running — the agents are
+serving that directory and holding that exe, and a link will fail with LNK1104.
+
 ## Taking control of your own browser
 
 By default the server launches its own Chrome with its own profile directory. That

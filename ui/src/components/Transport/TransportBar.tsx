@@ -46,6 +46,7 @@ import { Select } from "../common/Select";
 import { NumberDrag } from "../common/NumberDrag";
 import { Meter } from "../common/Meter";
 import { Tooltip } from "../common/Tooltip";
+import { showToast } from "../common/ToastHost";
 import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
 import TempoMapEditor from "./TempoMapEditor";
@@ -181,6 +182,18 @@ export function SnapCluster() {
     swingPendingRef.current = null;
     setGridLocal({ swing: v });
   };
+
+  // "Bar" snap persists as an ABSOLUTE division in beats, so a time-signature change
+  // would otherwise leave it on the old bar length while the select falls back to a dead,
+  // disabled "custom" entry. Re-derive it only when the division still IS the previous bar
+  // length (i.e. bar mode) — genuine custom divisions are left alone.
+  const prevBpbRef = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = prevBpbRef.current;
+    prevBpbRef.current = project ? beatsPerBar : null;
+    if (!project || prev === null || prev === beatsPerBar) return;
+    if (grid.snap && approx(grid.division, prev)) setGridLocal({ division: beatsPerBar });
+  }, [project, beatsPerBar, grid.snap, grid.division]);
 
   // close swing popover on outside click / Escape
   useEffect(() => {
@@ -355,8 +368,11 @@ export function TempoSigCluster() {
   );
 }
 
-/* Time signature — "N/D" text; double-click to type a new value (validated 1..32 / 1..32,
-   mirroring the engine's accepted range). Escape reverts, Enter/blur commits. */
+/** Denominators cmd/timesig.set accepts — anything else comes back as bad_request. */
+const SIG_DENS = [1, 2, 4, 8, 16, 32];
+
+/* Time signature — "N/D" text; double-click to type a new value (validated 1..32 over
+   SIG_DENS, mirroring the engine's accepted range). Escape reverts, Enter/blur commits. */
 function TimeSigField({
   sig,
   disabled,
@@ -382,12 +398,17 @@ function TimeSigField({
   };
   const commit = () => {
     const m = /^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*$/.exec(draft);
-    if (m) {
-      const num = Number(m[1]);
-      const den = Number(m[2]);
-      if (num >= 1 && num <= 32 && den >= 1 && den <= 32 && (num !== sig.num || den !== sig.den)) {
-        fire(setTimeSig(num, den));
-      }
+    const num = m ? Number(m[1]) : 0;
+    const den = m ? Number(m[2]) : 0;
+    if (m && num >= 1 && num <= 32 && SIG_DENS.includes(den)) {
+      if (num !== sig.num || den !== sig.den) fire(setTimeSig(num, den));
+    } else if (draft.trim() !== "") {
+      // Reverting in silence reads as "the app ignored me" — and a bad denominator only
+      // ever failed at the engine, where the rejection was swallowed by fire().
+      showToast(
+        `Time signature must be 1-32 over ${SIG_DENS.join(", ")} — "${draft.trim()}" ignored`,
+        "error",
+      );
     }
     setEditing(false);
   };

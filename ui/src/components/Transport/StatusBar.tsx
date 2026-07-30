@@ -45,8 +45,11 @@ export default function StatusBar() {
     };
   }, [connected, setEngineStatus]);
 
-  const driver = status?.driver ?? engineInfo?.driver ?? "—";
-  const device = status?.device ?? "";
+  // The engine names its no-audio fallback backend with the literal STRING "null"
+  // (never JSON null), so ?? alone never reaches the em dash and the strip reads "nullnull".
+  const named = (v: string | undefined): string => (v && v !== "null" ? v : "");
+  const driver = named(status?.driver) || named(engineInfo?.driver) || "—";
+  const device = named(status?.device);
   const sampleRate = status?.sampleRate ?? engineInfo?.sampleRate ?? 0;
   const bufferSize = status?.bufferSize ?? engineInfo?.blockSize ?? 0;
   const latencyMs = status?.latencyMs ?? engineInfo?.latencyMs ?? 0;

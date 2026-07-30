@@ -51,6 +51,12 @@ function rowKey(p: PluginInfo): string {
   return `${p.format}|${p.uid}|${p.bitness}|${p.path}`;
 }
 
+/** Favourites are stored per ROW, not per uid. Bare uids are pre-existing pref entries
+ *  (they matched every same-uid variant at once) — honoured on read so stars survive. */
+function isFavorite(favorites: readonly string[], p: PluginInfo): boolean {
+  return favorites.includes(rowKey(p)) || favorites.includes(p.uid);
+}
+
 function sortValue(p: PluginInfo, key: SortKey): string | number {
   switch (key) {
     case "name": return p.name.toLowerCase();
@@ -111,7 +117,13 @@ export default function PluginManagerPage() {
 
   const toggleFavorite = useCallback((p: PluginInfo) => {
     setFavorites((prev) => {
-      const next = prev.includes(p.uid) ? prev.filter((u) => u !== p.uid) : [...prev, p.uid];
+      const key = rowKey(p);
+      // Same pref as the Browser's Plugins tab, so it uses the same rule: star the
+      // full row key, never the uid (one uid = every shell variant), and drop any
+      // legacy bare-uid entry on un-star so the star cannot come back.
+      const next = isFavorite(prev, p)
+        ? prev.filter((k) => k !== key && k !== p.uid)
+        : [...prev, key];
       savePref("browser.pluginFavorites", [...next]);
       return next;
     });
@@ -168,7 +180,12 @@ export default function PluginManagerPage() {
         p.name.toLowerCase().includes(q) ||
         p.vendor.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
-        p.path.toLowerCase().includes(q)
+        p.path.toLowerCase().includes(q) ||
+        // the Format/Bits columns are searchable too ("vst2", "built-in", "32-bit").
+        // Bits match from the START only — a substring match would let "b"/"it" pull in
+        // every row via the "-bit" suffix. Built-in rows show "—" there, so they opt out.
+        formatLabel(p).toLowerCase().includes(q) ||
+        (p.format !== "builtin" && `${p.bitness}-bit`.startsWith(q))
       );
     });
     const { key, dir } = sort;
@@ -190,9 +207,19 @@ export default function PluginManagerPage() {
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
 
   const th = (key: SortKey, label: string, extraClass = "") => (
+    // Sortable headers are real controls: focusable + Enter/Space so the table can be
+    // sorted without a mouse, and aria-sort so the direction isn't glyph-only.
     <th
       className={`pm-th ${extraClass}`}
+      tabIndex={0}
+      aria-sort={sort.key === key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
       onClick={() => clickSort(key)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault(); // Space would scroll the table
+          clickSort(key);
+        }
+      }}
       title={`Sort by ${label.toLowerCase()}`}
     >
       {label}
@@ -204,6 +231,7 @@ export default function PluginManagerPage() {
     <button
       type="button"
       className={`pm-chip ${cls}${filter === f ? " active" : ""}`}
+      aria-pressed={filter === f}
       onClick={() => setFilter((cur) => (cur === f ? "all" : f))}
     >
       {label} <span className="pm-chip-count">{count}</span>
@@ -248,7 +276,8 @@ export default function PluginManagerPage() {
           <input
             className="pm-search"
             type="search"
-            placeholder="Search name, vendor, category, path…"
+            aria-label="Search plugins"
+            placeholder="Search name, vendor, category, format, path…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -289,7 +318,7 @@ export default function PluginManagerPage() {
             {rows.map((p) => {
               const key = rowKey(p);
               const busy = busyKey === key;
-              const fav = favorites.includes(p.uid);
+              const fav = isFavorite(favorites, p);
               return (
                 <tr
                   key={key}
@@ -302,6 +331,7 @@ export default function PluginManagerPage() {
                     <button
                       type="button"
                       className={"pm-fav" + (fav ? " on" : "")}
+                      aria-pressed={fav}
                       title={fav ? "Remove from favorites" : "Add to favorites"}
                       onClick={() => toggleFavorite(p)}
                     >

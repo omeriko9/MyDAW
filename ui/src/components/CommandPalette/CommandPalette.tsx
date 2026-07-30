@@ -22,6 +22,7 @@ import { locate, play, record, stop } from "../../store/actions";
 import { MENUS } from "../Transport/MenuBar";
 import type { MenuEntry, MenuItemDef } from "../common/ContextMenu";
 import { Icon, type IconName } from "../common/icons";
+import { showToast } from "../common/ToastHost";
 import { fuzzyMatch } from "../../lib/fuzzy";
 import { revealBeat } from "../../lib/reveal";
 import { toggleLoop } from "../../lib/keyboard";
@@ -279,6 +280,18 @@ function cmdToRow(c: Command, ranges?: Array<[number, number]>): Row {
   };
 }
 
+/**
+ * Nearest RUNNABLE row from `i` scanning in `dir`, falling back to the other
+ * direction — the highlight must never sit on a row Enter would swallow.
+ * Returns the clamped start when everything on offer is disabled.
+ */
+function nextEnabled(items: Row[], i: number, dir: 1 | -1): number {
+  const start = Math.max(0, Math.min(i, items.length - 1));
+  for (let j = start; j >= 0 && j < items.length; j += dir) if (!items[j].disabled) return j;
+  for (let j = start; j >= 0 && j < items.length; j -= dir) if (!items[j].disabled) return j;
+  return start;
+}
+
 export default function CommandPalette() {
   const open = useStore((s) => s.dialogs.palette);
   const setDialogs = useStore((s) => s.setDialogs);
@@ -357,7 +370,8 @@ export default function CommandPalette() {
   }, [open, query, commands]);
 
   const selectable = useMemo(() => rows.filter((r) => r.kind === "item"), [rows]);
-  const selRow = selectable[Math.min(sel, Math.max(0, selectable.length - 1))];
+  const selIdx = nextEnabled(selectable, sel, 1);
+  const selRow = selectable[selIdx];
 
   useEffect(() => {
     setSel(0);
@@ -374,9 +388,21 @@ export default function CommandPalette() {
   if (!open) return null;
 
   const execute = (row: Row | undefined): void => {
-    if (!row || row.disabled || !row.run) return;
+    if (!row || !row.run) return;
+    if (row.disabled) {
+      // Navigation skips disabled rows, but an all-disabled result set can still
+      // leave the highlight on one — and a keyboard user never sees the `title`
+      // tooltip, so say WHY instead of swallowing the Enter.
+      showToast(row.reason ?? `${row.label} is not available right now`);
+      return;
+    }
     if (row.cmdId) pushRecent(row.cmdId);
     close();
+    // Also reset here, not just in the open effect: a command that RE-opens the
+    // palette (Help › Command Palette…) keeps `open` true across the batch, so
+    // that effect never re-runs and the stale query/selection would survive.
+    setQuery("");
+    setSel(0);
     row.run();
   };
 
@@ -389,19 +415,19 @@ export default function CommandPalette() {
         break;
       case "ArrowDown":
         e.preventDefault();
-        setSel((i) => Math.min(i + 1, Math.max(0, selectable.length - 1)));
+        setSel(nextEnabled(selectable, selIdx + 1, 1));
         break;
       case "ArrowUp":
         e.preventDefault();
-        setSel((i) => Math.max(0, i - 1));
+        setSel(nextEnabled(selectable, selIdx - 1, -1));
         break;
       case "PageDown":
         e.preventDefault();
-        setSel((i) => Math.min(i + 8, Math.max(0, selectable.length - 1)));
+        setSel(nextEnabled(selectable, selIdx + 8, 1));
         break;
       case "PageUp":
         e.preventDefault();
-        setSel((i) => Math.max(0, i - 8));
+        setSel(nextEnabled(selectable, selIdx - 8, -1));
         break;
       case "Enter":
         e.preventDefault();
@@ -491,8 +517,9 @@ export default function CommandPalette() {
                 }
                 title={row.disabled ? row.reason : undefined}
                 onMouseMove={() => {
+                  if (row.disabled) return; // the highlight stays runnable
                   const i = selectable.indexOf(row);
-                  if (i >= 0 && i !== sel) setSel(i);
+                  if (i >= 0 && i !== selIdx) setSel(i);
                 }}
                 onMouseDown={(e) => e.preventDefault()} // keep input focus
                 onClick={() => execute(row)}
