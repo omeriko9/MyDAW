@@ -417,7 +417,9 @@ export function hitTestNote(notes: Note[], x: number, y: number, v: PrView): Not
     const x1 = beatToX(n.startBeat + n.lengthBeats, v);
     const w = x1 - x0;
     if (x < x0 || x > x1 + 2) continue;
-    const edgeZone = Math.min(EDGE_PX, Math.max(3, w * 0.3));
+    // No floor on the zone: a 3px minimum swallowed the whole body of a narrow note
+    // (a 1-beat note is 4px at 15% zoom), so it could only ever be resized, not moved.
+    const edgeZone = Math.min(EDGE_PX, w * 0.3);
     return { note: n, edge: x >= x1 - edgeZone };
   }
   return null;

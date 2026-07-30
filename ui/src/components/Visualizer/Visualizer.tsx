@@ -160,8 +160,15 @@ function NotesFall() {
     ctx.fillStyle = themeVar("--border");
     ctx.fillRect(0, fallH - 1, w, 1);
 
+    // Additive blending only reads as glow over a DARK backdrop: on the light themes
+    // (light/sepia/prism) "lighter" adds the note color to an already-bright
+    // --bg-sunken, clamping every channel to 255 — the notes come out plain white.
+    // Those themes composite normally so the per-track color survives.
+    const [bgR, bgG, bgB] = hexToRgb(themeVar("--bg-sunken"));
+    const additive = (0.2126 * bgR + 0.7152 * bgG + 0.0722 * bgB) / 255 < 0.5;
+
     const active = new Map<number, string>(); // pitch → color of a sounding note
-    ctx.globalCompositeOperation = "lighter";
+    ctx.globalCompositeOperation = additive ? "lighter" : "source-over";
     for (const e of eventsInWindow(evs, beat - 1, beat + LOOKAHEAD_BEATS)) {
       const x = (e.pitch - rg.lo) * laneW;
       const y1 = yOf(e.beat);

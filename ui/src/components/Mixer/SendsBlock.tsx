@@ -14,7 +14,33 @@ import { gainToDbText } from "../common/Fader";
 import { openContextMenu, contextMenuHandler, MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/icons";
 import { Knob } from "../common/Knob";
+import { showToast } from "../common/ToastHost";
 import { useGestureValue } from "./useGestureValue";
+
+/**
+ * Mirror of Model::wouldCreateRoutingCycle (engine Model.h): the engine refuses a send
+ * with routing_cycle when the source is reachable from the destination through existing
+ * output/send edges. Only buses can be a send destination or a track output target, so a
+ * DFS over `buses` visits every node the engine would. Kept in the UI so a cycling bus is
+ * shown greyed out with the reason instead of as a dead menu item.
+ */
+function wouldCycle(buses: Track[], srcId: number, destId: number): boolean {
+  if (srcId === destId) return true;
+  const byId = new Map(buses.map((b) => [b.id, b]));
+  const seen = new Set<number>();
+  const stack: number[] = [destId];
+  while (stack.length > 0) {
+    const cur = stack.pop() as number;
+    if (cur === srcId) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const t = byId.get(cur);
+    if (!t) continue;
+    if (typeof t.outputTarget === "number") stack.push(t.outputTarget);
+    for (const s of t.sends) if (s.destTrackId) stack.push(s.destTrackId);
+  }
+  return false;
+}
 
 function SendRow({
   track,
@@ -93,11 +119,25 @@ export function SendsBlock({ track, buses }: { track: Track; buses: Track[] }) {
     const candidates = buses.filter((b) => b.id !== track.id && !used.has(b.id));
     const items: MenuEntry[] =
       candidates.length > 0
-        ? candidates.map((b) => ({
-            label: b.name,
-            icon: "sliders" as const,
-            onClick: () => void actions.addSend(track.id, b.id),
-          }))
+        ? candidates.map((b) => {
+            const cycles = wouldCycle(buses, track.id, b.id);
+            return {
+              label: b.name,
+              icon: "sliders" as const,
+              disabled: cycles,
+              title: cycles
+                ? `${b.name} already feeds this channel — a send would create a routing cycle`
+                : undefined,
+              // The engine can still refuse (its model may be ahead of ours); surface it
+              // instead of letting the rejection die as an unhandled promise.
+              onClick: () =>
+                void actions
+                  .addSend(track.id, b.id)
+                  .catch((e) =>
+                    showToast(`Add send failed: ${e instanceof Error ? e.message : e}`, "error"),
+                  ),
+            };
+          })
         : [
             {
               label: buses.length === 0 ? "No buses — add one in the track list" : "All buses already used",

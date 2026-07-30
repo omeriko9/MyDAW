@@ -56,6 +56,9 @@ export interface FaderProps {
   /** Hide the dB tick marks (narrow strips). */
   noTicks?: boolean;
   title?: string;
+  /** Accessible name. aria-valuetext only carries the VALUE ("0.0 dB"), so without this
+   *  every fader in the mixer announces identically and none says which channel. */
+  ariaLabel?: string;
 }
 
 export function Fader({
@@ -68,6 +71,7 @@ export function Fader({
   className,
   noTicks,
   title,
+  ariaLabel,
 }: FaderProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -215,6 +219,7 @@ export function Fader({
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
       role="slider"
+      aria-label={ariaLabel}
       aria-valuemin={0}
       aria-valuemax={1}
       aria-valuenow={pos}

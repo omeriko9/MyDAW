@@ -115,7 +115,11 @@ export function addTrackMenuItems(index?: number): MenuEntry[] {
       label: `Add ${a.label}`,
       icon: a.icon,
       disabled: dupe,
-      title: dupe ? `The project already has a ${a.label.toLowerCase()}` : undefined,
+      // "a arranger track" — the article has to follow the kind, and this tooltip is
+      // generated here rather than coming from the engine's own refusal message.
+      title: dupe
+        ? `The project already has a${/^[aeiou]/i.test(a.label) ? "n" : ""} ${a.label.toLowerCase()}`
+        : undefined,
       onClick: () => fire(addTrack(a.kind, index !== undefined ? { index } : undefined)),
     };
   });
@@ -247,6 +251,25 @@ export default function TrackHeaders({
           if (y < row.top + row.height / 2) {
             insertIndex = row.flatIndex;
             dropLineY = row.top;
+          } else if (t.kind === "folder") {
+            // Below a folder header "after" means after its whole SUBTREE: a track landing
+            // between the header and its children would break the contiguity the indent
+            // promises (and would survive a collapse of the folder, visibly stranded).
+            let end = row.flatIndex + 1;
+            while (
+              end < project.tracks.length &&
+              isDescendantOf(project, project.tracks[end].id, t.id)
+            ) {
+              end++;
+            }
+            insertIndex = end;
+            // ...and the line under the last VISIBLE descendant — the folder's own bottom
+            // edge when it is collapsed or empty
+            const lastVisible = trackRows.reduce<TrackRowL>(
+              (acc, r) => (isDescendantOf(project, r.track.id, t.id) ? r : acc),
+              row,
+            );
+            dropLineY = lastVisible.top + lastVisible.height;
           } else {
             insertIndex = row.flatIndex + 1;
             dropLineY = row.top + row.height;
@@ -324,18 +347,25 @@ export default function TrackHeaders({
       return;
     }
 
+    // The engine REMOVES the dragged track before inserting (cmd/track.reorder), so every
+    // index computed against the current (pre-removal) list shifts down by one when the
+    // source sat above it. Both branches below must compensate, or the same drop lands in
+    // a different slot depending on which side the drag came from.
+    const dragIdx = project.tracks.findIndex((t) => t.id === d.trackId);
+    const compensate = (idx: number): number => (dragIdx >= 0 && idx > dragIdx ? idx - 1 : idx);
+
     if (d.dropIntoId !== null) {
       const folderRow = trackRows.find((r) => r.track.id === d.dropIntoId);
       if (folderRow) {
-        fire(reorderTrack(d.trackId, folderRow.flatIndex + 1, d.dropIntoId));
+        fire(reorderTrack(d.trackId, compensate(folderRow.flatIndex + 1), d.dropIntoId));
+        // A collapsed folder hides what it just accepted — the row would simply vanish,
+        // so expand it and let the user see where the track went.
+        if (collapsedFolders.has(d.dropIntoId)) onToggleFolder(d.dropIntoId);
       }
       return;
     }
     if (d.insertIndex < 0) return; // no valid target
-    const dragIdx = project.tracks.findIndex((t) => t.id === d.trackId);
-    let newIndex = d.insertIndex;
-    if (dragIdx >= 0 && newIndex > dragIdx) newIndex -= 1;
-    fire(reorderTrack(d.trackId, newIndex, d.insertParentId));
+    fire(reorderTrack(d.trackId, compensate(d.insertIndex), d.insertParentId));
   };
 
   /* ------------------------------------------------------------- height drag */
@@ -1054,16 +1084,20 @@ export default function TrackHeaders({
             )}
           </div>
         )}
-        <div
-          className="tlh-resize"
-          onPointerDown={(e) => onResizePointerDown(e, row)}
-          onPointerMove={onResizePointerMove}
-          onPointerUp={onResizePointerUp}
-          onPointerCancel={() => {
-            heightRef.current = null;
-            onHeightPreview(null);
-          }}
-        />
+        {/* fixed-height view rows get no handle at all — its row-resize cursor would
+            advertise a drag the height logic refuses */}
+        {!isViewRowKind(t.kind) && (
+          <div
+            className="tlh-resize"
+            onPointerDown={(e) => onResizePointerDown(e, row)}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={onResizePointerUp}
+            onPointerCancel={() => {
+              heightRef.current = null;
+              onHeightPreview(null);
+            }}
+          />
+        )}
       </div>
     );
   };

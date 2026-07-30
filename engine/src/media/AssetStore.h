@@ -2,7 +2,9 @@
 // Decoded-audio cache + import pipeline (SPEC §5.5, §7).
 //
 // - PcmData: float32 planar audio. The pointer returned by pcm() is STABLE until clear()
-//   (entries are heap-allocated and never replaced once inserted). pcm() is NOT called on
+//   (entries are heap-allocated and never freed before then: re-pointing an id at other
+//   material caches a NEW PcmData and RETIRES the old one, which stays alive because the
+//   live graph still holds the raw pointer until its next rebuild). pcm() is NOT called on
 //   the RT thread — the graph (E2) resolves PcmData* at rebuild time on the main thread.
 // - loadAsync()/ensurePeaks() run heavy work on a small internal worker pool (2 threads);
 //   loadAsync completion callbacks are invoked on a worker thread (or inline on the calling
@@ -133,6 +135,12 @@ private:
     // <fallbackDir_>/peaks/<fallbackRunToken_> — the per-run fallback peaks dir.
     // mutex_ must be held; fallbackDir_ must be non-empty.
     std::string fallbackPeaksDirLocked() const;
+    // Drops everything cached under asset.id (PCM, declared record, <id>.pk, in-flight
+    // load) when the record now names DIFFERENT material than the cache was built from —
+    // a recycled id (undo restores Project::nextId, so the next offline render is handed
+    // the id the undone one just freed) or a relink. Every cached lookup for an id must
+    // be preceded by this; takes mutex_ itself, so call it UNLOCKED.
+    void invalidateIfRecycled(const Asset& asset);
 
     mutable std::mutex mutex_;
     std::string projectDir_;
@@ -144,6 +152,11 @@ private:
     std::map<uint64_t, std::shared_ptr<PcmData>> pcmById_;
     std::map<uint64_t, int> channelsById_;   // DECLARED (model-record) channel counts
     std::map<uint64_t, int64_t> framesById_; // DECLARED (model-record) lengths in samples
+    std::map<uint64_t, std::string> srcById_; // material each id's cache was built from
+    // PCM dropped by invalidateIfRecycled: kept alive (not freed) until clear() because
+    // the live graph resolved raw PcmData* for that id at its last rebuild. Only grows
+    // when an id is genuinely re-pointed, i.e. no more entries than the cache held before.
+    std::vector<std::shared_ptr<PcmData>> retired_;
     std::map<uint64_t, std::vector<std::function<void(bool)>>> inflight_;
     uint64_t generation_ = 0; // bumped by clear(); stale loads are discarded
 

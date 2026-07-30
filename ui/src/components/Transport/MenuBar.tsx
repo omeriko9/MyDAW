@@ -58,7 +58,15 @@ import {
 import "./menubar.css";
 
 const fire = (p: Promise<unknown>): void => {
-  p.catch((e) => console.warn("[menu] command failed:", e));
+  // The engine's rejection message is the only explanation the user can get (nothing else
+  // surfaces it), so a refused menu command must not look like a dead item — same policy as
+  // the timeline's fire(). "cancelled" is the native file dialog being dismissed: that is
+  // the user saying no, not a failure.
+  p.catch((e: unknown) => {
+    console.warn("[menu] command failed:", e);
+    const msg = e instanceof Error && e.message ? e.message : "Command failed";
+    if (!msg.includes("cancelled")) showToast(msg, "error");
+  });
 };
 
 /** Context-aware edit dispatch (focused pane first) — same paths as the shortcuts. */

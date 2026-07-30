@@ -59,6 +59,15 @@ std::string sanitizeBaseName(const std::string& srcFileName) {
     return out;
 }
 
+// Identity of the material an id's cache was built from. Asset ids are RECYCLED — undo
+// restores Project::nextId, so the next offline render is handed the id the undone one
+// just freed — while every cache here is keyed by id alone; without this a fresh render
+// inherits the undone render's PCM (playback + further processing) and its peaks. Renders
+// and imports always write a collision-free file name, so the path pins the material.
+std::string sourceKey(const Asset& a) {
+    return a.file + "|" + a.originalPath;
+}
+
 bool readFileBytes(const std::string& path, std::vector<uint8_t>& out) {
     FILE* f = _wfopen(utf8ToWide(path).c_str(), L"rb");
     if (!f)
@@ -217,12 +226,59 @@ std::string AssetStore::resolveSourcePath(const Asset& asset) const {
     return {};
 }
 
+void AssetStore::invalidateIfRecycled(const Asset& asset) {
+    if (asset.id == 0)
+        return;
+    const std::string key = sourceKey(asset);
+    std::string pkDir;
+    std::vector<std::function<void(bool)>> orphaned;
+    bool evicted = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto it = srcById_.find(asset.id);
+        if (it != srcById_.end() && it->second != key) {
+            const auto pit = pcmById_.find(asset.id);
+            if (pit != pcmById_.end()) {
+                retired_.push_back(pit->second); // still reachable from the live graph
+                pcmById_.erase(pit);
+            }
+            channelsById_.erase(asset.id);
+            framesById_.erase(asset.id);
+            // A load of the PREVIOUS file may be in flight: detach it so the caller's own
+            // load is not coalesced onto it (its worker discards its decode on the key
+            // check in loadAsync) — its callbacks are failed below, outside the lock.
+            const auto iit = inflight_.find(asset.id);
+            if (iit != inflight_.end()) {
+                orphaned = std::move(iit->second);
+                inflight_.erase(iit);
+            }
+            pkDir = peaksDirLocked();
+            evicted = true;
+        }
+        srcById_[asset.id] = key;
+    }
+    if (!evicted)
+        return;
+    // The old <id>.pk validates structurally whenever the new material happens to share
+    // the geometry (a length-preserving DOP bake), so existence must not survive either.
+    if (!pkDir.empty())
+        deleteFile(pathJoin(pkDir, std::to_string(asset.id) + ".pk"));
+    Log::info("AssetStore: asset %llu re-pointed at '%s' — dropped the cache of its "
+              "previous material",
+              static_cast<unsigned long long>(asset.id),
+              asset.file.empty() ? asset.originalPath.c_str() : asset.file.c_str());
+    for (auto& cb : orphaned)
+        if (cb)
+            cb(false);
+}
+
 void AssetStore::loadAsync(const Asset& asset, std::function<void(bool)> done) {
     if (asset.id == 0) {
         if (done)
             done(false);
         return;
     }
+    invalidateIfRecycled(asset); // ids recycle: never answer for the previous material
 
     uint64_t gen = 0;
     {
@@ -273,8 +329,13 @@ void AssetStore::loadAsync(const Asset& asset, std::function<void(bool)> done) {
             if (gen != generation_) {
                 ok = false; // store was clear()ed while decoding — discard
             } else if (ok) {
-                if (pcmById_.find(copy.id) == pcmById_.end())
+                const auto sit = srcById_.find(copy.id);
+                if (sit != srcById_.end() && sit->second != sourceKey(copy)) {
+                    ok = false; // id re-pointed while we decoded — this is the old material
+                    err = "asset re-pointed at other material while decoding";
+                } else if (pcmById_.find(copy.id) == pcmById_.end()) {
                     pcmById_[copy.id] = std::make_shared<PcmData>(std::move(pcm));
+                }
                 // channelsById_ is NOT updated here: it mirrors the MODEL's asset record
                 // (via ensurePeaks), and peaks must not serve with the decoded count
                 // until the model is reconciled with it (see readPeaks).
@@ -317,6 +378,12 @@ bool AssetStore::ensurePeaks(const Asset& asset) {
 bool AssetStore::ensurePeaksFor(const Asset& asset, uint64_t gen) {
     if (asset.id == 0)
         return false;
+    // Before ANY cached lookup below — a recycled id's stale PCM would otherwise be
+    // serialized into this asset's peak file. Skipped for a straggler whose model is
+    // already gone (the authoritative gen check is under the lock below): its record must
+    // not evict what the CURRENT model just cached under the same id.
+    if (gen == generation())
+        invalidateIfRecycled(asset);
 
     std::string pkDir;
     std::shared_ptr<const PcmData> p; // keeps PCM alive across a concurrent clear()
@@ -512,6 +579,7 @@ bool AssetStore::importFile(const std::string& absPath, const std::string& proje
     out.missing = false;
 
     if (out.id != 0) {
+        invalidateIfRecycled(out); // the wav above is new — a recycled id keeps no cache
         // Peaks + PCM cache keyed by the caller-assigned asset id. (With id == 0 they
         // are generated lazily later via ensurePeaks()/loadAsync().) media/import into a
         // never-saved session passes the fallback dir as projectDir — peaks must then
@@ -596,6 +664,8 @@ void AssetStore::clear() {
         pcmById_.clear();
         channelsById_.clear();
         framesById_.clear();
+        srcById_.clear();
+        retired_.clear();
         for (auto& [id, list] : inflight_)
             for (auto& cb : list)
                 cbs.push_back(std::move(cb));

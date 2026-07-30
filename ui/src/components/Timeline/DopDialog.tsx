@@ -269,6 +269,13 @@ function DopModal({ clipId, onClose }: { clipId: number; onClose: () => void }) 
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [registry]);
   const clip = findClip(clipId);
+  // The clip going away (delete) closes the dialog for good — without clearing
+  // openForClip the element stays mounted rendering null, and undoing the delete
+  // would bring the window back on screen unrequested.
+  const gone = !clip;
+  React.useEffect(() => {
+    if (gone && openForClip === clipId) closeDop();
+  }, [gone, clipId]);
   if (!clip || openForClip !== clipId) {
     return null;
   }

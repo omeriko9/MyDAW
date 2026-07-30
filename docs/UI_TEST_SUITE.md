@@ -71,6 +71,33 @@ What is mechanised instead:
 device, or touch a native file dialog — those either block the browser on a modal or
 write outside the sandbox.
 
+## Second sweep: the areas that had no cases at all
+
+The 196 cases covered 14 areas but left whole features untouched. A later pass authored
+and executed checks for those in parallel slots — **126 checks, 113 PASS / 11 FAIL /
+2 BLOCKED, and 15 bugs that nothing else had a chance of finding**, three of them high:
+
+- MIDI-mapped volume/pan never reached the UI. `App::applyMidiMap` passes `transient=true`
+  and the command processor returns before `broadcastChanges` when transient — correct for
+  a UI fader drag (the browser is the source and already shows the value), wrong for a
+  hardware controller, where nothing on screen knows. Fixed by echoing a granular
+  `event/projectChanged` for externally-originated changes only, keeping the transient
+  envelope so a CC sweep still does not push an undo entry per message.
+- Undoing an offline render freed an asset id that the next render reused while the engine
+  kept serving the old material — every AssetStore cache is keyed by id alone.
+- CC automation lanes (from Extract MIDI Automation) rejected every edit: the lane is
+  created with paramRef `cc:<n>`, but `automationSet`'s inline check and `validParamRef`
+  each re-spelled the grammar as `volume|pan|send:*|plugin:*`.
+
+Worth copying: coverage here was proven through the audio, not just the DOM. The transpose
+row was verified by rendering offline and running Goertzel analysis — a sustained A4 read
+440 Hz, then 880 Hz at +12, then 1760 Hz at +24 applied at the note's onset.
+
+Still uncovered, and deliberately so: anything opening a native file dialog (it blocks the
+browser), project open/close/recovery, plugin rescan and audio-device switching, real VST
+editor windows, recording from real devices, and audio correctness in general — the test
+engine runs `--driver null`.
+
 ## The 14 areas
 
 `transport` · `timeline-tracks` · `timeline-clips` · `mixer` · `pianoroll` ·

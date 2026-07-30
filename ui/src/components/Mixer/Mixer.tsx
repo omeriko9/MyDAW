@@ -25,6 +25,19 @@ const VIRTUALIZE_THRESHOLD = 40;
 const STRIP_GAP = 2;
 const OVERSCAN = 4;
 
+/* Vertical budget. The dock's default height (App.tsx DOCK_DEFAULT 260) leaves the rail
+   ~229px while a full-size strip wants ~412px, so the fader, its dB readout and the
+   M/S/R row used to sit below the rail. The rail is measured and the fader sized from
+   it: the fader gives way first (down to FADER_MIN_H), then the rack area, which scrolls
+   inside the strip. RAIL_MIN_H mirrors .mixer-rail-inner's min-height in mixer.css — the
+   floor where the rail itself starts scrolling, so the budget must use the same value. */
+const RAIL_MIN_H = 220;
+const STRIP_PAD = 4; // .mixer-strips padding, top + bottom
+const STRIP_CHROME_H = 118; // strip minus fader and rack: color tab, name, pan, dB, M/S/R
+const STRIP_CHROME_NARROW_H = 132; // no io/rack, but M/S/R wraps to two rows at 56px
+const RACK_PREF_H = 102; // io + inserts + sends we try to keep before the rack scrolls
+const FADER_MIN_H = 72;
+
 /* Mix views (UI_IMPROVE.md §3.3) — kind filters over the strip rail (vertical
    icon toggles in the toolbar; master stays pinned in every view). */
 type MixView = "all" | "audio" | "instr" | "buses";
@@ -41,24 +54,41 @@ export default function Mixer() {
   const connected = useStore((s) => s.connected);
   const [wide, setWide] = useState(() => loadBoolPref(WIDE_PREF, true));
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const railRef = useRef<HTMLDivElement | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [viewW, setViewW] = useState(0);
+  const [railH, setRailH] = useState(0);
+  // A horizontal scrollbar takes its height from the strips but NOT from the pinned
+  // master (it sits outside the scroller) — mirrored onto the master's padding below.
+  const [scrollbarH, setScrollbarH] = useState(0);
 
   const hasProject = project !== null;
 
   // Seed viewport width BEFORE first paint so a >40-strip session windows immediately instead
-  // of mounting every strip once (viewW stayed 0 until the post-paint ResizeObserver fired).
+  // of mounting every strip once (viewW stayed 0 until the post-paint ResizeObserver fired);
+  // same for the rail height, which sizes the faders (a post-paint measure would flash them).
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) setViewW(el.clientWidth);
+    if (el) {
+      setViewW(el.clientWidth);
+      setScrollbarH(el.offsetHeight - el.clientHeight);
+    }
+    const rail = railRef.current;
+    if (rail) setRailH(rail.clientHeight);
   }, [hasProject]);
 
-  // Track viewport width for ongoing resizes.
+  // Track viewport size for ongoing resizes (dock resizer, window, popout).
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setViewW(el.clientWidth));
-    ro.observe(el);
+    const rail = railRef.current;
+    if (!el || !rail) return;
+    const ro = new ResizeObserver(() => {
+      setViewW(el.clientWidth);
+      setScrollbarH(el.offsetHeight - el.clientHeight);
+      setRailH(rail.clientHeight);
+    });
+    ro.observe(el); // content box, so a scrollbar appearing/vanishing also fires
+    ro.observe(rail);
     return () => ro.disconnect();
   }, [hasProject]);
 
@@ -141,6 +171,11 @@ export default function Mixer() {
     );
   }
 
+  /* One fader height for every strip INCLUDING master, so the faders line up. */
+  const availH = Math.max(railH, RAIL_MIN_H) - STRIP_PAD - scrollbarH;
+  const budget = wide ? STRIP_CHROME_H + RACK_PREF_H : STRIP_CHROME_NARROW_H;
+  const faderH = Math.max(FADER_MIN_H, Math.min(wide ? 150 : 120, availH - budget));
+
   /* horizontal windowing for large sessions */
   const stripW = wide ? 84 : 56;
   const pitch = stripW + STRIP_GAP;
@@ -158,7 +193,7 @@ export default function Mixer() {
 
   return (
     <div className="mixer-root" onPointerDownCapture={focusPane}>
-      <div className="mixer-rail">
+      <div className="mixer-rail" ref={railRef}>
         <div className="mixer-rail-inner">
           <div className="mixer-toolbar">
           <IconButton
@@ -223,13 +258,21 @@ export default function Mixer() {
             ) : (
               strips
                 .slice(first, last + 1)
-                .map((t) => <ChannelStrip key={t.id} track={t} buses={buses} wide={wide} />)
+                .map((t) => (
+                  <ChannelStrip key={t.id} track={t} buses={buses} wide={wide} faderH={faderH} />
+                ))
             )}
           </div>
         </div>
 
-          <div className="mixer-master-wrap">
-            <ChannelStrip track={project.masterTrack} buses={buses} wide={wide} isMaster />
+          <div className="mixer-master-wrap" style={{ paddingBottom: 2 + scrollbarH }}>
+            <ChannelStrip
+              track={project.masterTrack}
+              buses={buses}
+              wide={wide}
+              faderH={faderH}
+              isMaster
+            />
           </div>
         </div>
       </div>
