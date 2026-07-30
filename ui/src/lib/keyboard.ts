@@ -523,10 +523,17 @@ function onKeyDown(e: KeyboardEvent): void {
 
   // Layout presets (lib/layouts, UI_IMPROVE.md §6.3): Ctrl+Alt+1..4 apply,
   // Ctrl+Alt+Shift+1..4 save the current workspace into the slot.
-  if (ctrl && e.altKey && key >= "1" && key <= "4") {
+  // Match the PHYSICAL key: with Shift held, e.key is the digit's punctuation twin
+  // ("!@#$" on US), so comparing e.key against "1".."4" made the save half of this
+  // shortcut unreachable on a real keyboard. e.key stays as the fallback for
+  // synthetic events and layouts that report no usable code.
+  const slotKey =
+    /^(?:Digit|Numpad)([1-4])$/.exec(e.code)?.[1] ??
+    (key >= "1" && key <= "4" ? key : undefined);
+  if (ctrl && e.altKey && slotKey) {
     consume();
     if (e.repeat) return;
-    const slot = Number(key) as LayoutSlotIndex;
+    const slot = Number(slotKey) as LayoutSlotIndex;
     if (e.shiftKey) {
       const snap = saveLayoutSlot(slot);
       showToast(`Layout ${slot} saved — ${snap.name}`, "success");

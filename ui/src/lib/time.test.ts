@@ -74,10 +74,13 @@ describe("bpmAtBeat", () => {
   });
 });
 
-// bars 1-2 in 4/4 (beats 0..8), bar 3+ in 3/4 (3 beats per bar)
+// bars 1-2 in 4/4 (beats 0..8), bar 3+ in 3/4 (3 beats per bar).
+// Entry bars are 0-BASED, as the engine sends them (bar 0 = bar 1 as displayed);
+// the fixtures used to be 1-based, a shape the engine never emits, which hid the
+// off-by-one bar numbering that reached the transport readout and the ruler.
 const sigMap: TimeSigEntry[] = [
-  { bar: 1, num: 4, den: 4 },
-  { bar: 3, num: 3, den: 4 },
+  { bar: 0, num: 4, den: 4 },
+  { bar: 2, num: 3, den: 4 },
 ];
 
 describe("barToBeat", () => {
@@ -95,7 +98,7 @@ describe("barToBeat", () => {
   });
 
   it("handles denominators other than 4 (6/8 bar = 3 quarter-note beats)", () => {
-    const sixEight: TimeSigEntry[] = [{ bar: 1, num: 6, den: 8 }];
+    const sixEight: TimeSigEntry[] = [{ bar: 0, num: 6, den: 8 }];
     expect(barToBeat(2, sixEight)).toBe(3);
     expect(barToBeat(3, sixEight)).toBe(6);
   });
@@ -122,7 +125,7 @@ describe("timeSigAtBeat", () => {
   it("reports the signature and quarter-note beats per bar", () => {
     expect(timeSigAtBeat(0, sigMap)).toEqual({ num: 4, den: 4, beatsPerBar: 4 });
     expect(timeSigAtBeat(8, sigMap)).toEqual({ num: 3, den: 4, beatsPerBar: 3 });
-    const sixEight: TimeSigEntry[] = [{ bar: 1, num: 6, den: 8 }];
+    const sixEight: TimeSigEntry[] = [{ bar: 0, num: 6, den: 8 }];
     expect(timeSigAtBeat(0, sixEight)).toEqual({ num: 6, den: 8, beatsPerBar: 3 });
   });
 });

@@ -1566,7 +1566,7 @@ function Editor({ track, clip }: EditorProps) {
       }
       case "create": {
         const step = e.shiftKey ? 0 : stepRef.current;
-        g.note.pitch = M.yToPitch(y, v);
+        g.note.pitch = pitchAt(y); // press-drag must scale-snap like the click-to-add path
         const end = e.shiftKey ? M.xToBeat(x, v) : M.snapCeil(M.xToBeat(x, v), step);
         g.note.lengthBeats = Math.max(
           step > 0 ? step : M.MIN_NOTE_LEN,

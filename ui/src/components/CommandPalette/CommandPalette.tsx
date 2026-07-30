@@ -175,11 +175,14 @@ function jumpRows(query: string): Row[] {
     const barStart = barToBeat(bar, p.timeSigMap);
     const sig = timeSigAtBeat(barStart, p.timeSigMap);
     const unit = 4 / sig.den;
-    const beat = barStart + Math.min(beatInBar - 1, sig.num - 1) * unit;
+    // Clamp once and label the clamped beat — "1.9" in 4/4 locates to beat 4, so
+    // promising "beat 9" would name a position the palette never goes to.
+    const beatIdx = Math.min(beatInBar - 1, sig.num - 1);
+    const beat = barStart + beatIdx * unit;
     rows.push({
       kind: "item",
-      key: `bar:${bar}.${beatInBar}`,
-      label: `Go to bar ${bar}${barMatch[2] ? `, beat ${beatInBar}` : ""}`,
+      key: `bar:${bar}.${beatIdx + 1}`,
+      label: `Go to bar ${bar}${barMatch[2] ? `, beat ${beatIdx + 1}` : ""}`,
       path: "Go to",
       icon: "flag",
       run: () => {
@@ -313,7 +316,10 @@ export default function CommandPalette() {
         .filter((c): c is Command => !!c && !c.disabled);
       if (recents.length > 0) {
         out.push({ kind: "header", key: "h:recent", label: "Recent" });
-        out.push(...recents.map((c) => cmdToRow(c)));
+        // Own key namespace: every recent is ALSO emitted under its group below,
+        // so sharing `cmd:<id>` would duplicate React keys and make the
+        // keep-in-view [data-key] lookup always resolve the Recent copy.
+        out.push(...recents.map((c) => ({ ...cmdToRow(c), key: `recent:${c.id}` })));
       }
       let group = "";
       for (const c of commands) {
@@ -401,6 +407,13 @@ export default function CommandPalette() {
         e.preventDefault();
         execute(selRow);
         break;
+      case "Tab":
+        // Swallow it: the input is the palette's only key handler AND its only
+        // focusable element, so letting Tab move focus out kills Esc/arrows/Enter
+        // while .modal-overlay keeps the global handler inert too.
+        e.preventDefault();
+        e.stopPropagation();
+        break;
       default:
         // Keep every other key inside the palette (the global handler is inert
         // anyway while .modal-overlay exists, but belt and braces).
@@ -434,7 +447,17 @@ export default function CommandPalette() {
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div className="cp-panel" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div
+        className="cp-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        onMouseDown={(e) => {
+          // Same reason as the Tab case: a click on the header/list padding/footer
+          // must not blur the input, or the palette goes keyboard-dead.
+          if (e.target !== inputRef.current) e.preventDefault();
+        }}
+      >
         <div className="cp-input-row">
           <Icon name="search" size={16} />
           <input

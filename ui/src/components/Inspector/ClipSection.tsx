@@ -164,8 +164,12 @@ export function ClipSection({
           </div>
           <div className="insp-row">
             <span className="insp-label">Fade in</span>
+            {/* Cap at the clip duration like the Clip Editor: a longer fade never
+                reaches unity gain (the engine divides by the fade length), so the
+                clip would just play quiet under a normal-looking drawn fade. */}
             <SecondsDrag
               value={clip.fadeInSec}
+              max={clip.lengthSamples / sr}
               onDrag={(v) =>
                 transientParam("cmd/clip.set", { clipId: id, patch: { fadeInSec: v } })
               }
@@ -181,6 +185,7 @@ export function ClipSection({
             </span>
             <SecondsDrag
               value={clip.fadeOutSec}
+              max={clip.lengthSamples / sr}
               onDrag={(v) =>
                 transientParam("cmd/clip.set", { clipId: id, patch: { fadeOutSec: v } })
               }

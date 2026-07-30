@@ -462,7 +462,9 @@ export default function SheetMusic() {
     [clips],
   );
 
-  const selectedRefs = useCallback(() => refsFor(selectedNoteIds), [refsFor, selectedNoteIds]);
+  // Read the selection LIVE: context-menu items freeze their callbacks when the menu opens, and
+  // openNoteMenu selects the right-clicked note after that — a render-captured list would be stale.
+  const selectedRefs = useCallback(() => refsFor(useStore.getState().selection.noteIds), [refsFor]);
 
   const clipAtBeat = useCallback(
     (beat: number): MidiClip | null => {
@@ -984,6 +986,9 @@ export default function SheetMusic() {
   }, [measures, project, track, clefMode, fifths, gathered.originBeat]);
 
   const hasMusic = allNotes.length > 0;
+  // A clip with no notes yet still engraves as empty bars, and that staff is the only place edit
+  // mode can write the first note — so the placeholder must not swallow it.
+  const hasScore = hasMusic || clips.length > 0;
   const tempo = project ? bpmAtBeat(gathered.originBeat, project.tempoMap) : 120;
   const isKeyTarget = useIsKeyTarget("sheetMusic");
 
@@ -1135,7 +1140,7 @@ export default function SheetMusic() {
         ref={scrollRef}
         onWheel={() => noteManualScroll()}
       >
-        {!hasMusic ? (
+        {!hasScore ? (
           <div className="sm-empty">
             <div className="sm-empty-title">No notes to engrave</div>
             <div className="sm-empty-hint">

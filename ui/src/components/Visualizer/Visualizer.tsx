@@ -14,7 +14,7 @@
  * both modes animate on their own window's rAF clock (pop-out safe).
  */
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { metersBus, transportBus, useStore } from "../../store/store";
 import type { TransportEvent } from "../../protocol/types";
 import { useCanvas, useRafLoop } from "../../lib/canvas";
@@ -247,7 +247,12 @@ function Stage3D() {
   const levelsRef = useRef<number[]>([]);
   const ctx2dRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const setCanvas = (el: HTMLCanvasElement | null): void => {
+  // Stable identity + same-element short-circuit: React re-invokes a callback ref
+  // whose identity changed (ref(null) then ref(el)) on every re-render, and this
+  // component re-renders on every project edit and theme switch — without this the
+  // GL shaders/program/buffers would be rebuilt each time.
+  const setCanvas = useCallback((el: HTMLCanvasElement | null): void => {
+    if (el === canvasElRef.current) return;
     rendererRef.current?.dispose();
     rendererRef.current = null;
     ctx2dRef.current = null;
@@ -259,7 +264,7 @@ function Stage3D() {
         ctx2dRef.current = el.getContext("2d");
       }
     }
-  };
+  }, []);
 
   useEffect(() => () => setCanvas(null), []);
 

@@ -698,4 +698,7 @@ ws.on("event/log", (ev) => {
       : [...s.logLines, ev];
     return { logLines };
   });
+  // nothing renders logLines, so an error the engine reports (device fault, driver fallback)
+  // would otherwise be invisible. Errors only — warns are far too chatty to toast.
+  if (ev.level === "error") showToast(ev.msg, "error");
 });

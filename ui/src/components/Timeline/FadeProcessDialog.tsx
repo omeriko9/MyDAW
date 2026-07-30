@@ -242,6 +242,14 @@ function FadeModal({ opts, onClose }: { opts: FadeProcessDialogOptions; onClose:
                 if (Number.isFinite(v))
                   setLengthSec(Math.max(0, Math.min(opts.length!.maxSec, v)));
               }}
+              // onChange already clamped into state; since the field is uncontrolled, an
+              // out-of-range entry would keep showing while Apply used the clamped value.
+              // Snap the display back on blur so what you read is what you get.
+              onBlur={(e) => {
+                const shown = parseFloat(e.target.value);
+                if (!Number.isFinite(shown) || shown !== lengthSec)
+                  e.target.value = String(Math.round(lengthSec * 1000) / 1000);
+              }}
             />
           </label>
         )}

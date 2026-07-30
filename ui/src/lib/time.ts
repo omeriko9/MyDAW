@@ -111,10 +111,19 @@ export function bpmAtBeat(beat: number, tempoMap: TempoPoint[]): number {
 }
 
 /* ============================================================================
- * Time signature map: bars ↔ beats (bars are 1-based; map entries keyed by bar)
+ * Time signature map: bars ↔ beats
+ *
+ * Everything this module EXPOSES is 1-based, the way musicians and every other
+ * pane count: the project starts at bar 1 (Score.tsx labels measures `index + 1`
+ * for the same reason). The wire format is not — the engine keys timeSigMap
+ * entries by a 0-BASED bar (engine/src/core/TempoMap.h "bar is 0-based";
+ * cmd/timeSigMap.set requires the first entry at bar 0, which is why
+ * TempoMapEditor deliberately edits raw 0-based values). sigSegments is the one
+ * choke point every helper below funnels through, so the +1 conversion lives
+ * there and nowhere else.
  * ========================================================================= */
 
-const DEFAULT_SIG: TimeSigEntry = { bar: 1, num: 4, den: 4 };
+const DEFAULT_SIG: TimeSigEntry = { bar: 0, num: 4, den: 4 };
 
 interface SigSegment {
   bar: number; // first bar of this segment (1-based)
@@ -130,13 +139,16 @@ function sigSegments(timeSigMap: TimeSigEntry[]): SigSegment[] {
   let startBeat = 0;
   let prev: SigSegment | null = null;
   for (const e of map) {
-    if (prev) startBeat += (e.bar - prev.bar) * prev.beatsPerBar;
+    // Wire bar (0-based) -> this module's 1-based bar space. Convert BEFORE the
+    // startBeat delta so both sides of the subtraction are in the same space.
+    const bar = Math.round(e.bar) + 1;
+    if (prev) startBeat += (bar - prev.bar) * prev.beatsPerBar;
     // Sanitize: a den<=0 or num<1 entry would make beatsPerBar=Infinity/NaN and
     // hang grid-line loops that step by it. Fall back to 4/4 components.
     const den = e.den > 0 ? e.den : 4;
     const num = e.num >= 1 ? e.num : 4;
     const seg: SigSegment = {
-      bar: e.bar,
+      bar,
       startBeat,
       num,
       den,
