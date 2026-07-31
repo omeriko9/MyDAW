@@ -584,7 +584,9 @@ A project is a folder `Name.mydaw/` containing `project.json`, `audio/`, `peaks/
 Project = {
   formatVersion: 1, name: string, sampleRate: number,
   tempoMap: [{beat: number, bpm: number}],          // v1: single entry at beat 0
-  timeSigMap: [{bar: number, num: number, den: number}],
+  timeSigMap: [{bar: number, num: number, den: number}],  // bar is 0-BASED (0 = project
+                                                          // start, shown as bar 1); v1:
+                                                          // single entry at bar 0
   loop: {startBeat: number, endBeat: number, enabled: boolean},
   grid: {division: number /*beats*/, snap: boolean, triplet: boolean, swing: number /*0..1*/},
   markers: [{id, beat, endBeat? /*> beat = cycle marker*/, name, color?}],

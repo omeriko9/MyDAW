@@ -3618,7 +3618,7 @@
     },
     "TimeSigEntry": {
       "additionalProperties": false,
-      "description": "timeSigMap entry — bar is 1-based; v1: single entry (SPEC §6).",
+      "description": "timeSigMap entry — bar is 0-based: bar 0 is the project start, which the ruler and transport display as bar 1. Note this differs from automation.ramp/clear, whose startBar/endBar are 1-based. v1: single entry at bar 0 (SPEC §6).",
       "properties": {
         "bar": {
           "type": "number"
