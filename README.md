@@ -79,6 +79,7 @@ Full test gate (26 suites, ~90 s): `node scripts/gate.mjs`
 - [docs/SPEC.md](docs/SPEC.md) — the binding contract: protocol, project format, plugin IPC
 - [docs/IMPORT_PROJECT.md](docs/IMPORT_PROJECT.md) — writing an import provider for a new project format
 - [docs/CPR_MIXER_FORMAT.md](docs/CPR_MIXER_FORMAT.md) — Cubase `.cpr` format notes (reverse-engineered)
+- [docs/NEXT.md](docs/NEXT.md) — **what to work on next** (single source of truth)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — where this is going
 
 ## License

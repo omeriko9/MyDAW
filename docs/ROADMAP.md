@@ -1,6 +1,10 @@
 # Roadmap / TODO
 
 Status legend: ✅ done · 🔨 in progress · ⬜ not started.
+
+**What to pick up NOW lives in [NEXT.md](NEXT.md), not here.** This file is the map of the
+phases; NEXT.md is the single source of truth for the current task, what is queued behind it
+and why. Do not start a third list.
 Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md](SPEC.md)
 (binding contracts — extend it when adding protocol messages or schema fields).
 

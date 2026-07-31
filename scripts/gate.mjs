@@ -54,6 +54,10 @@ const SUITES = [
   { id: "vitest", tier: "fast", cmd: "npm", args: ["test", "--silent"], cwd: path.join(ROOT, "ui"),
     shell: true, note: "pure logic, no engine" },
 
+  // FIRST, and needs no engine: a static check that no harness can write the developer's
+  // real profile. It exists because the suite once erased a live plugin-folder list.
+  { id: "harness-isolation", tier: "fast", script: "harness-isolation-test.mjs",
+    note: "static guard: every engine spawn must redirect APPDATA" },
   { id: "smoke", tier: "fast", script: "smoke-test.mjs", requires: needsEngine },
   { id: "import", tier: "fast", script: "import-test.mjs", requires: needsEngine },
   { id: "peaks", tier: "fast", script: "peaks-test.mjs", requires: needsEngine },
