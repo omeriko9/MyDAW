@@ -229,6 +229,6 @@ From the 2026-06-12 edge-case audit. The crash/hang/garbage guards are FIXED (co
 ## Standing quality bar
 
 Every phase must end with: engine + host64 + host32 + UI builds green,
-`node scripts/smoke-test.mjs` all green, `node scripts/import-test.mjs` green, relevant
-new tests added, docs (SPEC §5/§6 + STUBS) updated, committed. No fake UI — unimplemented
-features stay invisible or visibly disabled with a reason.
+**`node scripts/gate.mjs` green** (`--full` before a merge or release), relevant new tests
+added, docs (SPEC §5/§6 + STUBS) updated, committed. No fake UI — unimplemented features
+stay invisible or visibly disabled with a reason.
