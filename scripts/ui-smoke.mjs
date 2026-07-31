@@ -232,6 +232,133 @@ export const checks = [
       tt.ok(after.dirty, "status bar keeps its .sb-dirty marker after a reload");
     },
   },
+
+  {
+    id: "layout-slot-save",
+    title: "Ctrl+Alt+Shift+1 saves a layout slot",
+    area: "menus-layout",
+    guards: "1314840 — the handler compared e.key against \"1\"..\"4\", but Shift turns those into \"!@#$\" on a US layout, so the SAVE half of the layout shortcut was dead on real hardware; it keys off e.code now. Only reachable through trusted input: the MCP's synthetic press_key reported key:\"1\" and passed the dead shortcut",
+    run: async (s, tt) => {
+      // Own precondition: the slots pref survives a reload, so clear it and remount
+      // rather than assuming this is the first check to touch it.
+      await s.eval(() => { localStorage.removeItem("mydaw.layouts.slots"); return true; });
+      await s.reload();
+      tt.eq(await s.eval(() => localStorage.getItem("mydaw.layouts.slots")), null,
+        "layout slots start empty");
+
+      await s.key("Control+Alt+Shift+1");
+      await s.untilEval("slot 1 is written", () => {
+        const raw = localStorage.getItem("mydaw.layouts.slots");
+        if (!raw) return false;
+        const s0 = JSON.parse(raw)[0];
+        return !!(s0 && s0.panels && s0.sizes);
+      });
+
+      const slots = await s.eval(() => JSON.parse(localStorage.getItem("mydaw.layouts.slots")));
+      tt.eq(slots.length, 4, "four slots are kept");
+      tt.ok(slots[1] === null && slots[2] === null && slots[3] === null,
+        `only slot 1 was written (got ${JSON.stringify(slots.map((x) => x && x.name))})`);
+      // A real snapshot, not a stub — it has to carry back the panel state and the
+      // pane sizes, or applying it later restores nothing.
+      tt.ok(typeof slots[0].name === "string" && slots[0].name.length > 0, "slot 1 carries a name");
+      tt.ok(typeof slots[0].panels.bottomTab !== "undefined", "the snapshot records the dock tab");
+      tt.ok(typeof slots[0].sizes.browserW === "number", "the snapshot records pane sizes");
+    },
+  },
+
+  {
+    id: "palette-tab-keeps-keyboard",
+    title: "Tab inside the command palette does not strand focus and freeze the keyboard",
+    area: "palette-keyboard",
+    guards: "1314840 — the input is the palette's only key handler AND its only focusable element, so Tab moved focus out and killed Esc/arrows/Enter; because the palette carries .modal-overlay the global handler was inert too, leaving the whole app keyboard-dead with no way out but the mouse",
+    run: async (s, tt) => {
+      await s.key("Control+k");
+      await s.untilEval("palette opens", () => !!document.querySelector(".cp-overlay"));
+      tt.eq(await s.eval(() => document.activeElement?.className ?? null), "cp-input",
+        "the palette input takes focus on open");
+
+      await s.key("Tab");
+      // Same-tick reads lag React, but focus moves synchronously — still, give the
+      // app a render to be wrong in before believing it.
+      await s.untilEval("focus stays on the palette input", () =>
+        document.activeElement?.className === "cp-input");
+
+      // The real consequence of losing focus was that Escape stopped working, so
+      // assert the escape hatch itself rather than only where focus sits.
+      await s.key("Escape");
+      await s.untilEval("Escape still closes the palette after Tab", () =>
+        !document.querySelector(".cp-overlay"));
+    },
+  },
+
+  {
+    id: "dialog-clamps-on-blur",
+    title: "Process ▸ Gain shows the clamped value instead of applying a different one",
+    area: "dialogs-modals",
+    guards: "1314840 — out-of-range entries were clamped only on Apply, so the field kept displaying the typed number: Gain showed 999 dB and applied 48. Shared by gain, normalize, resample, time-stretch, pitch-shift, the velocity ops, delete-notes and DOP edit, so one regression here lies in nine dialogs",
+    run: async (s, tt) => {
+      // Locate the fixture's audio clip by geometry — the clip surface is a canvas
+      // with no accessibility nodes. Lanes line up with the track header rows.
+      const target = await s.eval(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const row = rows.find((r) => r.textContent.trim().startsWith("Audio 1"));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        if (!row || !canvas) return null;
+        const rb = row.getBoundingClientRect();
+        const cb = canvas.getBoundingClientRect();
+        return { x: cb.left + 55, y: rb.top + rb.height / 2 };
+      });
+      tt.ok(target, "found the Audio 1 lane and the clip surface");
+
+      const clickItem = async (text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(".ctx-item")]
+            .find((i) => i.textContent.trim() === ${JSON.stringify(text)});
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`context-menu item not found: ${text}`);
+        await s.click(box.x, box.y);
+      };
+
+      await s.click(target.x, target.y, { button: "right" });
+      await s.untilEval("clip context menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Process"));
+      await clickItem("Process");
+      await s.untilEval("the Process submenu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Gain…"));
+      await clickItem("Gain…");
+
+      // NB: the selector is written out in full at every use. A function handed to
+      // s.eval is stringified and has no closure over this scope, so hoisting it to a
+      // const here would evaluate as `undefined` in the page — silently, on every poll,
+      // until the wait times out and blames the dialog for not opening.
+      await s.untilEval("the gain dialog opens", () =>
+        !!document.querySelector(".modal-overlay input[type=number]"));
+      const range = await s.eval(() => {
+        const el = document.querySelector(".modal-overlay input[type=number]");
+        return { min: el.min, max: el.max, focused: document.activeElement === el };
+      });
+      tt.eq(range.max, "48", "the dB field declares its ceiling");
+      tt.ok(range.focused, "the first field takes focus, so typing lands in it");
+
+      // Type well past the ceiling. The field must keep showing what Apply would use.
+      await s.key("Control+a");
+      await s.type("999");
+      await s.untilEval("the field accepts the typed value while typing", () =>
+        document.querySelector(".modal-overlay input[type=number]")?.value === "999");
+
+      await s.key("Tab"); // blur
+      await s.untilEval("the field clamps on blur", () =>
+        document.querySelector(".modal-overlay input[type=number]")?.value === "48");
+
+      // Leave nothing applied — this check must not mutate the project.
+      await s.key("Escape");
+      await s.untilEval("the dialog closes without applying", () =>
+        !document.querySelector(".modal-overlay"));
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */

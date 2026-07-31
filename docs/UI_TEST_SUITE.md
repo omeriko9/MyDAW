@@ -22,7 +22,7 @@ node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up 
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
 | Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
-| Kept from regressing, unattended | **4 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 3 of 14 areas |
+| Kept from regressing, unattended | **7 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 4 of 14 areas, ~10 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -82,6 +82,13 @@ is `eq`/`ok`/`near`/`match`. The runner reloads between checks, so no check inhe
 another's DOM — but **the engine keeps its project, transport position and selection
 across a reload**, so each check must establish its own preconditions rather than
 assume a virgin session. The file's header comment carries the full rule list.
+
+The rule that bites hardest: **a page function is stringified, so it closes over
+nothing.** Hoisting a selector to a `const` and using it inside `s.eval` raises a
+`ReferenceError` in the page on every poll, which used to surface as a plain timeout
+blaming whatever you were waiting for — a dialog that had in fact opened correctly.
+`waitFor` now carries the last predicate error into its timeout message, so this
+announces itself instead of costing an hour.
 
 ## Running an area
 

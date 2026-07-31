@@ -95,14 +95,23 @@ export function slotPorts(slot) {
 /** Poll until `fn()` is truthy. Errors count as "not ready yet". Returns its value. */
 export async function waitFor(label, fn, timeoutMs = 45000, intervalMs = 300) {
   const t0 = Date.now();
+  let lastErr = null;
   for (;;) {
     try {
       const v = await fn();
       if (v) return v;
-    } catch {
-      /* not ready */
+      lastErr = null;
+    } catch (e) {
+      // Throwing is normal while waiting — the element may not exist yet. But a
+      // predicate that throws EVERY time is broken, not early, and the difference is
+      // invisible: a page function is stringified, so referencing a variable from the
+      // caller's scope is a ReferenceError on every poll, and a bare "timed out
+      // waiting for the dialog" then sends you off debugging a dialog that opened
+      // fine. Carry the last error into the message.
+      lastErr = e?.message ?? String(e);
     }
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out waiting for ${label}`);
+    if (Date.now() - t0 > timeoutMs)
+      throw new Error(`timed out waiting for ${label}` + (lastErr ? ` — last error: ${lastErr}` : ""));
     await sleep(intervalMs);
   }
 }
