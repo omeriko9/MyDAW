@@ -20,6 +20,9 @@ namespace mydaw {
 namespace {
 
 constexpr int kNullChannels = 2;
+// Synthetic capture is a test affordance, not a virtual interface: two channels covers
+// mono and stereo arming, and the cap keeps a typo in --null-input from allocating wildly.
+constexpr int kMaxTestInputChannels = 8;
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
@@ -49,7 +52,9 @@ std::vector<DeviceInfo> NullDriver::enumerate() {
     d.id = "null";
     d.name = "Null (silent, real-time paced)";
     d.isDefault = true;
-    d.maxInputs = 0;
+    // Zero unless --null-input asked for a synthetic capture source: the engine opens a
+    // capture path only when an endpoint advertises inputs.
+    d.maxInputs = testInputChannels_;
     d.maxOutputs = kNullChannels;
     d.sampleRates = {44100, 48000, 88200, 96000, 176400, 192000};
     return {d};
@@ -84,9 +89,44 @@ bool NullDriver::open(const AudioConfig& config, AudioCallback callback, void* u
     for (int c = 0; c < kNullChannels; ++c)
         outPtrs_[static_cast<size_t>(c)] = outPlanes_[static_cast<size_t>(c)].data();
 
+    // Synthetic capture planes, allocated here so the callback thread never does.
+    if (testInputChannels_ > 0) {
+        inPlanes_.assign(static_cast<size_t>(testInputChannels_),
+                         std::vector<float>(static_cast<size_t>(actual_.bufferSize), 0.0f));
+        inPtrs_.resize(static_cast<size_t>(testInputChannels_));
+        for (int c = 0; c < testInputChannels_; ++c)
+            inPtrs_[static_cast<size_t>(c)] = inPlanes_[static_cast<size_t>(c)].data();
+        actual_.captureDeviceId = "null";
+    } else {
+        inPlanes_.clear();
+        inPtrs_.clear();
+    }
+    inFrame_ = 0;
+
     xruns_.store(0, std::memory_order_relaxed);
     opened_ = true;
     return true;
+}
+
+void NullDriver::setTestInput(int channels) {
+    // Before open(): enumerate() has to advertise it, and the planes are sized in open().
+    testInputChannels_ = std::clamp(channels, 0, kMaxTestInputChannels);
+}
+
+void NullDriver::fillTestInput(int64_t frame, int n) noexcept {
+    // 1 Hz sawtooth over [-1, 1): period == sampleRate, so the phase of any captured
+    // sample identifies its absolute frame index modulo one second. That is what makes a
+    // sample-accurate punch assertion possible — a periodic tone would not.
+    const int64_t period = actual_.sampleRate > 0 ? actual_.sampleRate : 48000;
+    const float inv = 2.0f / static_cast<float>(period);
+    for (int c = 0; c < testInputChannels_; ++c) {
+        float* dst = inPlanes_[static_cast<size_t>(c)].data();
+        const float scale = 1.0f / static_cast<float>(c + 1); // channel identity by amplitude
+        for (int i = 0; i < n; ++i) {
+            const int64_t k = (frame + i) % period;
+            dst[i] = (static_cast<float>(k) * inv - 1.0f) * scale;
+        }
+    }
 }
 
 bool NullDriver::start() {
@@ -191,7 +231,14 @@ void NullDriver::threadMain() {
 
         for (auto& plane : outPlanes_)
             std::memset(plane.data(), 0, blockBytes);
-        callback_(user_, nullptr, 0, outPtrs_.data(), kNullChannels, block);
+        if (testInputChannels_ > 0) {
+            fillTestInput(inFrame_, block);
+            inFrame_ += block;
+            callback_(user_, inPtrs_.data(), testInputChannels_, outPtrs_.data(), kNullChannels,
+                      block);
+        } else {
+            callback_(user_, nullptr, 0, outPtrs_.data(), kNullChannels, block);
+        }
         // Output discarded.
     }
 

@@ -73,6 +73,11 @@ struct AppOptions {
     // their last browser tab disconnects (and skip autosave/crash-recovery on the shared
     // %APPDATA% so they never clobber the primary instance). The primary never sets this.
     bool exitWhenIdle = false;
+    // --null-input N: synthesize N capture channels on the null driver so the recording
+    // path can be exercised headlessly. 0 = off. The null driver otherwise reports no
+    // inputs at all (NullDriver::enumerate), which left every recording feature — punch,
+    // loop-record takes, input metering — untestable by any automated layer.
+    int nullInputChannels = 0;
 };
 
 class App {

@@ -45,8 +45,25 @@ public:
     int xrunCount() const override;
     bool isRunning() const override;
 
+    /**
+     * Synthesize `channels` capture channels instead of reporting none (`--null-input N`).
+     * OPT-IN ONLY: default 0, so a user who falls back to the null driver never gets
+     * phantom input. Must be called before open() — enumerate() reports it as maxInputs,
+     * which is what makes the engine open a capture path at all.
+     *
+     * The signal is a 1 Hz sawtooth over [-1, 1), i.e. period == sampleRate frames, and
+     * that choice is the whole point: it is POSITION-RECOVERABLE. From any captured sample
+     * you can recover the absolute frame index modulo one second, so a test can assert
+     * WHICH samples were recorded, not merely that something was. Sample-accurate punch
+     * in/out cannot be tested against a signal you cannot locate yourself in. Channel c is
+     * the same ramp scaled by 1/(c+1), so channels are told apart by amplitude.
+     */
+    void setTestInput(int channels);
+
 private:
     void threadMain();
+    /** RT: fill inPlanes_ with the ramp for [frame, frame+n). Allocation- and lock-free. */
+    void fillTestInput(int64_t frame, int n) noexcept;
 
     AudioConfig actual_{};
     AudioCallback callback_ = nullptr;
@@ -57,6 +74,13 @@ private:
     // Pre-allocated output planes (stereo), zeroed each block, discarded after the callback.
     std::vector<std::vector<float>> outPlanes_;
     std::vector<float*> outPtrs_;
+
+    // Synthetic capture (opt-in, see setTestInput). Planes are pre-allocated in open() so
+    // the callback thread only writes into them.
+    int testInputChannels_ = 0;
+    std::vector<std::vector<float>> inPlanes_;
+    std::vector<float*> inPtrs_;
+    int64_t inFrame_ = 0; // absolute frames since start(), driver-thread only
 
     std::thread thread_;
     std::atomic<bool> stopRequested_{false};

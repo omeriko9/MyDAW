@@ -136,6 +136,14 @@ bool App::init(std::string& err) {
         else
             Log::warn("App: unknown --driver '%s' ignored", opts.driver.c_str());
     }
+    // Before open(): enumerate() has to advertise the synthetic inputs for a capture path
+    // to exist at all. Opt-in via --null-input, so a real fallback to the null driver is
+    // unchanged.
+    if (opts.nullInputChannels > 0) {
+        driver->setNullTestInput(opts.nullInputChannels);
+        Log::info("App: null driver synthesizing %d test capture channel(s)",
+                  opts.nullInputChannels);
+    }
     if (!driver->open(currentConfig_, &App::audioCallback, this, err)) {
         err = "audio driver open failed: " + err;
         return false;

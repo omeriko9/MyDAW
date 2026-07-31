@@ -47,6 +47,10 @@ public:
     // NullDriver failed (practically never).
     bool open(const AudioConfig& config, AudioCallback cb, void* user, std::string& err);
 
+    /** `--null-input N`: make the NullDriver synthesize N capture channels (0 = off, the
+     *  default). Test affordance only — see NullDriver::setTestInput. Before open(). */
+    void setNullTestInput(int channels) { null_.setTestInput(channels); }
+
     void start();
     void stop();
     void close();

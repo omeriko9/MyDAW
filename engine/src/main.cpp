@@ -110,6 +110,10 @@ bool parseArgs(const std::vector<std::string>& args, mydaw::AppOptions& opts) {
             opts.noBrowser = true;
         } else if (args[i] == "--exit-when-idle") {
             opts.exitWhenIdle = true;
+        } else if (take(i, "--null-input", v)) {
+            // Test affordance: synthesize N capture channels on the null driver so the
+            // recording path is reachable headlessly. Never on by default.
+            opts.nullInputChannels = std::atoi(v.c_str());
         } else {
             mydaw::Log::warn("main: ignoring unknown argument '%s'", args[i].c_str());
         }
