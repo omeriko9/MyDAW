@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "451bedddb1101fee6e172bddaaefc696a632872672327ecce88bd7c4a1ea7459";
+const char kAgentCatalogSha256[] = "21ce08fbf4d461006fbc04f78c55856a3623ffe065a3f7151ec0ed47c16acc1c";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -952,6 +952,39 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "ClipCrossfadeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "overlapSec": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "overlapSec"
+      ],
+      "type": "object"
+    },
+    "ClipCrossfadeRequest": {
+      "additionalProperties": false,
+      "description": "exactly two audio clips on one track; they must overlap on the timeline",
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "curve": {
+          "$ref": "#/schemas/FadeCurve"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
     "ClipDeleteRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1008,6 +1041,28 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "string"
     },
+    "ClipEnvPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "normalized position 0..1 across the clip's audible span",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "value": {
+          "description": "linear gain 0..2 (1 = unity)",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "pos",
+        "value"
+      ],
+      "type": "object"
+    },
     "ClipJoinReply": {
       "additionalProperties": false,
       "properties": {
@@ -1058,93 +1113,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
-    "ClipCrossfadeReply": {
-      "additionalProperties": false,
-      "properties": {
-        "overlapSec": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "overlapSec"
-      ],
-      "type": "object"
-    },
-    "ClipCrossfadeRequest": {
-      "additionalProperties": false,
-      "description": "exactly two audio clips on one track; they must overlap on the timeline",
-      "properties": {
-        "clipIds": {
-          "items": {
-            "type": "number"
-          },
-          "maxItems": 2,
-          "minItems": 2,
-          "type": "array"
-        },
-        "curve": {
-          "$ref": "#/schemas/FadeCurve"
-        }
-      },
-      "required": [
-        "clipIds"
-      ],
-      "type": "object"
-    },
-    "ClipProcess": {
-      "additionalProperties": false,
-      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "id": {
-          "type": "number"
-        },
-        "op": {
-          "type": "string"
-        },
-        "params": {
-          "additionalProperties": {
-            "type": "number"
-          },
-          "type": "object"
-        },
-        "sparams": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      },
-      "required": [
-        "id",
-        "op"
-      ],
-      "type": "object"
-    },
-    "ClipEnvPoint": {
-      "additionalProperties": false,
-      "properties": {
-        "pos": {
-          "description": "normalized position 0..1 across the clip's audible span",
-          "maximum": 1,
-          "minimum": 0,
-          "type": "number"
-        },
-        "value": {
-          "description": "linear gain 0..2 (1 = unity)",
-          "maximum": 2,
-          "minimum": 0,
-          "type": "number"
-        }
-      },
-      "required": [
-        "pos",
-        "value"
-      ],
-      "type": "object"
-    },
     "ClipPatch": {
       "additionalProperties": false,
       "properties": {
@@ -1180,6 +1148,38 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "ClipProcess": {
+      "additionalProperties": false,
+      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "number"
+        },
+        "op": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "sparams": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
       "type": "object"
     },
     "ClipResizeRequest": {
@@ -2140,6 +2140,27 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "startBeat",
         "lengthBeats",
         "notes"
+      ],
+      "type": "object"
+    },
+    "MidiFeedEventRequest": {
+      "additionalProperties": false,
+      "description": "Channel-voice MIDI injection from a non-port source. status is a channel-voice status byte (0x80..0xEF); data1/data2 are 0..127.",
+      "properties": {
+        "status": {
+          "type": "number"
+        },
+        "data1": {
+          "type": "number"
+        },
+        "data2": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "status",
+        "data1",
+        "data2"
       ],
       "type": "object"
     },
@@ -8371,6 +8392,36 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "input": {
             "assetId": 3,
             "newPath": "C:/Music/kick.wav"
+          }
+        }
+      ]
+    },
+    {
+      "name": "midi/feedEvent",
+      "category": "midi-mapping",
+      "description": "Inject one channel-voice MIDI message as if it arrived from a port. Unlike midimap/feedCc this reaches the RECORDER, so injected notes are recordable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MidiFeedEventRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "status": 144,
+            "data1": 60,
+            "data2": 100
           }
         }
       ]

@@ -27,6 +27,9 @@ void MidiRecorder::resetPending() {
 void MidiRecorder::begin(double startBeat) {
     laps_.clear();
     laps_.push_back(Lap{startBeat, startBeat});
+    noteLap_.clear();
+    ccLap_.clear();
+    curLap_ = 0;
     active_ = true;
     startBeat_ = startBeat;
     lastPumpBeat_ = startBeat;
@@ -72,16 +75,20 @@ void MidiRecorder::feed(const MidiEvent& e, double beatAtEvent) {
         n.channel = ch;
         pending_[ch][pitch] = static_cast<int>(notes_.size());
         notes_.push_back(n);
+        noteLap_.push_back(curLap_);
     } else if (e.isNoteOff()) {
         closePending(ch, e.note(), rel);
     } else if (e.isController()) {
         cc_.push_back(MidiCc{0, static_cast<int>(e.controller()), rel,
                              static_cast<double>(e.ccValue()) / 127.0});
+        ccLap_.push_back(curLap_);
     } else if (e.isPitchBend()) { // controller 128, 0.5 = center
         cc_.push_back(MidiCc{0, 128, rel,
                              static_cast<double>(e.pitchBendValue() + 8192) / 16383.0});
+        ccLap_.push_back(curLap_);
     } else if (e.isChannelAftertouch()) { // controller 129
         cc_.push_back(MidiCc{0, 129, rel, static_cast<double>(e.data[1]) / 127.0});
+        ccLap_.push_back(curLap_);
     }
     // Program change / poly aftertouch: not recorded.
 }
@@ -140,6 +147,8 @@ void MidiRecorder::wrapTake(double boundaryBeat, double resumeBeat) {
             n.channel = ch;
             pending_[ch][p] = static_cast<int>(notes_.size());
             notes_.push_back(n);
+            noteLap_.push_back(curLap_);
+        noteLap_.push_back(curLap_);
         }
     }
     // The seam IS the lap boundary — close this pass and open the next one. Held notes
@@ -148,6 +157,7 @@ void MidiRecorder::wrapTake(double boundaryBeat, double resumeBeat) {
     if (!laps_.empty())
         laps_.back().endBeat = boundaryBeat;
     laps_.push_back(Lap{resumeBeat, resumeBeat});
+    curLap_ = static_cast<int>(laps_.size()) - 1;
 
     // A finalize before the next pump must close held notes here, not back at the seam.
     lastPumpBeat_ = resumeBeat;
@@ -164,17 +174,8 @@ std::vector<MidiRecorder::RecordedNotes> MidiRecorder::finalize(const TempoMap& 
             if (pending_[ch][p] >= 0)
                 closePending(ch, p, relStop);
 
-    std::stable_sort(notes_.begin(), notes_.end(), [](const Note& a, const Note& b) {
-        if (a.startBeat != b.startBeat)
-            return a.startBeat < b.startBeat;
-        return a.pitch < b.pitch;
-    });
-    std::stable_sort(cc_.begin(), cc_.end(), [](const MidiCc& a, const MidiCc& b) {
-        if (a.controller != b.controller)
-            return a.controller < b.controller;
-        return a.beat < b.beat;
-    });
-
+    // NOTE: sorting happens per-lap AFTER bucketing. Sorting notes_/cc_ here would
+    // desync noteLap_/ccLap_, which are parallel by index.
     std::vector<RecordedNotes> out;
     if (notes_.empty() && cc_.empty()) {
         // Nothing recorded — one empty pass, so the caller's "skip when endBeat ==
@@ -214,29 +215,40 @@ std::vector<MidiRecorder::RecordedNotes> MidiRecorder::finalize(const TempoMap& 
         out[k].startBeat = laps_[k].startBeat;
         out[k].endBeat = laps_[k].endBeat;
     }
-    const auto lapOf = [&](double absBeat) -> size_t {
-        for (size_t k = laps_.size(); k-- > 0;)
-            if (absBeat >= laps_[k].startBeat - 1e-9)
-                return k;
-        return 0;
-    };
-    for (Note& n : notes_) {
-        const double abs = startBeat_ + n.startBeat;
-        const size_t k = lapOf(abs);
-        Note c = n;
-        c.startBeat = abs - laps_[k].startBeat; // re-base: clips are lap-relative
+    for (size_t i = 0; i < notes_.size(); ++i) {
+        const size_t k = static_cast<size_t>(
+            std::clamp(i < noteLap_.size() ? noteLap_[i] : 0, 0,
+                       static_cast<int>(laps_.size()) - 1));
+        Note c = notes_[i];
+        // Re-base onto this lap's own start. notes_ is relative to startBeat_, and a cycle
+        // re-enters the same span, so lap 3's note sits at the same musical position as
+        // lap 1's — the difference is which lane it belongs to, not where it plays.
+        c.startBeat = (startBeat_ + notes_[i].startBeat) - laps_[k].startBeat;
         if (c.startBeat < 0.0)
             c.startBeat = 0.0;
         out[k].notes.push_back(c);
     }
-    for (MidiCc& m : cc_) {
-        const double abs = startBeat_ + m.beat;
-        const size_t k = lapOf(abs);
-        MidiCc c = m;
-        c.beat = abs - laps_[k].startBeat;
+    for (size_t i = 0; i < cc_.size(); ++i) {
+        const size_t k = static_cast<size_t>(
+            std::clamp(i < ccLap_.size() ? ccLap_[i] : 0, 0,
+                       static_cast<int>(laps_.size()) - 1));
+        MidiCc c = cc_[i];
+        c.beat = (startBeat_ + cc_[i].beat) - laps_[k].startBeat;
         if (c.beat < 0.0)
             c.beat = 0.0;
         out[k].cc.push_back(c);
+    }
+    for (RecordedNotes& rn : out) {
+        std::stable_sort(rn.notes.begin(), rn.notes.end(), [](const Note& a, const Note& b) {
+            if (a.startBeat != b.startBeat)
+                return a.startBeat < b.startBeat;
+            return a.pitch < b.pitch;
+        });
+        std::stable_sort(rn.cc.begin(), rn.cc.end(), [](const MidiCc& a, const MidiCc& b) {
+            if (a.controller != b.controller)
+                return a.controller < b.controller;
+            return a.beat < b.beat;
+        });
     }
 
     // Drop laps that captured nothing — a wrap with no notes must not leave an empty take
@@ -256,6 +268,8 @@ std::vector<MidiRecorder::RecordedNotes> MidiRecorder::finalize(const TempoMap& 
     notes_.clear();
     cc_.clear();
     laps_.clear();
+    noteLap_.clear();
+    ccLap_.clear();
     resetPending();
     active_ = false;
 

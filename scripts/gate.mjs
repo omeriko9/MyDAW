@@ -64,6 +64,8 @@ const SUITES = [
     note: "headless recording via --null-input; the base every Phase 3 test builds on" },
   { id: "punch", tier: "fast", script: "punch-test.mjs", requires: needsEngine,
     note: "sample-exact record gate; leans on --null-input's position-recoverable ramp" },
+  { id: "midi-lap", tier: "fast", script: "midi-lap-test.mjs", requires: needsEngine,
+    note: "cycle-record lap splitting; needs midi/feedEvent to drive MIDI headlessly" },
   { id: "midi-learn", tier: "fast", script: "midi-learn-test.mjs", requires: needsEngine },
   { id: "midi-out-channel", tier: "fast", script: "midi-out-channel-test.mjs", requires: needsEngine },
   { id: "smf-logic", tier: "fast", script: "smf-logic-test.mjs", requires: needsEngine },

@@ -119,6 +119,13 @@ private:
         double endBeat = 0.0;
     };
     std::vector<Lap> laps_;
+    // Which lap each captured note/CC arrived in, parallel to notes_/cc_. Position CANNOT
+    // answer this: a cycle re-enters the same span every lap, so all laps share a start
+    // beat and every note of every pass lands at the same musical position. Only arrival
+    // order distinguishes them.
+    std::vector<int> noteLap_;
+    std::vector<int> ccLap_;
+    int curLap_ = 0;
     std::vector<Note> notes_;   // startBeat relative to startBeat_; lengthBeats 0 = open
     std::vector<MidiCc> cc_;    // beat relative to startBeat_; values normalized
     int pending_[16][128];      // [channel][pitch] -> index into notes_, -1 = none

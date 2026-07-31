@@ -1274,6 +1274,15 @@ export interface TimeSigMapSetRequest {
   entries: TimeSigEntry[];
 }
 
+/** Channel-voice injection from a non-port source (software keyboard / control surface /
+ *  test). `status` is a channel-voice status byte 0x80..0xEF. Reaches the RECORDER, unlike
+ *  midimap/feedCc which drives the mapping path. */
+export interface MidiFeedEventRequest {
+  status: number;
+  data1: number;
+  data2: number;
+}
+
 export interface LoopSetRequest {
   startBeat: number;
   endBeat: number;
@@ -1928,6 +1937,7 @@ export interface RequestMap {
   "cmd/timeSigMap.set": { req: TimeSigMapSetRequest; reply: EmptyObject };
   "cmd/loop.set": { req: LoopSetRequest; reply: EmptyObject };
   "cmd/punch.set": { req: LoopSetRequest; reply: EmptyObject };
+  "midi/feedEvent": { req: MidiFeedEventRequest; reply: EmptyObject };
   "cmd/grid.set": { req: GridSetRequest; reply: EmptyObject };
   "edit/undo": { req: EmptyObject; reply: UndoRedoReply };
   "edit/redo": { req: EmptyObject; reply: UndoRedoReply };
@@ -2126,6 +2136,7 @@ export const ArrangeCmd = {
   timeSigMapSet: "cmd/timeSigMap.set",
   loopSet: "cmd/loop.set",
   punchSet: "cmd/punch.set",
+  feedMidiEvent: "midi/feedEvent",
   gridSet: "cmd/grid.set",
 } as const satisfies Record<string, RequestType>;
 

@@ -108,6 +108,18 @@ public:
     json midiMapsJson() const;
     // Feed one CC through the control path (real MIDI callback + midimap/feedCc test/OSC hook).
     void feedMidiCc(int cc, int channel, int value) { handleMidiControl(cc, channel, value); }
+    /** Inject a channel-voice MIDI message (software control surface / on-screen keyboard
+     *  / test). Enters MidiInput's mirror ring, so it RECORDS exactly like hardware. */
+    void feedMidiEvent(int status, int data1, int data2) {
+        MidiEvent e;
+        e.sampleOffset = 0;
+        e.data[0] = static_cast<uint8_t>(status & 0xFFu);
+        e.data[1] = static_cast<uint8_t>(data1 & 0x7Fu);
+        e.data[2] = static_cast<uint8_t>(data2 & 0x7Fu);
+        const uint8_t hi = static_cast<uint8_t>(status & 0xF0u);
+        e.size = (hi == 0xC0 || hi == 0xD0) ? uint8_t{2} : uint8_t{3};
+        midiInput.feedExternal(e);
+    }
 
     // ----- job queue (thread-safe) -------------------------------------------
     void post(std::function<void()> job);

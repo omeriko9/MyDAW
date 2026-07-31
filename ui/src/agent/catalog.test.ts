@@ -81,6 +81,7 @@ const REQUEST_TYPES = [
   "cmd/timeSigMap.set",
   "cmd/loop.set",
   "cmd/punch.set",
+  "midi/feedEvent",
   "cmd/grid.set",
   "edit/undo",
   "edit/redo",
@@ -288,9 +289,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(130);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(131);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(144);
+    expect(AGENT_CATALOG.operations).toHaveLength(145);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

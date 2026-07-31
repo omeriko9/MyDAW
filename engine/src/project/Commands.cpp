@@ -6520,12 +6520,35 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     // clip and three passes over the same bar landed on top of each other with no way to
     // choose between them (docs/STUBS.md: "MIDI loop-record isn't lap-split").
     {
+        // Laps of a cycle do NOT share an exact start beat: the wrap resumes wherever the
+        // block boundary fell, so successive passes begin a few milliseconds apart
+        // (measured: 0, 0.0053, 0.0107 beats). Exact-equality grouping therefore produces
+        // one loose clip per lap instead of a stack. Group within a tolerance well below
+        // any deliberate spacing but well above a block.
+        constexpr double kLapGroupBeats = 0.0625; // 1/16 beat
         std::vector<std::pair<uint64_t, double>> order;
         std::map<std::pair<uint64_t, double>, std::vector<MidiClip>> groups;
         for (auto& pr : midiPending) {
-            const std::pair<uint64_t, double> key{pr.first, pr.second.startBeat};
+            std::pair<uint64_t, double> key{pr.first, pr.second.startBeat};
+            for (const auto& k : order) {
+                if (k.first == pr.first && std::abs(k.second - pr.second.startBeat) <= kLapGroupBeats) {
+                    key = k;
+                    break;
+                }
+            }
             if (groups.find(key) == groups.end())
                 order.push_back(key);
+            // Align the lane to the group's anchor, compensating the note and CC offsets so
+            // absolute timing is untouched — takes should stack, not stagger by a block.
+            const double shift = pr.second.startBeat - key.second;
+            if (shift != 0.0) {
+                pr.second.startBeat = key.second;
+                pr.second.lengthBeats += shift;
+                for (Note& n : pr.second.notes)
+                    n.startBeat += shift;
+                for (MidiCc& cv : pr.second.cc)
+                    cv.beat += shift;
+            }
             groups[key].push_back(std::move(pr.second));
         }
         for (const auto& key : order) {

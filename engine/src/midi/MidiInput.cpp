@@ -151,6 +151,14 @@ bool MidiInput::setEnabled(const std::string& id, bool enabled) {
     return true;
 }
 
+void MidiInput::feedExternal(const MidiEvent& e) {
+    // Same two consumers the winmm path feeds, minus the device RT ring (see the header).
+    mirror_.push(TimedMidiEvent{e, qpcNow()});
+    const std::shared_ptr<const ControlFn> ccb = controlCb_.load(std::memory_order_acquire);
+    if (ccb && *ccb)
+        (*ccb)(e);
+}
+
 void MidiInput::setControlCallback(std::function<void(const MidiEvent&)> cb) {
     controlCb_.store(std::make_shared<const ControlFn>(std::move(cb)), std::memory_order_release);
 }

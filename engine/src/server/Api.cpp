@@ -249,6 +249,20 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
                         std::clamp(getOr<int>(p, "value", 0), 0, 127));
         return json::object();
     }
+    // Channel-voice injection from a non-port source (software keyboard / control surface /
+    // test). Unlike midimap/feedCc — which drives the MAPPING path — this enters the
+    // recorder's mirror ring, so it is recordable exactly like hardware input.
+    if (type == "midi/feedEvent") {
+        const int status = getOr<int>(p, "status", 0);
+        if ((status & 0x80) == 0 || (status & 0xF0) == 0xF0) {
+            ec = "bad_request";
+            em = "status must be a channel-voice status byte (0x80..0xEF)";
+            return json();
+        }
+        app_.feedMidiEvent(status, std::clamp(getOr<int>(p, "data1", 0), 0, 127),
+                           std::clamp(getOr<int>(p, "data2", 0), 0, 127));
+        return json::object();
+    }
 
     // --- §5.1 session & project ---------------------------------------------------
     if (type == "session/hello")
