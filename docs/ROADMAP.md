@@ -31,12 +31,34 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
 - Grid/snap persistence: `cmd/grid.set` writes `project.grid` (undoable, saved); the
   transport snap selector keeps an optimistic local mirror.
 
-## Phase 3 — Recording & media ⬜
+## Phase 3 — Recording & media 🔨
 
-- Punch in/out: punch region on transport, record gate in `AudioGraph`/recording commit.
-- Loop-record takes: each loop pass → stacked clip (others muted), context-menu take
-  picker; same for MIDI.
-- Input gain per audio track (pre-insert), input meter while armed.
+- **Punch in/out** — DONE (2026-07-31): `project.punch` + `cmd/punch.set`, region carried in
+  `event/transport`, persisted, re-derived on a tempo edit. The record gate lives in
+  `AudioGraph`'s per-span record tap, NOT in `Transport::nextSpans` — spans are already split
+  at loop and arranger discontinuities, so punch composes with cycle recording for free and a
+  boundary landing mid-block simply shortens one span's contribution. `Transport::punchSpan`
+  is an interval INTERSECTION, never an edge test: the loop-wrap bug fixed in `f9a5309` was an
+  edge detector that never fired on a block-aligned boundary, and punch has the same hazard at
+  both ends. `AudioRecorder` reports where material actually began rather than where record was
+  pressed. UI: a sliver in the ruler's loop lane (Ctrl+Alt+drag) plus a transport toggle that
+  seeds an empty region from the cycle. Tests: `scripts/punch-test.mjs` (15/15, boundaries
+  asserted exactly — a 2-beat window yields exactly 48000 frames).
+- **Loop-record takes** — DONE (2026-07-31): audio lap stacking shipped with comping
+  (2026-07-03); MIDI now splits too. Placement comes from a SEGMENT LEDGER rather than
+  arithmetic — `AudioRecorder` records each contiguous run with both coordinates (timeline
+  position and offset within the take file), and `recordingCommit` groups runs by start
+  position: shared position means laps and becomes take lanes, distinct positions become
+  separate clips. That replaced `laps = ceil(frames/loopLen)`, which assumed the take began at
+  the loop start and ran without a gap — already wrong after any dropped block, since the file
+  stayed contiguous and everything after the gap was attributed a block early. MIDI laps are
+  bucketed by ARRIVAL, not position: a cycle re-enters the same span every lap, so all laps
+  share a start beat. Tests: `punch-test.mjs` (multi-lap), `midi-lap-test.mjs` (7/7).
+  Remaining: take lanes are still not drawn inline in the arrangement (see STUBS).
+- Input gain per audio track (pre-insert), input meter while armed. NOTE: decide and record in
+  SPEC §5.5 whether the recorded FILE is raw or gain-baked before building — recording raw
+  means the input meter shows a level the file does not have; baking means a mis-set trim
+  destroys a take. One sentence either way, but not a detail to leave implicit.
 - `media/import` tempo prompt (`SmfReader` already parses tempo) + make import undoable
   (route through an `internal/recording.commit`-style command).
 - Stem export: `export/render` per-track/bus variant (offline render with per-track tap

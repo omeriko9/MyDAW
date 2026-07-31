@@ -57,7 +57,7 @@ Your browser opens `http://127.0.0.1:8417` with the UI. Point Settings ▸ Plugi
 VST folders, hit scan, and make some noise.
 
 Quick sanity check (headless): `node scripts/smoke-test.mjs`
-Full test gate (23 suites, ~70 s): `node scripts/gate.mjs`
+Full test gate (26 suites, ~90 s): `node scripts/gate.mjs`
 
 ## Repository layout
 
