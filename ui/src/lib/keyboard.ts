@@ -247,6 +247,22 @@ function isEditableTarget(el: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
 }
 
+/**
+ * True when Space belongs to the focused control while the UI is blocked. Blink only
+ * runs a button's native activation (keydown default → click on keyup) if the keydown
+ * was not defaultPrevented, so preventing it blanket-killed Space on every button in
+ * every dialog. Keep it for a control the user deliberately tabbed to — but NOT for a
+ * modal's title-bar X, which Modal focuses on open: there the DAW's Space reflex would
+ * dismiss the dialog and discard everything typed into it. Anything else (the panel,
+ * the overlay, a role="button" div that handles Space itself) has no native Space
+ * action, so preventDefault there only stops the page from scrolling.
+ */
+function spaceActivatesTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const btn = el.closest("button, a[href]");
+  return !!btn && !btn.closest(".modal-title");
+}
+
 /** True when the user has a non-empty DOM text selection (e.g. highlighted chat text). */
 function hasTextSelection(): boolean {
   const sel = window.getSelection();
@@ -515,10 +531,7 @@ function onKeyDown(e: KeyboardEvent): void {
   // Menus/modals own the keyboard (incl. their Esc) — except transport keys inside
   // modals that opt in (Room View): play/stop/locate must work in every view.
   if (uiBlocked() && !(blockedButTransportAllowed() && isTransportKey(e))) {
-    // Space must not reach the browser here: the focused control is usually a button
-    // (Modal auto-focuses the title-bar X), and its default activation would let the
-    // transport reflex dismiss the dialog and discard everything typed into it.
-    if (e.key === " ") e.preventDefault();
+    if (e.key === " " && !spaceActivatesTarget(e.target)) e.preventDefault();
     return;
   }
 
@@ -536,10 +549,13 @@ function onKeyDown(e: KeyboardEvent): void {
   // ("!@#$" on US), so comparing e.key against "1".."4" made the save half of this
   // shortcut unreachable on a real keyboard. e.key stays as the fallback for
   // synthetic events and layouts that report no usable code.
+  // AltGr must NOT count as Ctrl+Alt: Windows reports it as ctrlKey+altKey, so matching
+  // the physical code made AltGr+1..4 — how a German/Spanish/… layout types | @ # ~ —
+  // swap the whole workspace.
   const slotKey =
     /^(?:Digit|Numpad)([1-4])$/.exec(e.code)?.[1] ??
     (key >= "1" && key <= "4" ? key : undefined);
-  if (ctrl && e.altKey && slotKey) {
+  if (ctrl && e.altKey && slotKey && !e.getModifierState("AltGraph")) {
     consume();
     if (e.repeat) return;
     const slot = Number(slotKey) as LayoutSlotIndex;

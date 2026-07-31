@@ -187,12 +187,20 @@ export function SnapCluster() {
   // would otherwise leave it on the old bar length while the select falls back to a dead,
   // disabled "custom" entry. Re-derive it only when the division still IS the previous bar
   // length (i.e. bar mode) — genuine custom divisions are left alone.
-  const prevBpbRef = useRef<number | null>(null);
+  // Keyed on the project NAME, not on null-ness: opening a project swaps A for B in one
+  // setState (project never passes through null), so a bare number would compare B's grid
+  // against A's bar length and silently rewrite the snap of a project nobody edited.
+  const prevBpbRef = useRef<{ name: string; beatsPerBar: number } | null>(null);
   useEffect(() => {
     const prev = prevBpbRef.current;
-    prevBpbRef.current = project ? beatsPerBar : null;
-    if (!project || prev === null || prev === beatsPerBar) return;
-    if (grid.snap && approx(grid.division, prev)) setGridLocal({ division: beatsPerBar });
+    prevBpbRef.current = project ? { name: project.name, beatsPerBar } : null;
+    if (!project || prev === null || prev.name !== project.name) return;
+    if (prev.beatsPerBar === beatsPerBar) return;
+    // Transient: undo restores a whole-project snapshot, so the meter change's own entry
+    // already carries the old division — a second "Set Grid" entry would only let one
+    // Ctrl+Z land in the dead custom state this re-derive exists to avoid.
+    if (grid.snap && approx(grid.division, prev.beatsPerBar))
+      setGridLocal({ division: beatsPerBar }, true);
   }, [project, beatsPerBar, grid.snap, grid.division]);
 
   // close swing popover on outside click / Escape
@@ -303,7 +311,7 @@ export function SnapCluster() {
 export function TempoSigCluster() {
   const project = useStore((s) => s.project);
   const bpm = project?.tempoMap[0]?.bpm ?? 120;
-  const sig = project?.timeSigMap[0] ?? { bar: 1, num: 4, den: 4 };
+  const sig = project?.timeSigMap[0] ?? { bar: 0, num: 4, den: 4 }; // bar is 0-based on the wire
   const [bpmDrag, setBpmDrag] = useState<number | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const mapRef = useRef<HTMLSpanElement | null>(null);
@@ -665,7 +673,14 @@ export default function TransportBar() {
             icon="mixer"
             active={panels.bottomTab !== null}
             tooltip="Bottom dock"
-            onClick={() => setPanels({ bottomTab: panels.bottomTab === null ? "mixer" : null })}
+            onClick={() =>
+              // Reopen on the pane the dock was closed on (panels.bottomTabPrev), same as
+              // View → Bottom Dock: a hard-coded "mixer" lost that pane and could collide
+              // with bottomTab2, which App's normalizer resolves by dropping the split.
+              setPanels({
+                bottomTab: panels.bottomTab === null ? (panels.bottomTabPrev ?? "mixer") : null,
+              })
+            }
           />
           <IconButton
             icon="sliders"

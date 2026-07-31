@@ -1124,6 +1124,7 @@ int App::run() {
     auto lastClientPresent = now; // for --exit-when-idle child instances
     bool everConnected = false;
     TransportState lastState = transport.state();
+    uint32_t lastWrapSeq = transport.wrapSeq();
 
     while (!stopping_.load(std::memory_order_acquire)) {
         std::vector<std::function<void()>> jobs;
@@ -1170,6 +1171,19 @@ int App::run() {
         if (now - lastPump >= 33ms) { // ~30 Hz
             lastPump = now;
             host->pump();
+        }
+
+        // Cycle wrap / arranger jump: the RT thread moved the playhead BACKWARDS, and the
+        // recorder times everything off that playhead. Split the take at the seam before
+        // the next pump — otherwise the note-off of a key held across the loop end is
+        // timestamped before its own note-on and the note commits as a 1/128-beat stub.
+        // Checked every tick (not at the 20 ms pump) so the boundary stays tight.
+        const uint32_t wrapSeq = transport.wrapSeq();
+        if (wrapSeq != lastWrapSeq) {
+            lastWrapSeq = wrapSeq;
+            if (recordingActive_ && midiRecorder.active())
+                midiRecorder.wrapTake(tempoMap.samplesToBeats(transport.wrapFromSamples()),
+                                      transport.playheadBeats());
         }
 
         if (recordingActive_ && midiRecorder.active() && now - lastMidiPump >= 20ms) {

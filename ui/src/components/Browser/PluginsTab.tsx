@@ -14,7 +14,7 @@
  *   event/scanProgress, gear → Settings dialog
  */
 
-import React, { memo, useCallback, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useStore, type DawState } from "../../store/store";
 import {
   addPlugin,
@@ -24,7 +24,12 @@ import {
 } from "../../store/actions";
 import { setDragChip, setPluginDrag } from "../../lib/dnd";
 import { pluginCardEnter, pluginCardLeave } from "./pluginHoverCard";
-import { pluginKey } from "../../lib/ids";
+import {
+  isPluginFavorite,
+  loadPluginFavorites,
+  pluginKey,
+  togglePluginFavorite,
+} from "../../lib/ids";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isBool, loadPref, oneOf, savePref, usePrefState } from "../../lib/prefs";
 import type { PluginInfo, Track } from "../../protocol/types";
@@ -75,16 +80,6 @@ function firstSelectedTrack(st: DawState): Track | undefined {
   );
 }
 
-/**
- * Favourites are keyed by the full pluginKey, not by uid: a VST2 shell reports the SAME
- * uid for every copy of the DLL, so a uid-keyed star lit up every variant at once. Bare
- * uids in the pref are pre-existing entries — still honoured so nobody loses their stars;
- * anything starred from now on is written with the unique key.
- */
-function isFavorite(favorites: ReadonlySet<string>, p: PluginInfo): boolean {
-  return favorites.has(pluginKey(p)) || favorites.has(p.uid);
-}
-
 function buildRows(
   registry: PluginInfo[],
   query: string,
@@ -96,7 +91,7 @@ function buildRows(
 ): { rows: Row[]; matchCount: number; variantsByKey: Map<string, string[]> } {
   const q = query.trim().toLowerCase();
   const favSet = new Set(favorites);
-  const isFav = (p: PluginInfo) => isFavorite(favSet, p);
+  const isFav = (p: PluginInfo) => isPluginFavorite(favSet, p);
   let filtered = (
     q
       ? registry.filter(
@@ -133,7 +128,7 @@ function buildRows(
             key: "fav:*",
             label: "★ Favorites",
             sect: "fav",
-            plugins: filtered.filter((p) => favSet.has(p.uid)), // `filtered` is already name-sorted
+            plugins: filtered.filter(isFav), // `filtered` is already name-sorted
           },
           {
             key: "recent:*",
@@ -367,10 +362,8 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(loadPref<string[]>("browser.pluginsCollapsed", [], isStringArray)),
   );
-  // Favorited plugin uids + most-recent-first uids of plugins added from this tab.
-  const [favorites, setFavorites] = useState<readonly string[]>(() =>
-    loadPref<string[]>("browser.pluginFavorites", [], isStringArray),
-  );
+  // Favorited plugins (lib/ids keys) + most-recent-first uids of plugins added from this tab.
+  const [favorites, setFavorites] = useState<readonly string[]>(loadPluginFavorites);
   const [recent, setRecent] = useState<readonly string[]>(() =>
     loadPref<string[]>("browser.pluginRecent", [], isStringArray),
   );
@@ -387,17 +380,16 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
     [registry, query, groupBy, collapsed, favorites, recent, favoritesOnly],
   );
 
+  // The Plugin Manager tab edits the same pref: follow its writes live, and toggle
+  // through lib/ids (which re-reads storage) so we never write back a stale array.
+  useEffect(() => {
+    const onStorage = () => setFavorites(loadPluginFavorites());
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const toggleFavorite = useCallback((p: PluginInfo) => {
-    setFavorites((prev) => {
-      const key = pluginKey(p);
-      // Un-starring also drops a legacy bare-uid entry, otherwise the star would
-      // come straight back (and take every same-uid shell variant with it).
-      const next = isFavorite(new Set(prev), p)
-        ? prev.filter((k) => k !== key && k !== p.uid)
-        : [...prev, key];
-      savePref("browser.pluginFavorites", next);
-      return next;
-    });
+    setFavorites(togglePluginFavorite(p));
   }, []);
 
   const recordRecent = useCallback((uid: string) => {
@@ -507,7 +499,7 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
       return (
         <PluginRowView
           p={r.plugin}
-          favorite={isFavorite(favoriteSet, r.plugin)}
+          favorite={isPluginFavorite(favoriteSet, r.plugin)}
           variants={variantsByKey.get(pluginKey(r.plugin))}
           onAdd={onAdd}
           onToggleFavorite={toggleFavorite}

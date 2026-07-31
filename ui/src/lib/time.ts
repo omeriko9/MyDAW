@@ -2,7 +2,8 @@
  * Musical time math — mirrors engine semantics (SPEC §4, §7):
  *   - musical positions are in `double beats` (quarter notes)
  *   - tempoMap is piecewise-CONSTANT bpm (each entry holds until the next)
- *   - timeSigMap entries start at 1-based bar numbers
+ *   - timeSigMap entries are keyed by a 0-BASED wire bar; everything this module
+ *     exposes is 1-based (sigSegments does the conversion — see its block comment)
  *
  * Also: beat↔px via the viewport, grid snapping (snapping uses division & triplet;
  * swing is for quantize only — SPEC §6 grid object), and bars.beats / time formatting.

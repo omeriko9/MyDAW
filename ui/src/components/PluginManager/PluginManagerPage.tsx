@@ -22,14 +22,16 @@ import {
   scanPlugins,
   unblacklistPlugin,
 } from "../../store/actions";
-import { loadPref, savePref } from "../../lib/prefs";
+import {
+  isPluginFavorite,
+  loadPluginFavorites,
+  pluginKey,
+  togglePluginFavorite,
+} from "../../lib/ids";
 import { Icon } from "../common/icons";
 
 type KindFilter = "all" | "instruments" | "effects" | "blacklisted" | "bit32";
 type SortKey = "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io" | "folder" | "status";
-
-const isStringArray = (v: unknown): boolean =>
-  Array.isArray(v) && v.every((e) => typeof e === "string");
 
 function folderOf(p: PluginInfo): string {
   if (p.format === "builtin") return "";
@@ -44,17 +46,6 @@ function fileOf(p: PluginInfo): string {
 
 function formatLabel(p: PluginInfo): string {
   return p.format === "vst2" ? "VST2" : p.format === "vst3" ? "VST3" : "Built-in";
-}
-
-/** Stable identity for rows: uid is NOT unique across shell variants — include path+bitness. */
-function rowKey(p: PluginInfo): string {
-  return `${p.format}|${p.uid}|${p.bitness}|${p.path}`;
-}
-
-/** Favourites are stored per ROW, not per uid. Bare uids are pre-existing pref entries
- *  (they matched every same-uid variant at once) — honoured on read so stars survive. */
-function isFavorite(favorites: readonly string[], p: PluginInfo): boolean {
-  return favorites.includes(rowKey(p)) || favorites.includes(p.uid);
 }
 
 function sortValue(p: PluginInfo, key: SortKey): string | number {
@@ -80,9 +71,8 @@ export default function PluginManagerPage() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [favorites, setFavorites] = useState<readonly string[]>(() =>
-    loadPref<string[]>("browser.pluginFavorites", [], isStringArray),
-  );
+  const [favorites, setFavorites] = useState<readonly string[]>(loadPluginFavorites);
+  const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
   const refresh = useCallback(() => {
     getPluginRegistry()
@@ -103,8 +93,7 @@ export default function PluginManagerPage() {
     });
     const offProg = ws.on("event/scanProgress", setScan);
     // Another tab may edit favorites (same localStorage) — follow it live.
-    const onStorage = () =>
-      setFavorites(loadPref<string[]>("browser.pluginFavorites", [], isStringArray));
+    const onStorage = () => setFavorites(loadPluginFavorites());
     window.addEventListener("storage", onStorage);
     return () => {
       offState();
@@ -115,23 +104,15 @@ export default function PluginManagerPage() {
     };
   }, [refresh]);
 
+  // Same pref as the Browser's Plugins tab (another window), so the key format and the
+  // read-modify-write live in lib/ids — a local copy of the rule is what went stale before.
   const toggleFavorite = useCallback((p: PluginInfo) => {
-    setFavorites((prev) => {
-      const key = rowKey(p);
-      // Same pref as the Browser's Plugins tab, so it uses the same rule: star the
-      // full row key, never the uid (one uid = every shell variant), and drop any
-      // legacy bare-uid entry on un-star so the star cannot come back.
-      const next = isFavorite(prev, p)
-        ? prev.filter((k) => k !== key && k !== p.uid)
-        : [...prev, key];
-      savePref("browser.pluginFavorites", [...next]);
-      return next;
-    });
+    setFavorites(togglePluginFavorite(p));
   }, []);
 
   const disable = useCallback(
     (p: PluginInfo) => {
-      const key = rowKey(p);
+      const key = pluginKey(p);
       setBusyKey(key);
       blacklistPlugin(p.path, p.uid)
         .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -143,7 +124,7 @@ export default function PluginManagerPage() {
 
   const enable = useCallback(
     (p: PluginInfo) => {
-      const key = rowKey(p);
+      const key = pluginKey(p);
       setBusyKey(key);
       // PATH first for single-variant granularity (removeByUid also matches entry
       // paths); uid only as a fallback for rows without one.
@@ -316,9 +297,9 @@ export default function PluginManagerPage() {
           </thead>
           <tbody>
             {rows.map((p) => {
-              const key = rowKey(p);
+              const key = pluginKey(p);
               const busy = busyKey === key;
-              const fav = isFavorite(favorites, p);
+              const fav = isPluginFavorite(favoriteSet, p);
               return (
                 <tr
                   key={key}

@@ -92,17 +92,21 @@ export function TextInput({
         if (e.key === "Enter") {
           inputRef.current?.blur(); // blur handler commits
         } else if (e.key === "Escape") {
-          // Only swallow Escape when there is genuinely an edit to cancel. Without
+          // Only SWALLOW Escape when there is genuinely an edit to cancel. Without
           // onCommit this field has no draft of its own, so the revert below is a
           // no-op — and stopPropagation would still eat the key, which Modal listens
           // for on window in the BUBBLE phase. That cost the user a whole extra
           // Escape to close any dialog whose field is built on TextInput.
-          if (!onCommit || draft === value) return;
-          revertingRef.current = true;
-          setDraft(value);
-          onChange?.(value);
+          // The blur stays unconditional: it is the only way out of the field (keyboard.ts
+          // ignores every key aimed at an INPUT), so skipping it left the next keystrokes
+          // typing into the field — and committing them on the eventual blur.
+          if (onCommit && draft !== value) {
+            revertingRef.current = true;
+            setDraft(value);
+            onChange?.(value);
+            e.stopPropagation(); // don't trigger global esc (clear selection)
+          }
           inputRef.current?.blur();
-          e.stopPropagation(); // don't trigger global esc (clear selection)
         }
       }}
     />

@@ -34,6 +34,7 @@ import {
   unfreezeTrack,
 } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
+import { isPluginFavorite, loadPluginFavorites, pluginKey } from "../../lib/ids";
 import {
   assignInstrumentToFeeder,
   assignInstrumentToTrack,
@@ -167,6 +168,8 @@ interface ReorderRef {
   insertIndex: number;
   insertParentId: number | undefined;
   dropIntoId: number | null;
+  /** folder with descendants — the drag is refused once the threshold is crossed */
+  blocked: boolean;
 }
 
 interface HeightDragRef {
@@ -306,6 +309,14 @@ export default function TrackHeaders({
       insertIndex: -1,
       insertParentId: undefined,
       dropIntoId: null,
+      // cmd/track.reorder erases and re-inserts exactly ONE track, so it cannot express
+      // "move the folder with its subtree" — the children would stay put, stranded under a
+      // folder that is no longer above them (and the contiguity the drop math assumes would
+      // be broken). Faking it with one command per descendant is neither atomic nor one
+      // undo step, so a populated folder simply refuses to be dragged.
+      blocked:
+        row.track.kind === "folder" &&
+        !!project?.tracks.some((x) => isDescendantOf(project, x.id, row.track.id)),
     };
     // NO pointer capture yet: capture retargets the browser's click/dblclick to the
     // row, which silently killed double-click-to-rename on the name span. Capture is
@@ -317,6 +328,15 @@ export default function TrackHeaders({
     if (!d) return;
     if (!d.started) {
       if (Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
+      if (d.blocked) {
+        // Say why rather than showing a drop line for a move that would strand the children.
+        reorderRef.current = null;
+        showToast(
+          "A folder that contains tracks can't be reordered — move its tracks out first.",
+          "info",
+        );
+        return;
+      }
       d.started = true;
       e.currentTarget.setPointerCapture(e.pointerId); // keep the drag alive off-row
     }
@@ -334,14 +354,15 @@ export default function TrackHeaders({
 
     if (!d.started) {
       // plain click → select track (ctrl toggles)
+      // setSelection MERGES: a surviving clip selection would send M/S-style keys down the
+      // clip branch instead of the tracks just clicked, so BOTH branches replace the whole
+      // selection — building a multi-track selection with ctrl is no different.
       if (e.ctrlKey || e.metaKey) {
         const ids = selection.trackIds.includes(row.track.id)
           ? selection.trackIds.filter((id) => id !== row.track.id)
           : [...selection.trackIds, row.track.id];
-        setSelection({ trackIds: ids });
+        setSelection({ trackIds: ids, clipIds: [], noteIds: [] });
       } else {
-        // setSelection MERGES: a surviving clip selection would send M/S-style keys down
-        // the clip branch instead of the track just clicked, so replace the whole thing.
         setSelection({ trackIds: [row.track.id], clipIds: [], noteIds: [] });
       }
       return;
@@ -692,11 +713,11 @@ export default function TrackHeaders({
     current: { uid: string; path: string } | undefined,
     pick: (p: PluginInfo) => void,
   ): MenuEntry[] => {
-    const favUids = loadPref<string[]>(
-      "browser.pluginFavorites",
-      [],
-      (v) => Array.isArray(v) && v.every((e) => typeof e === "string"),
-    );
+    // Favourites live in lib/ids alongside pluginKey. Reading the pref by hand here is
+    // what made this picker go blank when the key format changed — four readers had each
+    // spelled the rule themselves.
+    const favKeys = new Set(loadPluginFavorites());
+    const isFav = (p: PluginInfo): boolean => isPluginFavorite(favKeys, p);
     const instruments = registry.filter((p) => p.isInstrument && !p.blacklisted);
     const entryFor = (p: PluginInfo): MenuEntry => ({
       label: p.name,
@@ -705,9 +726,7 @@ export default function TrackHeaders({
       checked: current?.uid === p.uid && (!current.path || current.path === p.path),
       onClick: () => pick(p),
     });
-    const favs = instruments
-      .filter((p) => favUids.includes(p.uid))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const favs = instruments.filter(isFav).sort((a, b) => a.name.localeCompare(b.name));
     const items: MenuEntry[] = favs.map(entryFor);
     if (items.length === 0) {
       // Nothing starred yet — stay useful: offer the (deduped) instrument list instead.

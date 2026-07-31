@@ -213,10 +213,16 @@ export default function SheetMusic() {
   /* ---- gather notes in absolute ticks, with the score starting at a whole bar ---- */
   const gathered = useMemo(() => {
     const sigMap = project?.timeSigMap ?? [];
-    const firstBeat = clips.reduce(
+    const firstNoteBeat = clips.reduce(
       (m, c) => (c.notes.length ? Math.min(m, c.startBeat + Math.min(...c.notes.map((nt) => nt.startBeat))) : m),
       Infinity,
     );
+    // A note-less clip still engraves (see hasScore), and with no note to anchor on the
+    // origin would fall back to beat 0 — a clip parked at bar 101 would then engrave 104
+    // empty bars from bar 1. Anchor on the earliest clip instead.
+    const firstBeat = Number.isFinite(firstNoteBeat)
+      ? firstNoteBeat
+      : clips.reduce((m, c) => Math.min(m, c.startBeat), Infinity);
     const sig = timeSigAtBeat(Number.isFinite(firstBeat) ? firstBeat : 0, sigMap);
     const beatsPerBar = sig.beatsPerBar > 0 ? sig.beatsPerBar : 4;
     const originBar = Number.isFinite(firstBeat) ? Math.max(0, Math.floor(firstBeat / beatsPerBar)) : 0;

@@ -724,6 +724,13 @@ ws.on("event/dopDone", (ev) => {
   if (!ev.ok) showToast(`Offline process failed: ${ev.error ?? "render failed"}`, "error");
 });
 
+/* The log sink broadcasts the fully FORMATTED line ("12:34:56.789 [error] audio: ..."),
+   not a message — that framing is noise in a toast. The subsystem ("audio: ") stays: it is
+   the only context most of these lines carry. */
+const LOG_LINE_PREFIX_RE = /^\d{2}:\d{2}:\d{2}\.\d{3} \[\w+ *\] */;
+const ERROR_TOAST_DEDUPE_MS = 4000;
+let lastErrorToast: { key: string; at: number } = { key: "", at: 0 };
+
 ws.on("event/log", (ev) => {
   useStore.setState((s) => {
     const logLines = s.logLines.length >= MAX_LOG_LINES
@@ -733,5 +740,14 @@ ws.on("event/log", (ev) => {
   });
   // nothing renders logLines, so an error the engine reports (device fault, driver fallback)
   // would otherwise be invisible. Errors only — warns are far too chatty to toast.
-  if (ev.level === "error") showToast(ev.msg, "error");
+  if (ev.level !== "error") return;
+  const msg = ev.msg.replace(LOG_LINE_PREFIX_RE, "");
+  // One fault, one toast: a device fault arrives twice (DriverManager both Log::error's it
+  // and broadcasts its own event/log), the two wordings differing only in punctuation — so
+  // the repeat key ignores everything but the letters and digits.
+  const key = msg.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const now = Date.now();
+  if (key === lastErrorToast.key && now - lastErrorToast.at < ERROR_TOAST_DEDUPE_MS) return;
+  lastErrorToast = { key, at: now };
+  showToast(msg, "error");
 });

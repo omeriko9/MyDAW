@@ -19,7 +19,7 @@ import {
   scanPlugins,
   setPluginFolders,
 } from "../../store/actions";
-import { loadPref } from "../../lib/prefs";
+import { isPluginFavorite, loadPluginFavorites } from "../../lib/ids";
 import type { PluginFormat, PluginRecreateResult, UnresolvedPlugin } from "../../protocol/types";
 import { ws } from "../../protocol/ws";
 import { Modal } from "../common/Modal";
@@ -97,13 +97,9 @@ export default function RecreatePluginsDialog() {
   // whether or not the fuzzy matcher found anything close. Pref re-read per open.
   const favoriteInstruments = useMemo(() => {
     if (!open) return [];
-    const favUids = loadPref<string[]>(
-      "browser.pluginFavorites",
-      [],
-      (v) => Array.isArray(v) && v.every((e) => typeof e === "string"),
-    );
+    const favs = new Set(loadPluginFavorites());
     return registry
-      .filter((p) => p.isInstrument && !p.blacklisted && favUids.includes(p.uid))
+      .filter((p) => p.isInstrument && !p.blacklisted && isPluginFavorite(favs, p))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [open, registry]);
 

@@ -75,6 +75,14 @@ public:
     // transport beat. When not recording it discards pending mirror events.
     void pump(const TempoMap& tempoMap, double currentBeat);
 
+    // The transport jumped backwards mid-pass (cycle wrap / arranger jump, published by
+    // Transport::wrapSeq()). E9 calls this BEFORE the next pump: every still-held note is
+    // closed at `boundaryBeat` (where the playhead left) and re-opened at `resumeBeat`
+    // (where it landed), so a key held across the seam records as one note per lap. Without
+    // it the note-off arrives timestamped BEFORE the note-on and closePending clamps the
+    // whole note to kMinNoteLenBeats. Beats are absolute, like begin()'s.
+    void wrapTake(double boundaryBeat, double resumeBeat);
+
     // Ends the pass: closes still-held notes at the last pumped beat, sorts, and returns
     // the result. NOTE(spec): endBeat is rounded UP to the next bar boundary (via the
     // TempoMap's time signature) so the created clip covers whole bars — the simplest

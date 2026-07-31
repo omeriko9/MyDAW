@@ -190,6 +190,7 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
                     out[1] = BlockSpan{st.to, rest, true};
                     playhead_.store(st.to + rest, std::memory_order_release);
                     arrStep_.store(s + 1, std::memory_order_release);
+                    noteWrap(st.end);
                     return 2;
                 }
                 if (pos >= st.end) {
@@ -200,6 +201,7 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
                     out[0] = BlockSpan{to, frames, true};
                     playhead_.store(to + frames, std::memory_order_release);
                     arrStep_.store(s + 1, std::memory_order_release);
+                    noteWrap(st.end);
                     return 1;
                 }
             } else if (pos >= st.end) {
@@ -218,12 +220,19 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
     const int64_t le = loopEnd_.load(std::memory_order_acquire);
 
     if (loop && le > ls) {
+        // Fold every re-entry back into [ls, le): a cycle SHORTER than one block would
+        // otherwise store a playhead PAST le, where neither branch below can fire again
+        // and the transport escapes the loop for the rest of the take. Normally the loop
+        // is many blocks long and the modulo is a no-op. (The arranger above needs none —
+        // its step counter advances, so the next block re-tests against the NEXT section.)
+        const int64_t loopLen = le - ls;
         if (pos < le && pos + frames > le) {
             const int first = static_cast<int>(le - pos);
             const int rest = frames - first;
             out[0] = BlockSpan{pos, first, false};
             out[1] = BlockSpan{ls, rest, true};
-            playhead_.store(ls + rest, std::memory_order_release);
+            playhead_.store(ls + (rest % loopLen), std::memory_order_release);
+            noteWrap(le);
             return 2;
         }
         if (pos == le) {
@@ -236,7 +245,8 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
             // Only pos == le wraps: a playhead located BEYOND the right locator keeps
             // playing linearly, as it does in Cubase.
             out[0] = BlockSpan{ls, frames, true};
-            playhead_.store(ls + frames, std::memory_order_release);
+            playhead_.store(ls + (frames % loopLen), std::memory_order_release);
+            noteWrap(le);
             return 1;
         }
     }

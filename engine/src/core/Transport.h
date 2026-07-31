@@ -93,6 +93,16 @@ public:
     int64_t loopStartSamples() const { return loopStart_.load(std::memory_order_acquire); }
     int64_t loopEndSamples() const { return loopEnd_.load(std::memory_order_acquire); }
 
+    // Timeline discontinuities published by the RT thread (loop wrap / arranger jump).
+    // `wrapSeq` counts them and `wrapFromSamples` is the position the playhead LEFT.
+    // Pollers that reconstruct time from the playhead — MIDI recording (E9) above all —
+    // must notice the backwards step: a note held across the seam would otherwise be
+    // closed by a note-off timestamped before its own note-on. Two independent atomics,
+    // same v1 tradeoff as the loop region: `from` is published before the counter, so a
+    // reader that sees a new count sees the matching boundary.
+    uint32_t wrapSeq() const { return wrapSeq_.load(std::memory_order_acquire); }
+    int64_t wrapFromSamples() const { return wrapFrom_.load(std::memory_order_acquire); }
+
     int countInBars() const { return countInBars_.load(std::memory_order_acquire); }
     bool metronomeEnabled() const { return metronome_.load(std::memory_order_acquire); }
 
@@ -127,8 +137,9 @@ public:
     //       loopStart with wrapped=true.
     // Count-in consumes leading frames without advancing the playhead; a partial
     // count-in block yields spans for the remaining frames only. If the remainder after
-    // a wrap exceeds the loop length, the overflow plays on linearly past loopEnd and
-    // wraps again on the NEXT block (v1 simplification; loop length is normally >> block).
+    // a wrap exceeds the loop length (a cycle shorter than one block), the extra laps are
+    // not rendered but the stored playhead is folded back into [loopStart, loopEnd) so the
+    // cycle keeps wrapping (v1 simplification; loop length is normally >> block).
     int nextSpans(int frames, BlockSpan out[2]);
 
 private:
@@ -147,6 +158,15 @@ private:
     std::atomic<int64_t> countInRemaining_{0};
     std::atomic<int64_t> countInTotal_{0};
     std::atomic<int64_t> lastPlayStart_{0}; // position where playback/recording last began
+    std::atomic<uint32_t> wrapSeq_{0};      // see wrapSeq() — bumped once per discontinuity
+    std::atomic<int64_t> wrapFrom_{0};
+
+    // RT: publish a timeline discontinuity. Wait-free (two atomic ops, no allocation), so
+    // it is safe to call from nextSpans() on the audio thread.
+    void noteWrap(int64_t fromSamples) {
+        wrapFrom_.store(fromSamples, std::memory_order_release);
+        wrapSeq_.fetch_add(1, std::memory_order_release);
+    }
 
     // Arranger chain: double-buffered step table (control writes the inactive buffer,
     // then flips arrBuf_). arrStep_ = the chain position the playhead is inside/awaiting.
