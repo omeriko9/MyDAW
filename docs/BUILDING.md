@@ -55,12 +55,20 @@ cmake --preset host32-release   && cmake --build --preset host32-release
 
 Vite proxies `/ws` and `/api` to the engine on 8417.
 
+For inspecting or driving the UI in a real browser (console, network, performance
+traces, interactive control), see [DEBUGGING_UI.md](DEBUGGING_UI.md).
+
 ## Tests
 
 ```powershell
-node scripts/smoke-test.mjs       # spawns engine (null driver), 16 protocol checks
+node scripts/smoke-test.mjs       # spawns engine (null driver), 42 protocol checks
 node scripts/vst-load-test.mjs    # real plugin scan + out-of-process load + RT bridge run
+node scripts/ui-smoke.mjs         # engine + real Chrome, browser regression checks
+cd ui; npm test                   # 401 vitest cases over the pure UI logic
 ```
+
+`ui-smoke.mjs` needs `ui/dist` and the engine already built — it serves the former and
+spawns the latter. See [UI_TEST_SUITE.md](UI_TEST_SUITE.md) for what belongs in it.
 
 ## Notes
 

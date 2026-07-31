@@ -57,6 +57,7 @@ Your browser opens `http://127.0.0.1:8417` with the UI. Point Settings ▸ Plugi
 VST folders, hit scan, and make some noise.
 
 Quick sanity check (headless): `node scripts/smoke-test.mjs`
+Browser regression checks (spawns its own engine + Chrome): `node scripts/ui-smoke.mjs`
 
 ## Repository layout
 
@@ -73,6 +74,8 @@ Quick sanity check (headless): `node scripts/smoke-test.mjs`
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — processes, threading, the native/web boundary
 - [docs/BUILDING.md](docs/BUILDING.md) — build options and troubleshooting
+- [docs/DEBUGGING_UI.md](docs/DEBUGGING_UI.md) — inspecting and driving the web UI in a real browser
+- [docs/UI_TEST_SUITE.md](docs/UI_TEST_SUITE.md) — the browser test suite: what is covered, what is not, and the traps
 - [docs/SPEC.md](docs/SPEC.md) — the binding contract: protocol, project format, plugin IPC
 - [docs/IMPORT_PROJECT.md](docs/IMPORT_PROJECT.md) — writing an import provider for a new project format
 - [docs/CPR_MIXER_FORMAT.md](docs/CPR_MIXER_FORMAT.md) — Cubase `.cpr` format notes (reverse-engineered)

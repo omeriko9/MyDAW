@@ -106,13 +106,47 @@ node scripts/ui-drive.mjs down  --slot 2                        # always, even o
 Each command prints one JSON line. `eval` evaluates an *expression* and awaits promises,
 so wrap async work as `(async () => { ... })()`.
 
+### From Node, instead of a shell
+
+The CLI is a thin wrapper over `openSlot()`, which is the better door for anything with
+control flow — it keeps one CDP connection and one engine socket open instead of paying
+a connect per command, and it is what [ui-smoke.mjs](../scripts/ui-smoke.mjs) is built on.
+
+```js
+import { openSlot } from "./scripts/ui-drive.mjs";
+const s = await openSlot({ slot: 8, fixture: true });   // ~2 s, engine + Chrome + fixture
+try {
+  await s.probe("transport/locate", { beat: 0 });        // engine truth, correlated on replyTo
+  await s.click(x, y, { clicks: 2 });                    // trusted input
+  await s.type("3.1.000");
+  await s.key("Enter");
+  await s.untilEval("readout follows", () =>             // poll a PAGE-side predicate
+    document.querySelector(".tb-pos-main")?.textContent === "3.1.000");
+  console.log(s.consoleErrors());
+} finally { await s.close(); }                           // or s.detach() to leave it up
+```
+
+Also on the Slot: `eval`, `until`, `drag`, `shot`, `reload`, `seedFixture`, `console`,
+`clearConsole`, and the `enginePort` / `debugPort` / `url` it came up on. A function
+passed to `s.eval` is **stringified** — it has no closure over your variables, so
+interpolate what it needs into the source.
+
 **Input goes through CDP's Input domain, so events are TRUSTED and carry what a real
 layout would send.** This is not a nicety — `Control+Alt+Shift+1` arrives as `key:"!"`,
 `code:"Digit1"`, exactly like a physical US keyboard. The MCP's `press_key` delivers
 `key:"1"` for the same combo, which silently *passes* shortcuts that are dead in real
-use; that difference hid a broken save-layout shortcut here. Note the same class of trap
-inside the harness itself: space must be sent as `key:" "` with `code:"Space"`, not
-`key:"Space"`, or every Space-driven check is a silent no-op.
+use; that difference hid a broken save-layout shortcut here.
+
+Two traps of the same class inside the harness, both of which cost a debugging session:
+
+- Space must be sent as `key:" "` with `code:"Space"`, not `key:"Space"`, or every
+  Space-driven check is a silent no-op.
+- **A character's ASCII code is not its virtual key** — that coincidence holds for
+  letters and digits and nothing else. `.` is ASCII 46, which is `VK_DELETE`; `'` is 39
+  (`End`), `-` is 45 (`Insert`), `[` is 91 (`LWin`). Chrome dispatches the virtual key,
+  so deriving one from the other types text that vanishes and presses editing keys
+  instead. `keyEvents()` now carries the real OEM codes; if you add a key, add its code
+  there rather than letting it fall through to `charCodeAt(0)`.
 
 Two operational notes: `--user-data-dir` is mandatory (see the warning below), and you
 must not rebuild `ui/dist` or the engine binary while slots are running — the agents are
