@@ -6455,6 +6455,7 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             any = true;
         }
     }
+    std::vector<std::pair<uint64_t, MidiClip>> midiPending;
     if (p.is_object() && p.contains("midi") && p["midi"].is_array()) {
         for (const json& ej : p["midi"]) {
             if (!ej.is_object())
@@ -6505,10 +6506,59 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             c.lengthBeats = std::max({kMinClipBeats, endBeat - startBeat, maxNoteEnd});
             sortNotes(c);
             sortCc(c);
-            clipsOut.push_back(toJson(c));
-            t->clips.emplace_back(std::move(c));
-            sortClipsByStart(*t);
+            // Deferred: cycle-record produces one entry per LAP, and laps sharing a start
+            // position stack as take lanes rather than piling clips on one another. The
+            // grouping needs the whole set, so it runs after this loop.
+            midiPending.emplace_back(trackId, std::move(c));
             any = true;
+        }
+    }
+
+    // Flush the MIDI takes. Same rule as audio: entries sharing a start position are laps
+    // of one cycle-record and become take lanes (comp defaults to the most recent pass);
+    // a lone entry is an ordinary clip. Before this, every lap was merged into a single
+    // clip and three passes over the same bar landed on top of each other with no way to
+    // choose between them (docs/STUBS.md: "MIDI loop-record isn't lap-split").
+    {
+        std::vector<std::pair<uint64_t, double>> order;
+        std::map<std::pair<uint64_t, double>, std::vector<MidiClip>> groups;
+        for (auto& pr : midiPending) {
+            const std::pair<uint64_t, double> key{pr.first, pr.second.startBeat};
+            if (groups.find(key) == groups.end())
+                order.push_back(key);
+            groups[key].push_back(std::move(pr.second));
+        }
+        for (const auto& key : order) {
+            Track* t = m.trackById(key.first);
+            if (!t)
+                continue;
+            std::vector<MidiClip>& group = groups[key];
+            if (group.size() >= 2) {
+                TakeFolder folder;
+                folder.id = m.nextId();
+                folder.name = "MIDI Take";
+                folder.startBeat = key.second;
+                double longest = 0.0;
+                for (const MidiClip& c : group)
+                    longest = std::max(longest, c.lengthBeats);
+                folder.endBeat = key.second + longest;
+                int k = 0;
+                for (MidiClip& c : group) {
+                    c.name = "Take " + std::to_string(++k);
+                    TakeLane ln;
+                    ln.id = m.nextId();
+                    ln.name = c.name;
+                    ln.clips.push_back(std::move(c));
+                    folder.lanes.push_back(std::move(ln));
+                }
+                folder.comp.push_back(
+                    CompSegment{folder.startBeat, static_cast<int>(folder.lanes.size()) - 1});
+                t->takeFolders.push_back(std::move(folder));
+            } else {
+                clipsOut.push_back(toJson(group[0]));
+                t->clips.emplace_back(std::move(group[0]));
+                sortClipsByStart(*t);
+            }
         }
     }
 

@@ -750,8 +750,13 @@ void App::stopRecordingAndCommit() {
     json midiArr = json::array();
     if (midiRecorder.active()) {
         midiRecorder.pump(tempoMap, transport.playheadBeats()); // final drain
-        const MidiRecorder::RecordedNotes rec = midiRecorder.finalize(tempoMap);
-        if (!rec.notes.empty() || !rec.cc.empty()) {
+        // One entry per LAP per armed track. wrapTake() split held notes at each cycle
+        // seam already, so each lap is a complete take of the span it covers; the commit
+        // stacks same-position laps into take lanes exactly as it does for audio.
+        const std::vector<MidiRecorder::RecordedNotes> laps = midiRecorder.finalize(tempoMap);
+        for (const MidiRecorder::RecordedNotes& rec : laps) {
+            if (rec.notes.empty() && rec.cc.empty())
+                continue;
             json notes = json::array();
             for (const Note& n : rec.notes)
                 notes.push_back(json{{"pitch", n.pitch},
