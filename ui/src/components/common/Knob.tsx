@@ -68,7 +68,7 @@ export function Knob({
   const [dragging, setDragging] = useState(false);
   const [hover, setHover] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const drag = useRef<{ lastY: number; acc: number; startVal: number } | null>(null);
+  const drag = useRef<{ lastY: number; acc: number; startVal: number; moved: boolean } | null>(null);
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
   const quant = (v: number) => {
@@ -123,15 +123,22 @@ export function Knob({
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (disabled || e.button !== 0) return;
     e.preventDefault();
+    // preventDefault above also suppresses the browser's focus-on-press, so take focus by
+    // hand — otherwise the arrow-key stepping below is unreachable with a mouse and the
+    // presses fall through to the global shortcut layer. preventScroll: focusing must not
+    // yank the surrounding scroller when a partly visible control is clicked.
+    e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { lastY: e.clientY, acc: value, startVal: value };
+    drag.current = { lastY: e.clientY, acc: value, startVal: value, moved: false };
     setDragging(true);
   };
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const d = drag.current;
     if (!d) return;
     const dy = d.lastY - e.clientY;
+    if (dy === 0) return;
     d.lastY = e.clientY;
+    d.moved = true;
     const sens = (range / 150) * (e.shiftKey ? 1 / 8 : 1);
     d.acc = clamp(d.acc + dy * sens);
     onChange(quant(d.acc));
@@ -146,7 +153,9 @@ export function Knob({
     } catch {
       /* already released */
     }
-    onCommit?.(quant(d.acc));
+    // Only commit a gesture that actually moved: a bare click would send a no-op
+    // command, dirtying the project and pushing an undo entry that drops the redo tail.
+    if (d.moved) onCommit?.(quant(d.acc));
   };
   const onDoubleClick = () => {
     if (disabled) return;

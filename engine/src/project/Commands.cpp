@@ -18,6 +18,7 @@
 #include "EngineContext.h"
 #include "agent/AgentCatalog.gen.h"
 #include "core/AudioGraph.h"      // E2
+#include "core/AutomationEval.h"  // parseParamRef — the paramRef grammar's single owner
 #include "core/Transport.h"
 #include "core/effects/Effects.h" // built-ins as offline clip processes (DOP)
 #include "media/AssetStore.h"     // E4
@@ -1055,9 +1056,13 @@ json CommandProcessor::trackAdd(const json& p, CmdResult& r) {
     // duplicate view of the same thing (TRACK_TYPES_PLAN §3.5).
     if (trackKindIsViewRow(kind))
         for (const Track& x : m.project.tracks)
-            if (x.kind == kind)
-                return r.fail("bad_request", std::string("the project already has a ") +
-                                                 kindStr + " track");
+            if (x.kind == kind) {
+                // The kind supplies the article ("an arranger", "a chord") — this message is
+                // shown verbatim, including in the UI's disabled-menu tooltip.
+                const bool vowel = std::string("aeiou").find(kindStr[0]) != std::string::npos;
+                return r.fail("bad_request", std::string("the project already has a") +
+                                                 (vowel ? "n " : " ") + kindStr + " track");
+            }
 
     Track t;
     t.id = m.nextId();
@@ -1133,6 +1138,12 @@ json CommandProcessor::trackRemove(const json& p, CmdResult& r) {
         for (int i = static_cast<int>(x.sends.size()) - 1; i >= 0; --i)
             if (x.sends[static_cast<size_t>(i)].destTrackId == id)
                 eraseSendAndFixLanes(x, i);
+        // An insert's sidechain key is a routing reference too: left behind it is a dangling
+        // id that no editor can display (the <select> falls back to "none") let alone clear,
+        // and it would be saved into the project.
+        for (PluginInstance& pi : x.inserts)
+            if (pi.sidechainSource == id)
+                pi.sidechainSource = 0;
     };
     for (Track& x : m.project.tracks)
         fixRouting(x);
@@ -4424,8 +4435,13 @@ json CommandProcessor::automationSet(const json& p, CmdResult& r) {
     if (!m.trackById(trackId))
         return r.fail("not_found", "unknown trackId");
     const std::string paramRef = getOr(p, "paramRef", "");
+    // "cc:<0..129>" lanes are first-class: midi.extractAutomation creates them and the graph
+    // bakes them back to CC events, so they must be editable like any other lane. The bound
+    // check is parseParamRef's — re-spelling the grammar here is how it drifted in the first
+    // place (Kind::Cc is exact: "cc:1" passes, "cc:", "cc:x" and "cc:200" do not).
     const bool valid = paramRef == "volume" || paramRef == "pan" ||
-                       startsWith(paramRef, "send:") || startsWith(paramRef, "plugin:");
+                       startsWith(paramRef, "send:") || startsWith(paramRef, "plugin:") ||
+                       parseParamRef(paramRef).kind == ParamRef::Kind::Cc;
     if (!valid)
         return r.fail("bad_request", "bad paramRef: " + paramRef);
 
@@ -4515,7 +4531,10 @@ namespace {
 
 /** True for the paramRefs an automation lane may address (SPEC §5.3). */
 bool validParamRef(const std::string& ref) {
-    return ref == "volume" || ref == "pan" || startsWith(ref, "send:") || startsWith(ref, "plugin:");
+    // cc:<0..129> included — extracted MIDI-controller lanes are editable lanes (see
+    // automationSet); the exact bound is parseParamRef's, not re-spelled here.
+    return ref == "volume" || ref == "pan" || startsWith(ref, "send:") ||
+           startsWith(ref, "plugin:") || parseParamRef(ref).kind == ParamRef::Kind::Cc;
 }
 
 /**
@@ -4606,8 +4625,8 @@ json CommandProcessor::automationRamp(const json& p, CmdResult& r) {
     if (!validParamRef(paramRef))
         return r.fail("bad_request",
                       "bad paramRef: " + paramRef +
-                          " (expected \"volume\", \"pan\", \"send:<index>\" or "
-                          "\"plugin:<instanceId>:<paramId>\")");
+                          " (expected \"volume\", \"pan\", \"send:<index>\", "
+                          "\"plugin:<instanceId>:<paramId>\" or \"cc:<controller>\")");
 
     double fromBeat = 0.0;
     double toBeat = 0.0;

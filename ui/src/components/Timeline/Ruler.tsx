@@ -198,7 +198,8 @@ export default function Ruler() {
       }
       if (proj.timeSigMap.length > 1) {
         for (const sg of proj.timeSigMap) {
-          marks.push({ beat: barToBeat(sg.bar, proj.timeSigMap), text: `${sg.num}/${sg.den}` });
+          // sg.bar is the raw 0-based wire value; barToBeat takes a 1-based bar.
+          marks.push({ beat: barToBeat(sg.bar + 1, proj.timeSigMap), text: `${sg.num}/${sg.den}` });
         }
       }
       marks.sort((a, b) => a.beat - b.beat);

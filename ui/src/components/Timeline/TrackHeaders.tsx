@@ -34,6 +34,7 @@ import {
   unfreezeTrack,
 } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
+import { isPluginFavorite, loadPluginFavorites, pluginKey } from "../../lib/ids";
 import {
   assignInstrumentToFeeder,
   assignInstrumentToTrack,
@@ -79,7 +80,12 @@ export const HEADER_W = 220;
 const DRAG_THRESHOLD_PX = 4;
 
 const fire = (p: Promise<unknown>): void => {
-  p.catch((e) => console.warn("[timeline] command failed:", e));
+  // The engine's rejection message is the only explanation the user can get (nothing
+  // else surfaces it), so a refused command must not look like a dead affordance.
+  p.catch((e) => {
+    console.warn("[timeline] command failed:", e);
+    showToast(e instanceof Error && e.message ? e.message : "Command failed", "error");
+  });
 };
 
 /* ============================================================================
@@ -100,11 +106,24 @@ const ADDABLE: Array<{ kind: AddableTrackKind; label: string; icon: IconName }> 
 ];
 
 export function addTrackMenuItems(index?: number): MenuEntry[] {
-  return ADDABLE.map((a) => ({
-    label: `Add ${a.label}`,
-    icon: a.icon,
-    onClick: () => fire(addTrack(a.kind, index !== undefined ? { index } : undefined)),
-  }));
+  // Menus are imperative (built once, at open time) so the track list is read from the
+  // store, not a hook — the one-per-project kinds are greyed out instead of being
+  // offered and then refused by the engine.
+  const tracks = useStore.getState().project?.tracks ?? [];
+  return ADDABLE.map((a) => {
+    const dupe = isViewRowKind(a.kind) && tracks.some((t) => t.kind === a.kind);
+    return {
+      label: `Add ${a.label}`,
+      icon: a.icon,
+      disabled: dupe,
+      // "a arranger track" — the article has to follow the kind, and this tooltip is
+      // generated here rather than coming from the engine's own refusal message.
+      title: dupe
+        ? `The project already has a${/^[aeiou]/i.test(a.label) ? "n" : ""} ${a.label.toLowerCase()}`
+        : undefined,
+      onClick: () => fire(addTrack(a.kind, index !== undefined ? { index } : undefined)),
+    };
+  });
 }
 
 /* ============================================================================
@@ -149,6 +168,8 @@ interface ReorderRef {
   insertIndex: number;
   insertParentId: number | undefined;
   dropIntoId: number | null;
+  /** folder with descendants — the drag is refused once the threshold is crossed */
+  blocked: boolean;
 }
 
 interface HeightDragRef {
@@ -233,6 +254,25 @@ export default function TrackHeaders({
           if (y < row.top + row.height / 2) {
             insertIndex = row.flatIndex;
             dropLineY = row.top;
+          } else if (t.kind === "folder") {
+            // Below a folder header "after" means after its whole SUBTREE: a track landing
+            // between the header and its children would break the contiguity the indent
+            // promises (and would survive a collapse of the folder, visibly stranded).
+            let end = row.flatIndex + 1;
+            while (
+              end < project.tracks.length &&
+              isDescendantOf(project, project.tracks[end].id, t.id)
+            ) {
+              end++;
+            }
+            insertIndex = end;
+            // ...and the line under the last VISIBLE descendant — the folder's own bottom
+            // edge when it is collapsed or empty
+            const lastVisible = trackRows.reduce<TrackRowL>(
+              (acc, r) => (isDescendantOf(project, r.track.id, t.id) ? r : acc),
+              row,
+            );
+            dropLineY = lastVisible.top + lastVisible.height;
           } else {
             insertIndex = row.flatIndex + 1;
             dropLineY = row.top + row.height;
@@ -269,6 +309,14 @@ export default function TrackHeaders({
       insertIndex: -1,
       insertParentId: undefined,
       dropIntoId: null,
+      // cmd/track.reorder erases and re-inserts exactly ONE track, so it cannot express
+      // "move the folder with its subtree" — the children would stay put, stranded under a
+      // folder that is no longer above them (and the contiguity the drop math assumes would
+      // be broken). Faking it with one command per descendant is neither atomic nor one
+      // undo step, so a populated folder simply refuses to be dragged.
+      blocked:
+        row.track.kind === "folder" &&
+        !!project?.tracks.some((x) => isDescendantOf(project, x.id, row.track.id)),
     };
     // NO pointer capture yet: capture retargets the browser's click/dblclick to the
     // row, which silently killed double-click-to-rename on the name span. Capture is
@@ -280,6 +328,15 @@ export default function TrackHeaders({
     if (!d) return;
     if (!d.started) {
       if (Math.abs(e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
+      if (d.blocked) {
+        // Say why rather than showing a drop line for a move that would strand the children.
+        reorderRef.current = null;
+        showToast(
+          "A folder that contains tracks can't be reordered — move its tracks out first.",
+          "info",
+        );
+        return;
+      }
       d.started = true;
       e.currentTarget.setPointerCapture(e.pointerId); // keep the drag alive off-row
     }
@@ -297,29 +354,39 @@ export default function TrackHeaders({
 
     if (!d.started) {
       // plain click → select track (ctrl toggles)
+      // setSelection MERGES: a surviving clip selection would send M/S-style keys down the
+      // clip branch instead of the tracks just clicked, so BOTH branches replace the whole
+      // selection — building a multi-track selection with ctrl is no different.
       if (e.ctrlKey || e.metaKey) {
         const ids = selection.trackIds.includes(row.track.id)
           ? selection.trackIds.filter((id) => id !== row.track.id)
           : [...selection.trackIds, row.track.id];
-        setSelection({ trackIds: ids });
+        setSelection({ trackIds: ids, clipIds: [], noteIds: [] });
       } else {
-        setSelection({ trackIds: [row.track.id] });
+        setSelection({ trackIds: [row.track.id], clipIds: [], noteIds: [] });
       }
       return;
     }
 
+    // The engine REMOVES the dragged track before inserting (cmd/track.reorder), so every
+    // index computed against the current (pre-removal) list shifts down by one when the
+    // source sat above it. Both branches below must compensate, or the same drop lands in
+    // a different slot depending on which side the drag came from.
+    const dragIdx = project.tracks.findIndex((t) => t.id === d.trackId);
+    const compensate = (idx: number): number => (dragIdx >= 0 && idx > dragIdx ? idx - 1 : idx);
+
     if (d.dropIntoId !== null) {
       const folderRow = trackRows.find((r) => r.track.id === d.dropIntoId);
       if (folderRow) {
-        fire(reorderTrack(d.trackId, folderRow.flatIndex + 1, d.dropIntoId));
+        fire(reorderTrack(d.trackId, compensate(folderRow.flatIndex + 1), d.dropIntoId));
+        // A collapsed folder hides what it just accepted — the row would simply vanish,
+        // so expand it and let the user see where the track went.
+        if (collapsedFolders.has(d.dropIntoId)) onToggleFolder(d.dropIntoId);
       }
       return;
     }
     if (d.insertIndex < 0) return; // no valid target
-    const dragIdx = project.tracks.findIndex((t) => t.id === d.trackId);
-    let newIndex = d.insertIndex;
-    if (dragIdx >= 0 && newIndex > dragIdx) newIndex -= 1;
-    fire(reorderTrack(d.trackId, newIndex, d.insertParentId));
+    fire(reorderTrack(d.trackId, compensate(d.insertIndex), d.insertParentId));
   };
 
   /* ------------------------------------------------------------- height drag */
@@ -340,7 +407,13 @@ export default function TrackHeaders({
   const onResizePointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
     const d = heightRef.current;
     if (!d) return;
-    d.h = clamp(d.startH + (e.clientY - d.startClientY), MIN_TRACK_H, MAX_TRACK_H);
+    // MIN/MAX_TRACK_H bound the STORED height; the preview is display px, so scale them
+    // by vScale too — otherwise the row snaps at pointer-up to what the commit clamp allows.
+    d.h = clamp(
+      d.startH + (e.clientY - d.startClientY),
+      Math.max(MIN_TRACK_H, Math.round(MIN_TRACK_H * vScale)),
+      Math.min(MAX_TRACK_H, Math.round(MAX_TRACK_H * vScale)),
+    );
     onHeightPreview({ trackId: d.trackId, height: d.h });
   };
 
@@ -640,11 +713,11 @@ export default function TrackHeaders({
     current: { uid: string; path: string } | undefined,
     pick: (p: PluginInfo) => void,
   ): MenuEntry[] => {
-    const favUids = loadPref<string[]>(
-      "browser.pluginFavorites",
-      [],
-      (v) => Array.isArray(v) && v.every((e) => typeof e === "string"),
-    );
+    // Favourites live in lib/ids alongside pluginKey. Reading the pref by hand here is
+    // what made this picker go blank when the key format changed — four readers had each
+    // spelled the rule themselves.
+    const favKeys = new Set(loadPluginFavorites());
+    const isFav = (p: PluginInfo): boolean => isPluginFavorite(favKeys, p);
     const instruments = registry.filter((p) => p.isInstrument && !p.blacklisted);
     const entryFor = (p: PluginInfo): MenuEntry => ({
       label: p.name,
@@ -653,9 +726,7 @@ export default function TrackHeaders({
       checked: current?.uid === p.uid && (!current.path || current.path === p.path),
       onClick: () => pick(p),
     });
-    const favs = instruments
-      .filter((p) => favUids.includes(p.uid))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const favs = instruments.filter(isFav).sort((a, b) => a.name.localeCompare(b.name));
     const items: MenuEntry[] = favs.map(entryFor);
     if (items.length === 0) {
       // Nothing starred yet — stay useful: offer the (deduped) instrument list instead.
@@ -730,12 +801,19 @@ export default function TrackHeaders({
     const x = e.clientX;
     const y = e.clientY;
     const freezable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
+    const viewRow = isViewRowKind(t.kind);
     const items: MenuEntry[] = [
       { label: "Add Track", icon: "plus", submenu: addTrackMenuItems(row.flatIndex + 1) },
       "separator",
       { label: "Rename…", icon: "pencil", onClick: () => openRename(t, x, y) },
       { label: "Color…", onClick: () => openColor(t, x, y) },
-      { label: "Duplicate Track", onClick: () => fire(duplicateTrack(t.id)) },
+      {
+        label: "Duplicate Track",
+        // one view row of each kind per project — the engine refuses a second one
+        disabled: viewRow,
+        title: viewRow ? "View-row tracks cannot be duplicated (max one per project)" : undefined,
+        onClick: () => fire(duplicateTrack(t.id)),
+      },
     ];
     if (versionable(t))
       items.push({ label: "Track Versions", icon: "layers", submenu: versionMenuItems(t, x, y) });
@@ -1025,16 +1103,20 @@ export default function TrackHeaders({
             )}
           </div>
         )}
-        <div
-          className="tlh-resize"
-          onPointerDown={(e) => onResizePointerDown(e, row)}
-          onPointerMove={onResizePointerMove}
-          onPointerUp={onResizePointerUp}
-          onPointerCancel={() => {
-            heightRef.current = null;
-            onHeightPreview(null);
-          }}
-        />
+        {/* fixed-height view rows get no handle at all — its row-resize cursor would
+            advertise a drag the height logic refuses */}
+        {!isViewRowKind(t.kind) && (
+          <div
+            className="tlh-resize"
+            onPointerDown={(e) => onResizePointerDown(e, row)}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={onResizePointerUp}
+            onPointerCancel={() => {
+              heightRef.current = null;
+              onHeightPreview(null);
+            }}
+          />
+        )}
       </div>
     );
   };
@@ -1052,6 +1134,14 @@ export default function TrackHeaders({
           {spec.label}
         </span>
         <span className="tlh-lane-value">{spec.fmt(laneCurrentValue(t, row.paramRef))}</span>
+        {/* Lane rows are a fixed height, so this is the only collapse affordance that
+            survives a short track row (which hides the "A" toggle with the controls). */}
+        <IconButton
+          icon="chevronUp"
+          size={18}
+          tooltip="Collapse automation lanes"
+          onClick={() => useAutomationUi.getState().setExpanded(t.id, false)}
+        />
         <IconButton
           icon="plus"
           size={18}

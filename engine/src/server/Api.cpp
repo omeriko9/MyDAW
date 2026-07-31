@@ -607,6 +607,11 @@ json Api::sessionHello() {
                 {"metronome", json{{"enabled", app_.transport.metronomeEnabled()},
                                    {"countInBars", app_.transport.countInBars()}}},
                 {"automationWrite", app_.transport.automationWrite()},
+                // The UI's dirty flag is client-side, so a reload or a second tab used to
+                // come up believing a project with unsaved engine-side edits was clean —
+                // which also disabled its auto-save-before-replace guard (File > New/Open
+                // would then discard the edits silently). Seed it from the engine here.
+                {"dirty", app_.projectIO.isDirty()},
                 {"midiMaps", app_.midiMapsJson()}};
 }
 

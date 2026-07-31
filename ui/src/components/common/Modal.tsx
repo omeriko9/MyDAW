@@ -1,8 +1,9 @@
 /**
  * Modal — portal'd dialog (owned by F4).
  *
- * Escape and overlay-click close (overlay configurable). Focus trap-lite: focuses the
- * panel on open, Tab cycles within, focus restored on close. Title bar with close X.
+ * Escape (topmost dialog only) and overlay-click close (overlay configurable). Focus
+ * trap-lite: focuses the panel on open, Tab cycles within, focus restored on close.
+ * Title bar with close X.
  * An element marked `data-autofocus` receives the initial focus instead of the first
  * focusable control (e.g. a dialog's default action button, so Enter activates it).
  */
@@ -35,6 +36,9 @@ export interface ModalProps {
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Open modals, outermost first — only the last one answers Escape (see the open effect). */
+const escStack: object[] = [];
 
 export function Modal({
   open,
@@ -92,15 +96,25 @@ export function Modal({
         panel.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? panel).focus();
     }
+    // Escape, bubble phase by contract (lib/keyboard.ts): a field that consumes it to
+    // cancel its own inline edit (NumberDrag's type-in, TextInput's revert) stops the
+    // event before it reaches us, so a second Escape closes the dialog. Only the topmost
+    // dialog answers: stacked modals live in separate React roots and each registers its
+    // own window listener, and stopPropagation does not silence siblings on the same node
+    // (stopImmediatePropagation would, but registration order would let the PARENT win).
+    const token = {};
+    escStack.push(token);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && escStack[escStack.length - 1] === token) {
         e.stopPropagation();
         onClose();
       }
     };
-    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keydown", onKey);
+      const i = escStack.indexOf(token);
+      if (i >= 0) escStack.splice(i, 1);
       const prev = prevFocus.current;
       if (prev instanceof HTMLElement) prev.focus();
     };

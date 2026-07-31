@@ -142,6 +142,8 @@ const MIN_CLIP_BEATS = 1 / 16;
 const MOVE_THRESHOLD_PX = 3;
 /** alt+vertical-drag on a lane segment: curve bend per pixel (full -1..1 ≈ 100px). */
 const CURVE_PX_GAIN = 0.02;
+/** cmd/clip.stretch clamps the varispeed ratio to 0.25×–4×, i.e. exactly ±24 semitones. */
+const MAX_PITCH_SHIFT_ST = 24;
 
 /** Right-click toolbox entries (mirror the transport tool buttons + 1-4 keys). */
 const TIMELINE_TOOLS: Array<{
@@ -158,6 +160,18 @@ const TIMELINE_TOOLS: Array<{
 
 const fire = (p: Promise<unknown>): void => {
   p.catch((e) => console.warn("[timeline] command failed:", e));
+};
+
+/**
+ * Lane edits leave no other trace when the engine refuses them (the gesture is
+ * local-preview only, so a rejected paramRef just discards the edit and the lane
+ * redraws unchanged) — surface the engine's message instead, like TrackHeaders.
+ */
+const fireLane = (p: Promise<unknown>): void => {
+  p.catch((e) => {
+    console.warn("[timeline] automation edit failed:", e);
+    showToast(e instanceof Error && e.message ? e.message : "Automation edit failed", "error");
+  });
 };
 
 function clipById(project: Project, id: number): Clip | null {
@@ -244,6 +258,8 @@ type Drag =
       kind: "resize";
       clipId: number;
       edge: ClipEdge;
+      /** Press position, for the click-vs-drag threshold (the edge is off-grid in general). */
+      grabBeat: number;
       origStart: number;
       origLen: number;
       start: number;
@@ -1058,7 +1074,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       if (pt) {
         if (st.tool === "erase") {
           keepEmptiedLaneRow(row);
-          fire(setAutomation(row.track.id, row.paramRef, { remove: [pt.id] }));
+          fireLane(setAutomation(row.track.id, row.paramRef, { remove: [pt.id] }));
           return;
         }
         dragRef.current = {
@@ -1250,6 +1266,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           kind: "resize",
           clipId: clip.id,
           edge: hit.zone,
+          grabBeat: rawBeat,
           origStart: clip.startBeat,
           origLen: len,
           start: clip.startBeat,
@@ -1423,6 +1440,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         return;
       }
       case "resize": {
+        // A 1-2 px twitch on the edge is a click, not a resize: without a threshold the
+        // very first move snaps an off-grid edge onto the grid and silently re-quantizes
+        // the clip. Same gate (and unit: beats × zoomX = px) as the "move" branch.
+        if (!d.moved && Math.abs((rawBeat - d.grabBeat) * st.vp.zoomX) <= MOVE_THRESHOLD_PX)
+          return;
         d.moved = true;
         if (d.edge === "l") {
           const ns = clamp(
@@ -1680,6 +1702,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           })();
           break;
         }
+        // A drop the UI rejected (red ghost + "· incompatible track" HUD) cancels the WHOLE
+        // gesture: committing only its horizontal half would contradict the feedback the
+        // user just saw, and with Alt it would leave a stray copy on the source track.
+        if (d.targetTrackId !== null && !d.valid) {
+          showToast("That track can't hold this clip");
+          break;
+        }
         const tgt =
           d.targetTrackId !== null && d.valid && d.targetTrackId !== d.sourceTrackId
             ? d.targetTrackId
@@ -1752,7 +1781,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         // transients already streamed — always commit so the engine state is authoritative
         // and the gesture lands on the undo stack (SPEC §5.8)
         if (d.moved) {
-          fire(
+          fireLane(
             commitParam("cmd/automation.set", {
               trackId: d.trackId,
               paramRef: d.paramRef,
@@ -1764,7 +1793,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
       case "laneCurve": {
         if (d.moved) {
-          fire(
+          fireLane(
             commitParam("cmd/automation.set", {
               trackId: d.trackId,
               paramRef: d.paramRef,
@@ -1777,7 +1806,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       case "laneDraw": {
         if (d.stream.size <= 1) {
           // plain click — one snapped point (the pre-paint draw-tool behavior)
-          fire(
+          fireLane(
             setAutomation(d.trackId, d.paramRef, {
               add: [{ t: snapB(d.lastBeat, proj.grid, e.shiftKey), v: d.lastValue }],
             }),
@@ -1795,7 +1824,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         const add = [...d.stream.entries()]
           .sort((a, b) => a[0] - b[0])
           .map(([k, v]) => ({ t: k * d.qStep, v }));
-        fire(setAutomation(d.trackId, d.paramRef, { remove, add }));
+        fireLane(setAutomation(d.trackId, d.paramRef, { remove, add }));
         break;
       }
     }
@@ -1922,7 +1951,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       // deletes, split stays inert on lanes); skip points (dbl-click = move target)
       if (st.tool !== "select" || laneHitPoint(row, vx, cy, st.vp)) return;
       const spec = paramSpecFor(row.paramRef, row.track);
-      fire(
+      fireLane(
         setAutomation(row.track.id, row.paramRef, {
           add: [
             {
@@ -2180,7 +2209,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           }).then((ok) => {
             if (!ok) return;
             keepEmptiedLaneRow(row);
-            fire(setAutomation(row.track.id, row.paramRef, { remove: row.points.map((p) => p.id) }));
+            fireLane(setAutomation(row.track.id, row.paramRef, { remove: row.points.map((p) => p.id) }));
           });
         },
       };
@@ -2214,7 +2243,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                 icon: "trash" as const,
                 onClick: () => {
                   keepEmptiedLaneRow(row);
-                  fire(setAutomation(row.track.id, row.paramRef, { remove: [pt.id] }));
+                  fireLane(setAutomation(row.track.id, row.paramRef, { remove: [pt.id] }));
                 },
               },
               "separator" as const,
@@ -2225,7 +2254,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           icon: "plus",
           title: `${spec.label} ${spec.fmt(addValue)} at ${formatBarsBeatsShort(pasteBeat, proj.timeSigMap)} — any tool; drag with the Draw tool (2) to paint`,
           onClick: () =>
-            fire(
+            fireLane(
               setAutomation(row.track.id, row.paramRef, {
                 add: [{ t: pasteBeat, v: addValue }],
               }),
@@ -2534,8 +2563,18 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                       ],
                     }).then((v) => {
                       if (!v) return;
-                      const st = (v.semitones as number) + (v.cents as number) / 100;
-                      if (st === 0) return;
+                      const asked = (v.semitones as number) + (v.cents as number) / 100;
+                      if (asked === 0) return;
+                      // The two fields together reach ±25 st, but cmd/clip.stretch clamps
+                      // the ratio to 0.25×–4× = exactly ±24 st — clamp here too and say so,
+                      // otherwise the dialog reports success for a shift it never performed.
+                      const st = clamp(asked, -MAX_PITCH_SHIFT_ST, MAX_PITCH_SHIFT_ST);
+                      if (st !== asked) {
+                        showToast(
+                          `Pitch shift limited to ${st > 0 ? "+" : "−"}${MAX_PITCH_SHIFT_ST} semitones`,
+                          "info",
+                        );
+                      }
                       const ratio = Math.pow(2, st / 12);
                       fire(stretchClip(clip.id, ratio, true, v.timeCorrection !== true));
                     });

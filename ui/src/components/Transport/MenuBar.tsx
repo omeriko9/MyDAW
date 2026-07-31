@@ -34,6 +34,7 @@ import {
   saveLayoutSlot,
   type LayoutSlotIndex,
 } from "../../lib/layouts";
+import { savePref } from "../../lib/prefs";
 import { applyTheme, getTheme, THEMES } from "../../lib/theme";
 import { toggleMetronome } from "../../store/metronome";
 import { closeContextMenu, openContextMenu } from "../common/ContextMenu";
@@ -57,7 +58,15 @@ import {
 import "./menubar.css";
 
 const fire = (p: Promise<unknown>): void => {
-  p.catch((e) => console.warn("[menu] command failed:", e));
+  // The engine's rejection message is the only explanation the user can get (nothing else
+  // surfaces it), so a refused menu command must not look like a dead item — same policy as
+  // the timeline's fire(). "cancelled" is the native file dialog being dismissed: that is
+  // the user saying no, not a failure.
+  p.catch((e: unknown) => {
+    console.warn("[menu] command failed:", e);
+    const msg = e instanceof Error && e.message ? e.message : "Command failed";
+    if (!msg.includes("cancelled")) showToast(msg, "error");
+  });
 };
 
 /** Context-aware edit dispatch (focused pane first) — same paths as the shortcuts. */
@@ -430,7 +439,12 @@ function buildAudioMenu(): MenuEntry[] {
       label: "Audio Settings…",
       icon: "settings",
       title: "Driver / device / sample rate / buffer size (Settings → Audio)",
-      onClick: () => useStore.getState().setDialogs({ settings: true }),
+      // the dialog re-reads this pref on every open, so naming the tab here wins over
+      // the remembered one (which is what File → Settings… still gets)
+      onClick: () => {
+        savePref("ui.settingsTab", "audio");
+        useStore.getState().setDialogs({ settings: true });
+      },
     },
   ];
 }
@@ -515,7 +529,10 @@ function buildViewMenu(): MenuEntry[] {
       label: "Bottom Dock",
       checked: s.panels.bottomTab !== null,
       title: "Mixer / Piano Roll / Clip Editor / Sheet Music / Visualizer dock",
-      onClick: () => s.setPanels({ bottomTab: s.panels.bottomTab === null ? "mixer" : null }),
+      onClick: () =>
+        s.setPanels({
+          bottomTab: s.panels.bottomTab === null ? (s.panels.bottomTabPrev ?? "mixer") : null,
+        }),
     },
     "separator",
     {
@@ -608,7 +625,10 @@ function buildMidiMenu(): MenuEntry[] {
       label: "MIDI Settings…",
       icon: "settings",
       title: "MIDI input devices (Settings → MIDI)",
-      onClick: () => useStore.getState().setDialogs({ settings: true }),
+      onClick: () => {
+        savePref("ui.settingsTab", "midi");
+        useStore.getState().setDialogs({ settings: true });
+      },
     },
     {
       label: "Import MIDI File…",
@@ -733,8 +753,18 @@ export default function MenuBar() {
         }, CLOSE_INTENT_MS);
       }
     };
+    // Escape closes the overlay from the inside without telling the strip: the icon would
+    // stay lit and the next hover would be eaten (onEnter bails while openIdx is set, and
+    // the move above only clears it), so clear here instead.
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") close();
+    };
     window.addEventListener("pointermove", onMove, true);
-    return () => window.removeEventListener("pointermove", onMove, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openIdx]);
 

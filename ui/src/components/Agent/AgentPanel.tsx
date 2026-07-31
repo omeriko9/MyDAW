@@ -92,9 +92,13 @@ export function AgentPanel() {
     if (el && atBottom) el.scrollTop = el.scrollHeight;
   }, [transcript, streaming, pendingApproval, atBottom]);
 
+  // `ready` is false on the first render (config arrives asynchronously), and the composer
+  // renders disabled until then — a disabled element cannot take focus, so focusing once on
+  // mount was always a no-op and the panel opened with nothing focused. Focus it when it
+  // actually becomes usable instead.
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
+    if (ready) textareaRef.current?.focus();
+  }, [ready]);
 
   // The caret opens a quick-pick of prepared scripts (embedded + custom); choosing one sends
   // its prompt straight into the chat. The icon opens the full ScriptsManager modal.

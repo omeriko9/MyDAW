@@ -182,8 +182,10 @@ export function detectKey(
   const MAJOR_FIFTHS: Record<number, number> = {
     0: 0, 7: 1, 2: 2, 9: 3, 4: 4, 11: 5, 6: 6, 1: -5, 8: -4, 3: -3, 10: -2, 5: -1,
   };
+  // A minor key is written with its RELATIVE MAJOR's signature, so these are not the
+  // major values for the same pitch class (Eb minor is 6 flats, not 3).
   const MINOR_FIFTHS: Record<number, number> = {
-    9: 0, 4: 1, 11: 2, 6: 3, 1: 4, 8: 5, 3: -3, 10: -2, 5: -1, 0: -3, 7: -2, 2: -1,
+    9: 0, 4: 1, 11: 2, 6: 3, 1: 4, 8: 5, 3: -6, 10: -5, 5: -4, 0: -3, 7: -2, 2: -1,
   };
   const fifths = best.minor ? (MINOR_FIFTHS[best.tonic] ?? 0) : (MAJOR_FIFTHS[best.tonic] ?? 0);
   return { fifths, minor: best.minor };

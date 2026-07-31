@@ -18,7 +18,9 @@ export interface TempoPoint {
   bpm: number;
 }
 
-/** timeSigMap entry — bar is 1-based; v1: single entry (SPEC §6). */
+/** timeSigMap entry — bar is 0-BASED on the wire, matching the engine's
+ *  TempoMap (first entry must be bar 0). lib/time.ts converts to the 1-based
+ *  bars the UI displays; TempoMapEditor edits these raw values as-is. */
 export interface TimeSigEntry {
   bar: number;
   num: number;
@@ -644,6 +646,8 @@ export interface HelloReply {
   automationWrite?: boolean;
   /** MIDI control-surface maps + learn-arm — absent on older engines */
   midiMaps?: MidiMapsState;
+  /** engine-side unsaved-changes flag — absent on older engines */
+  dirty?: boolean;
 }
 
 export interface ProjectLoadRequest {

@@ -156,6 +156,12 @@ export interface PanelsState {
   /** Big Clock — floating readable-from-across-the-room position display (View menu). */
   bigClock: boolean;
   bottomTab: BottomTab;
+  /** Slot-1 tab to restore when the dock is REOPENED — stashed by setPanels whenever a
+   *  patch closes the dock. Reopening on a hard-coded "mixer" not only lost the pane the
+   *  user was in, it could equal bottomTab2 and so destroy the split (App.tsx invariant).
+   *  Optional: a panels object assembled without it is still valid, and the reopen then
+   *  falls back to "mixer" as before. */
+  bottomTabPrev?: PoppedOutTab;
   /** Second dock slot (split dock, UI_IMPROVE.md §6.1). null = not split. Only
    *  VISIBLE while bottomTab is non-null (the dock itself is open) — remembered
    *  across dock close/reopen. Never equals bottomTab (selecting the other
@@ -381,7 +387,18 @@ const prefPanels: PanelsState = {
     null,
     oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
   ),
-  ...loadPref<Omit<PanelsState, "poppedOut" | "minimap" | "agent" | "bottomTab2" | "bigClock">>(
+  // slot-1 tab to restore on dock reopen — likewise a later, separately-stored field
+  bottomTabPrev: loadPref<PoppedOutTab>(
+    "ui.panels.bottomTabPrev",
+    "mixer",
+    oneOf<PoppedOutTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"),
+  ),
+  ...loadPref<
+    Omit<
+      PanelsState,
+      "poppedOut" | "minimap" | "agent" | "bottomTab2" | "bottomTabPrev" | "bigClock"
+    >
+  >(
     "ui.panels",
     { browser: true, browserTab: "plugins", inspector: true, bottomTab: "mixer" },
     shapeOf({
@@ -463,7 +480,17 @@ export const useStore = create<DawState>((set) => ({
   setFocusedPane: (focusedPane) =>
     set((s) => (s.focusedPane === focusedPane ? s : { ...s, focusedPane })),
   setFollowPlayhead: (followPlayhead) => set({ followPlayhead }),
-  setPanels: (patch) => set((s) => ({ panels: { ...s.panels, ...patch } })),
+  setPanels: (patch) =>
+    set((s) => ({
+      panels: {
+        ...s.panels,
+        // remember which pane slot 1 was showing when the dock is closed (see bottomTabPrev)
+        ...(patch.bottomTab === null && s.panels.bottomTab !== null
+          ? { bottomTabPrev: s.panels.bottomTab }
+          : {}),
+        ...patch,
+      },
+    })),
   setActiveMidiClipId: (activeMidiClipId) => set({ activeMidiClipId }),
   setActiveAudioClipId: (activeAudioClipId) => set({ activeAudioClipId }),
   setDialogs: (patch) => set((s) => ({ dialogs: { ...s.dialogs, ...patch } })),
@@ -510,11 +537,12 @@ useStore.subscribe((s, prev) => {
 useStore.subscribe((s, prev) => {
   if (s.viewport !== prev.viewport) savePrefDebounced("ui.viewport", s.viewport);
   if (s.panels !== prev.panels) {
-    const { browser, browserTab, inspector, bottomTab, bottomTab2, minimap, agent, bigClock } = s.panels;
+    const { browser, browserTab, inspector, bottomTab, bottomTab2, bottomTabPrev, minimap, agent, bigClock } = s.panels;
     savePrefDebounced("ui.panels", { browser, browserTab, inspector, bottomTab });
     savePrefDebounced("ui.panels.minimap", minimap);
     savePrefDebounced("ui.panels.agent", agent);
     savePrefDebounced("ui.panels.bottomTab2", bottomTab2);
+    savePrefDebounced("ui.panels.bottomTabPrev", bottomTabPrev);
     savePrefDebounced("ui.panels.bigClock", bigClock);
   }
   if (s.tool !== prev.tool) savePref("ui.tool", s.tool);
@@ -578,6 +606,11 @@ async function sendHello(): Promise<void> {
       recentProjects: r.recentProjects,
       audioDevices: r.audioDevices,
       midiInputs: r.midiInputs,
+      // Re-seed from the engine: `dirty` lives client-side, so a reload or a second
+      // tab otherwise came up thinking a project with unsaved engine-side edits was
+      // clean — which silently disabled autoSaveIfDirty's save-before-replace guard.
+      // Older engines omit the field; keep whatever we had rather than clearing it.
+      ...(r.dirty !== undefined ? { dirty: r.dirty } : {}),
     });
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)
     reconcileAutomationWrite(r.automationWrite);
@@ -691,6 +724,13 @@ ws.on("event/dopDone", (ev) => {
   if (!ev.ok) showToast(`Offline process failed: ${ev.error ?? "render failed"}`, "error");
 });
 
+/* The log sink broadcasts the fully FORMATTED line ("12:34:56.789 [error] audio: ..."),
+   not a message — that framing is noise in a toast. The subsystem ("audio: ") stays: it is
+   the only context most of these lines carry. */
+const LOG_LINE_PREFIX_RE = /^\d{2}:\d{2}:\d{2}\.\d{3} \[\w+ *\] */;
+const ERROR_TOAST_DEDUPE_MS = 4000;
+let lastErrorToast: { key: string; at: number } = { key: "", at: 0 };
+
 ws.on("event/log", (ev) => {
   useStore.setState((s) => {
     const logLines = s.logLines.length >= MAX_LOG_LINES
@@ -698,4 +738,16 @@ ws.on("event/log", (ev) => {
       : [...s.logLines, ev];
     return { logLines };
   });
+  // nothing renders logLines, so an error the engine reports (device fault, driver fallback)
+  // would otherwise be invisible. Errors only — warns are far too chatty to toast.
+  if (ev.level !== "error") return;
+  const msg = ev.msg.replace(LOG_LINE_PREFIX_RE, "");
+  // One fault, one toast: a device fault arrives twice (DriverManager both Log::error's it
+  // and broadcasts its own event/log), the two wordings differing only in punctuation — so
+  // the repeat key ignores everything but the letters and digits.
+  const key = msg.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const now = Date.now();
+  if (key === lastErrorToast.key && now - lastErrorToast.at < ERROR_TOAST_DEDUPE_MS) return;
+  lastErrorToast = { key, at: now };
+  showToast(msg, "error");
 });

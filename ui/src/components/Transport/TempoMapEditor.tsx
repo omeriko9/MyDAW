@@ -15,6 +15,7 @@ import { setTempoMap, setTimeSigMap } from "../../store/actions";
 import { bpmAtBeat, formatBarsBeats, parseBarsBeats } from "../../lib/time";
 import type { TempoPoint, TimeSigEntry } from "../../protocol/types";
 import { IconButton } from "../common/IconButton";
+import { showToast } from "../common/ToastHost";
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import { TextInput } from "../common/TextInput";
@@ -54,31 +55,39 @@ function BpmCell({ bpm, onCommit }: { bpm: number; onCommit: (v: number) => void
   );
 }
 
-/** bar NumberDrag (0-based, engine convention) with a local draft. */
+/**
+ * bar NumberDrag with a local draft. DISPLAYS the 1-based bar the rest of the UI counts
+ * in (ruler, transport readout, the tempo rows right above) while `bar`/onCommit stay in
+ * the engine's 0-based wire space — showing the raw value made the same position read
+ * "1.1.000" on a tempo row and "0" here, so a meter change landed a bar off the number
+ * the user typed. `minBar` is 1-based too: bar 1 belongs to the pinned entry 0.
+ */
 function BarCell({
   bar,
   disabled,
+  minBar,
   onCommit,
 }: {
   bar: number;
   disabled?: boolean;
+  minBar: number;
   onCommit: (v: number) => void;
 }) {
   const [drag, setDrag] = useState<number | null>(null);
   return (
     <NumberDrag
-      value={drag ?? bar}
-      min={0}
+      value={drag ?? bar + 1}
+      min={minBar}
       step={1}
       precision={0}
       units="bar"
       width={74}
       disabled={disabled}
-      title={disabled ? "First time signature is locked to bar 0" : "Bar (0-based)"}
+      title={disabled ? "First time signature is locked to bar 1" : "Bar"}
       onChange={setDrag}
       onCommit={(v) => {
         setDrag(null);
-        onCommit(Math.max(0, Math.round(v)));
+        onCommit(Math.max(minBar, Math.round(v)) - 1);
       }}
     />
   );
@@ -105,7 +114,12 @@ export default function TempoMapEditor() {
 
   const addTempoAtPlayhead = () => {
     const beat = Math.max(0, transportBus.last?.beat ?? 0);
-    if (tempoMap.some((e) => Math.abs(e.beat - beat) < 1e-6)) return; // entry already there
+    if (tempoMap.some((e) => Math.abs(e.beat - beat) < 1e-6)) {
+      // Entry 0 is pinned to beat 0, so at the project start this fires on a fresh project —
+      // the engine wants strictly ascending beats, so say why instead of doing nothing.
+      showToast("There is already a tempo change at the playhead", "info");
+      return;
+    }
     commitTempo([...tempoMap, { beat, bpm: bpmAtBeat(beat, tempoMap) }]);
   };
 
@@ -116,6 +130,14 @@ export default function TempoMapEditor() {
       .map((e) => ({ bar: Math.max(0, Math.round(e.bar)), num: e.num, den: e.den }))
       .sort((a, b) => a.bar - b.bar);
     if (list.length > 0) list[0] = { ...list[0], bar: 0 };
+    // The engine wants STRICTLY ascending bars, and its rejection only reaches fire()'s
+    // console.warn — the row would snap back with no explanation (same reason TimeSigField
+    // toasts instead of reverting in silence).
+    const dupIdx = list.findIndex((e, i) => i > 0 && e.bar === list[i - 1].bar);
+    if (dupIdx > 0) {
+      showToast(`There is already a time signature change at bar ${list[dupIdx].bar + 1}`, "info");
+      return;
+    }
     fire(setTimeSigMap(list));
   };
 
@@ -156,7 +178,12 @@ export default function TempoMapEditor() {
           )}
         </div>
       ))}
-      <button type="button" className="btn" onClick={addTempoAtPlayhead}>
+      <button
+        type="button"
+        className="btn"
+        title="Add a tempo change at the playhead"
+        onClick={addTempoAtPlayhead}
+      >
         + Add at playhead
       </button>
 
@@ -165,7 +192,12 @@ export default function TempoMapEditor() {
       </div>
       {sigMap.map((e, i) => (
         <div className="tb-map-row" key={`s${i}`}>
-          <BarCell bar={e.bar} disabled={i === 0} onCommit={(bar) => updateSig(i, { bar })} />
+          <BarCell
+            bar={e.bar}
+            disabled={i === 0}
+            minBar={i === 0 ? 1 : 2}
+            onCommit={(bar) => updateSig(i, { bar })}
+          />
           <span className="row gap0">
             <Select
               value={String(e.num)}

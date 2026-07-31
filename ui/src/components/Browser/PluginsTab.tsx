@@ -14,8 +14,8 @@
  *   event/scanProgress, gear → Settings dialog
  */
 
-import React, { memo, useCallback, useMemo, useState } from "react";
-import { useStore } from "../../store/store";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useStore, type DawState } from "../../store/store";
 import {
   addPlugin,
   getPluginRegistry,
@@ -24,10 +24,15 @@ import {
 } from "../../store/actions";
 import { setDragChip, setPluginDrag } from "../../lib/dnd";
 import { pluginCardEnter, pluginCardLeave } from "./pluginHoverCard";
-import { pluginKey } from "../../lib/ids";
+import {
+  isPluginFavorite,
+  loadPluginFavorites,
+  pluginKey,
+  togglePluginFavorite,
+} from "../../lib/ids";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isBool, loadPref, oneOf, savePref, usePrefState } from "../../lib/prefs";
-import type { PluginInfo } from "../../protocol/types";
+import type { PluginInfo, Track } from "../../protocol/types";
 import { contextMenuHandler, type MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/icons";
 import { IconButton } from "../common/IconButton";
@@ -61,6 +66,20 @@ type Row = GroupRow | PluginRowModel;
 const isStringArray = (v: unknown): boolean =>
   Array.isArray(v) && v.every((x) => typeof x === "string");
 
+/**
+ * First selected track, resolved against the live project. A selection id outlives its
+ * track (removing/undoing an Add Track leaves the dead id in selection.trackIds), so a
+ * bare `trackIds[0] !== undefined` test would send the add and surface a raw engine error.
+ */
+function firstSelectedTrack(st: DawState): Track | undefined {
+  const id = st.selection.trackIds[0];
+  const proj = st.project;
+  if (id === undefined || proj === null) return undefined;
+  return (
+    proj.tracks.find((t) => t.id === id) ?? (proj.masterTrack.id === id ? proj.masterTrack : undefined)
+  );
+}
+
 function buildRows(
   registry: PluginInfo[],
   query: string,
@@ -72,6 +91,7 @@ function buildRows(
 ): { rows: Row[]; matchCount: number; variantsByKey: Map<string, string[]> } {
   const q = query.trim().toLowerCase();
   const favSet = new Set(favorites);
+  const isFav = (p: PluginInfo) => isPluginFavorite(favSet, p);
   let filtered = (
     q
       ? registry.filter(
@@ -85,7 +105,7 @@ function buildRows(
   filtered = grouped.plugins;
   const variantsByKey = grouped.variantsByKey;
   // Favorites-only mode: restrict the whole list to favorited plugins.
-  if (favoritesOnly) filtered = filtered.filter((p) => favSet.has(p.uid));
+  if (favoritesOnly) filtered = filtered.filter(isFav);
 
   if (groupBy === "flat") {
     return {
@@ -108,7 +128,7 @@ function buildRows(
             key: "fav:*",
             label: "★ Favorites",
             sect: "fav",
-            plugins: filtered.filter((p) => favSet.has(p.uid)), // `filtered` is already name-sorted
+            plugins: filtered.filter(isFav), // `filtered` is already name-sorted
           },
           {
             key: "recent:*",
@@ -172,18 +192,19 @@ const PluginRowView = memo(function PluginRowView({
   const menuItems = (): MenuEntry[] => {
     const st = useStore.getState();
     const scanning = st.scanProgress !== null;
+    const selTrack = firstSelectedTrack(st);
     const addTitle = p.blacklisted
       ? "Blacklisted — remove it from the blacklist first"
       : !st.connected
         ? "Engine disconnected"
-        : st.selection.trackIds[0] === undefined
+        : selTrack === undefined
           ? "Select a track first"
           : `Add "${p.name}" to the first selected track`;
     return [
       {
         label: "Add to Selected Track",
         icon: "plus",
-        disabled: p.blacklisted || !st.connected || st.selection.trackIds[0] === undefined,
+        disabled: p.blacklisted || !st.connected || selTrack === undefined,
         title: addTitle,
         onClick: () => onAdd(p),
       },
@@ -341,10 +362,8 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(loadPref<string[]>("browser.pluginsCollapsed", [], isStringArray)),
   );
-  // Favorited plugin uids + most-recent-first uids of plugins added from this tab.
-  const [favorites, setFavorites] = useState<readonly string[]>(() =>
-    loadPref<string[]>("browser.pluginFavorites", [], isStringArray),
-  );
+  // Favorited plugins (lib/ids keys) + most-recent-first uids of plugins added from this tab.
+  const [favorites, setFavorites] = useState<readonly string[]>(loadPluginFavorites);
   const [recent, setRecent] = useState<readonly string[]>(() =>
     loadPref<string[]>("browser.pluginRecent", [], isStringArray),
   );
@@ -361,12 +380,16 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
     [registry, query, groupBy, collapsed, favorites, recent, favoritesOnly],
   );
 
+  // The Plugin Manager tab edits the same pref: follow its writes live, and toggle
+  // through lib/ids (which re-reads storage) so we never write back a stale array.
+  useEffect(() => {
+    const onStorage = () => setFavorites(loadPluginFavorites());
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const toggleFavorite = useCallback((p: PluginInfo) => {
-    setFavorites((prev) => {
-      const next = prev.includes(p.uid) ? prev.filter((uid) => uid !== p.uid) : [...prev, p.uid];
-      savePref("browser.pluginFavorites", next);
-      return next;
-    });
+    setFavorites(togglePluginFavorite(p));
   }, []);
 
   const recordRecent = useCallback((uid: string) => {
@@ -423,18 +446,15 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
           showHint("Engine disconnected — cannot add plugins.");
           return;
         }
-        const trackId = st.selection.trackIds[0];
-        if (trackId === undefined) {
+        const track = firstSelectedTrack(st);
+        if (track === undefined) {
           showHint("Select a track first, or drag the plugin onto a track / mixer strip.");
           return;
         }
-        const track =
-          st.project?.tracks.find((t) => t.id === trackId) ??
-          (st.project && st.project.masterTrack.id === trackId ? st.project.masterTrack : undefined);
         try {
-          await addPlugin(trackId, p.uid);
+          await addPlugin(track.id, p.uid);
           recordRecent(p.uid);
-          showHint(`Added "${p.name}" to ${track ? `"${track.name}"` : "the selected track"}.`);
+          showHint(`Added "${p.name}" to "${track.name}".`);
         } catch (e) {
           showHint(`Failed to add "${p.name}": ${errText(e)}`);
         }
@@ -479,7 +499,7 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
       return (
         <PluginRowView
           p={r.plugin}
-          favorite={favoriteSet.has(r.plugin.uid)}
+          favorite={isPluginFavorite(favoriteSet, r.plugin)}
           variants={variantsByKey.get(pluginKey(r.plugin))}
           onAdd={onAdd}
           onToggleFavorite={toggleFavorite}
@@ -491,8 +511,9 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
     [rows, toggleGroup, favoriteSet, variantsByKey, onAdd, toggleFavorite, onUnblacklist, onRescan],
   );
 
+  // "X of Y" whenever ANY filter narrows the list — favorites-only shrinks it just like the search.
   const countText =
-    query.trim() !== ""
+    query.trim() !== "" || favoritesOnly
       ? `${matchCount} of ${registry.length} plugin${registry.length === 1 ? "" : "s"}`
       : `${registry.length} plugin${registry.length === 1 ? "" : "s"}`;
 

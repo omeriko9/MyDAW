@@ -165,6 +165,18 @@ function FieldsModal({
                   max={f.max}
                   step={f.step ?? 1}
                   onChange={(e) => set(f.key, e.target.value === "" ? "" : Number(e.target.value))}
+                  // Typing stays unclamped (so a lone "-" or a partial decimal survives), but on
+                  // blur the field snaps to the range commit() would apply — otherwise it keeps
+                  // showing a number that Apply silently replaces with the clamped one.
+                  onBlur={(e) => {
+                    if (e.target.value === "") return;
+                    const n = Number(e.target.value);
+                    if (!Number.isFinite(n)) return;
+                    let c = n;
+                    if (f.min !== undefined) c = Math.max(f.min, c);
+                    if (f.max !== undefined) c = Math.min(f.max, c);
+                    if (c !== n) set(f.key, c);
+                  }}
                 />
               ) : (
                 <select

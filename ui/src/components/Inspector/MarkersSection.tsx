@@ -19,9 +19,14 @@ export function MarkersSection({ project }: { project: Project }) {
 
   const addAtPlayhead = () => {
     const beat = transportBus.last?.beat ?? 0;
-    void addMarker(beat, `Marker ${project.markers.length + 1}`).catch((e) =>
-      setErr(errText(e)),
-    );
+    // Number off the highest existing "Marker N", not off the count — after a delete the
+    // count reuses a suffix that is still on screen (two rows both reading "Marker 3").
+    const n =
+      project.markers.reduce((mx, m) => {
+        const k = /^Marker (\d+)$/.exec(m.name);
+        return k ? Math.max(mx, Number(k[1])) : mx;
+      }, project.markers.length) + 1;
+    void addMarker(beat, `Marker ${n}`).catch((e) => setErr(errText(e)));
   };
 
   return (

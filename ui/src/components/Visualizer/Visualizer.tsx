@@ -14,7 +14,7 @@
  * both modes animate on their own window's rAF clock (pop-out safe).
  */
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { metersBus, transportBus, useStore } from "../../store/store";
 import type { TransportEvent } from "../../protocol/types";
 import { useCanvas, useRafLoop } from "../../lib/canvas";
@@ -160,8 +160,15 @@ function NotesFall() {
     ctx.fillStyle = themeVar("--border");
     ctx.fillRect(0, fallH - 1, w, 1);
 
+    // Additive blending only reads as glow over a DARK backdrop: on the light themes
+    // (light/sepia/prism) "lighter" adds the note color to an already-bright
+    // --bg-sunken, clamping every channel to 255 — the notes come out plain white.
+    // Those themes composite normally so the per-track color survives.
+    const [bgR, bgG, bgB] = hexToRgb(themeVar("--bg-sunken"));
+    const additive = (0.2126 * bgR + 0.7152 * bgG + 0.0722 * bgB) / 255 < 0.5;
+
     const active = new Map<number, string>(); // pitch → color of a sounding note
-    ctx.globalCompositeOperation = "lighter";
+    ctx.globalCompositeOperation = additive ? "lighter" : "source-over";
     for (const e of eventsInWindow(evs, beat - 1, beat + LOOKAHEAD_BEATS)) {
       const x = (e.pitch - rg.lo) * laneW;
       const y1 = yOf(e.beat);
@@ -247,7 +254,12 @@ function Stage3D() {
   const levelsRef = useRef<number[]>([]);
   const ctx2dRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const setCanvas = (el: HTMLCanvasElement | null): void => {
+  // Stable identity + same-element short-circuit: React re-invokes a callback ref
+  // whose identity changed (ref(null) then ref(el)) on every re-render, and this
+  // component re-renders on every project edit and theme switch — without this the
+  // GL shaders/program/buffers would be rebuilt each time.
+  const setCanvas = useCallback((el: HTMLCanvasElement | null): void => {
+    if (el === canvasElRef.current) return;
     rendererRef.current?.dispose();
     rendererRef.current = null;
     ctx2dRef.current = null;
@@ -259,7 +271,7 @@ function Stage3D() {
         ctx2dRef.current = el.getContext("2d");
       }
     }
-  };
+  }, []);
 
   useEffect(() => () => setCanvas(null), []);
 

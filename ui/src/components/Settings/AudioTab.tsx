@@ -76,7 +76,9 @@ export function AudioTab() {
       drv.devices.find((d) => d.isDefault) ??
       drv.devices[0];
     setCfg({
-      driver: drv.type,
+      /* the engine can be RUNNING on a driver it never enumerates (--driver null, or the
+         failed-open fallback), so keep its own answer rather than fabricating a config */
+      driver: st && !drivers.some((d) => d.type === st.driver) ? st.driver : drv.type,
       deviceId: dev?.id ?? "",
       sampleRate: st?.sampleRate || engineInfo?.sampleRate || 48000,
       bufferSize: st?.bufferSize || engineInfo?.blockSize || 256,
@@ -90,6 +92,13 @@ export function AudioTab() {
     label: d.type.toUpperCase() + (d.available ? "" : ` — ${d.reason ?? "unavailable"}`),
     disabled: !d.available,
   }));
+  /* an unenumerated running driver still needs an option, or the select would show a stale
+     WASAPI row while the status strip below reads the real one */
+  if (engineStatus && drivers.length > 0 && !drivers.some((d) => d.type === engineStatus.driver))
+    driverOpts.push({
+      value: engineStatus.driver,
+      label: engineStatus.driver.toUpperCase() + " (current)",
+    });
   const curDriver = drivers.find((d) => d.type === cfg?.driver);
   const deviceOpts: SelectOption[] = (curDriver?.devices ?? []).map((d) => ({
     value: d.id,

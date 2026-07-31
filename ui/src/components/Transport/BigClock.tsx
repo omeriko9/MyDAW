@@ -7,7 +7,7 @@
  * ballistics — never per-frame React state).
  */
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useRef } from "react";
 import { transportBus, useStore } from "../../store/store";
 import type { TransportEvent } from "../../protocol/types";
 import { useRafLoop } from "../../lib/canvas";
@@ -26,10 +26,13 @@ export default function BigClock() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const barsRef = useRef<HTMLDivElement | null>(null);
   const timeRef = useRef<HTMLDivElement | null>(null);
-  const posRef = useRef(
-    loadPref<{ x: number; y: number }>(
+  // null = never placed by hand, so the default (defaultPos below) still applies. The
+  // "unplaced" marker has to be null and not a coordinate: 0 is a legal position (parked
+  // against the left/top edge) and must never be mistaken for "no saved position".
+  const posRef = useRef<{ x: number; y: number } | null>(
+    loadPref<{ x: number; y: number } | null>(
       POS_PREF,
-      { x: 0, y: 0 },
+      null,
       shapeOf({ x: isFiniteNumber, y: isFiniteNumber }),
     ),
   );
@@ -76,15 +79,61 @@ export default function BigClock() {
   const clampPos = (x: number, y: number): { x: number; y: number } => {
     const w = rootRef.current?.offsetWidth ?? 240;
     const h = rootRef.current?.offsetHeight ?? 90;
-    return {
-      x: Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w)),
-      y: Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h)),
-    };
+    let cx = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w));
+    const cy = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - h));
+    // The clock is position:fixed at z 850, so the viewport edge is not the only thing
+    // worth clamping against: parked at the left edge it sits ON the menu strip and
+    // File/Edit/View stop responding to clicks. Push it clear of the strip whenever it
+    // would overlap vertically — there is always room, the strip is a narrow rail.
+    const strip = document.querySelector(".menu-strip");
+    if (strip) {
+      const r = strip.getBoundingClientRect();
+      const overlapsY = cy < r.bottom && cy + h > r.top;
+      if (overlapsY && cx < r.right) cx = Math.min(r.right, Math.max(0, window.innerWidth - w));
+    }
+    return { x: cx, y: cy };
   };
+
+  /**
+   * Default placement: the top-right of the ARRANGEMENT column, not of the viewport. The
+   * clock is position:fixed above every pane (z 850), so a viewport-relative default lands
+   * inside whichever panel is docked at the right edge (Agent) and covers it — the panel
+   * underneath is then unreadable and unclickable until the clock is dragged away.
+   */
+  const defaultPos = (): { x: number; y: number } => {
+    const w = rootRef.current?.offsetWidth ?? 240;
+    const c = document.querySelector(".app-center")?.getBoundingClientRect();
+    const right = c && c.width > 0 ? c.right : window.innerWidth;
+    const top = c && c.height > 0 ? c.top : 64;
+    return { x: right - w - 16, y: top + 12 };
+  };
+
+  // A fixed element does not reflow when the side panels open/close/resize, so while the
+  // clock is still unplaced keep re-parking it over the arrangement column (the panel that
+  // would cover it is usually opened AFTER the clock).
+  useLayoutEffect(() => {
+    if (!open || posRef.current !== null) return;
+    const place = (): void => {
+      const el = rootRef.current;
+      if (!el || posRef.current !== null) return;
+      const d = defaultPos();
+      const p = clampPos(d.x, d.y);
+      el.style.left = `${p.x}px`;
+      el.style.top = `${p.y}px`;
+    };
+    place();
+    const center = document.querySelector(".app-center");
+    if (!center || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(place);
+    ro.observe(center);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   if (!open || !hasProject) return null;
 
-  const pos = clampPos(posRef.current.x || window.innerWidth - 300, posRef.current.y || 64);
+  const start = posRef.current ?? defaultPos();
+  const pos = clampPos(start.x, start.y);
 
   return (
     <div

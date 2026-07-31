@@ -190,6 +190,7 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
                     out[1] = BlockSpan{st.to, rest, true};
                     playhead_.store(st.to + rest, std::memory_order_release);
                     arrStep_.store(s + 1, std::memory_order_release);
+                    noteWrap(st.end);
                     return 2;
                 }
                 if (pos >= st.end) {
@@ -200,6 +201,7 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
                     out[0] = BlockSpan{to, frames, true};
                     playhead_.store(to + frames, std::memory_order_release);
                     arrStep_.store(s + 1, std::memory_order_release);
+                    noteWrap(st.end);
                     return 1;
                 }
             } else if (pos >= st.end) {
@@ -217,13 +219,36 @@ int Transport::nextSpans(int frames, BlockSpan out[2]) {
     const int64_t ls = loopStart_.load(std::memory_order_acquire);
     const int64_t le = loopEnd_.load(std::memory_order_acquire);
 
-    if (loop && le > ls && pos < le && pos + frames > le) {
-        const int first = static_cast<int>(le - pos);
-        const int rest = frames - first;
-        out[0] = BlockSpan{pos, first, false};
-        out[1] = BlockSpan{ls, rest, true};
-        playhead_.store(ls + rest, std::memory_order_release);
-        return 2;
+    if (loop && le > ls) {
+        // Fold every re-entry back into [ls, le): a cycle SHORTER than one block would
+        // otherwise store a playhead PAST le, where neither branch below can fire again
+        // and the transport escapes the loop for the rest of the take. Normally the loop
+        // is many blocks long and the modulo is a no-op. (The arranger above needs none —
+        // its step counter advances, so the next block re-tests against the NEXT section.)
+        const int64_t loopLen = le - ls;
+        if (pos < le && pos + frames > le) {
+            const int first = static_cast<int>(le - pos);
+            const int rest = frames - first;
+            out[0] = BlockSpan{pos, first, false};
+            out[1] = BlockSpan{ls, rest, true};
+            playhead_.store(ls + (rest % loopLen), std::memory_order_release);
+            noteWrap(le);
+            return 2;
+        }
+        if (pos == le) {
+            // Boundary landed EXACTLY on a block edge, so the split above never fired:
+            // the previous block ended ON le (pos + frames > le was false) and this one
+            // starts there (pos < le is false), which used to skip the wrap forever. A
+            // whole-bar cycle at an integer tempo hits this every time — 8 beats at
+            // 120 bpm / 48 kHz is 192000 frames, exactly 3000 64-frame blocks. Same
+            // shape as the arranger's block-edge jump above.
+            // Only pos == le wraps: a playhead located BEYOND the right locator keeps
+            // playing linearly, as it does in Cubase.
+            out[0] = BlockSpan{ls, frames, true};
+            playhead_.store(ls + (frames % loopLen), std::memory_order_release);
+            noteWrap(le);
+            return 1;
+        }
     }
 
     out[0] = BlockSpan{pos, frames, false};

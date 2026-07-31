@@ -43,7 +43,7 @@ export function pluginCardEnter(p: PluginInfo, rowEl: HTMLElement): void {
     timer = 0;
     if (!rowEl.isConnected) return; // row scrolled away (VirtualList recycled it)
     shownFor = p.uid;
-    render(<Card p={p} anchor={rowEl.getBoundingClientRect()} />);
+    render(<Card p={p} el={rowEl} anchor={rowEl.getBoundingClientRect()} />);
   }, SHOW_DELAY_MS);
 }
 
@@ -51,7 +51,16 @@ export function pluginCardEnter(p: PluginInfo, rowEl: HTMLElement): void {
 window.addEventListener("wheel", pluginCardLeave, { passive: true, capture: true });
 window.addEventListener("scroll", pluginCardLeave, { passive: true, capture: true });
 
-function Card({ p, anchor }: { p: PluginInfo; anchor: DOMRect }) {
+function Card({ p, el, anchor }: { p: PluginInfo; el: HTMLElement; anchor: DOMRect }) {
+  // React fires no mouseleave when the anchor row unmounts under a motionless pointer
+  // (typing in the search box until it is filtered out), so watch the element itself.
+  React.useEffect(() => {
+    const iv = window.setInterval(() => {
+      if (!el.isConnected) pluginCardLeave();
+    }, 200);
+    return () => window.clearInterval(iv);
+  }, [el]);
+
   const proj = useStore.getState().project;
   const usedOn = proj
     ? proj.tracks.filter((t) => t.inserts.some((i) => i.uid === p.uid)).map((t) => t.name)

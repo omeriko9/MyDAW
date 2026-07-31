@@ -28,6 +28,7 @@ import {
   timeSigAtBeat,
   type SnapMode,
 } from "../../lib/time";
+import { THEME_EVENT } from "../../lib/theme";
 import { gainToDbText } from "../common/Fader";
 import type { IconName } from "../common/icons";
 
@@ -169,16 +170,23 @@ export function computeRows(project: Project | null, o: RowsOptions): Row[] {
     top += h;
     if (o.autoExpanded.has(t.id)) {
       const seen = new Set<string>();
+      const extras = o.extraLanes.get(t.id) ?? [];
+      // A locally added lane keeps its add-order slot even after the engine adopts it
+      // (i.e. once its first point is written): emitting all engine lanes first would
+      // make that lane jump above the lanes added before it — under the very pointer
+      // that just drew the point — so lanes still listed in extraLanes are held back.
+      const isExtra = new Set(extras);
       for (const lane of t.automation) {
-        if (seen.has(lane.paramRef)) continue;
+        if (seen.has(lane.paramRef) || isExtra.has(lane.paramRef)) continue;
         seen.add(lane.paramRef);
         rows.push({ kind: "lane", track: t, paramRef: lane.paramRef, points: lane.points, top, height: LANE_H, depth });
         top += LANE_H;
       }
-      for (const ref of o.extraLanes.get(t.id) ?? []) {
+      for (const ref of extras) {
         if (seen.has(ref)) continue;
         seen.add(ref);
-        rows.push({ kind: "lane", track: t, paramRef: ref, points: [], top, height: LANE_H, depth });
+        const lane = t.automation.find((l) => l.paramRef === ref);
+        rows.push({ kind: "lane", track: t, paramRef: ref, points: lane ? lane.points : [], top, height: LANE_H, depth });
         top += LANE_H;
       }
     }
@@ -594,10 +602,20 @@ export function isDescendantOf(project: Project, trackId: number, ancestorId: nu
 /* ============================================================================
  * Theme colors (canvas needs resolved values; read CSS vars once, cache).
  * The cache is keyed by the active theme (data-theme on <html>), so a theme
- * switch just resolves fresh values — no invalidation ordering to get right.
+ * switch just resolves fresh values.
  * ========================================================================= */
 
 const varCache = new Map<string, string>();
+
+// …but the theme key alone cannot express "same theme, new accent": lib/accent
+// restamps --accent* as INLINE properties on <html> without touching data-theme,
+// so every already-populated entry (of EVERY theme) would keep the old accent
+// until a reload. Drop the whole cache on THEME_EVENT — it is broadcast for both
+// theme and accent changes. Registered at module scope so it runs before the
+// per-canvas redraw listeners (lib/canvas), which mount later.
+if (typeof window !== "undefined") {
+  window.addEventListener(THEME_EVENT, () => varCache.clear());
+}
 
 export function themeVar(name: string): string {
   const theme =

@@ -990,6 +990,24 @@ void App::applyMidiMap(const MidiMap& m, int value) {
         return;
     const double norm = std::clamp(value / 127.0, 0.0, 1.0);
     std::string ec, em;
+    // The applies below stay TRANSIENT so a controller sweep behaves like a drag: no undo
+    // entry per CC, no dirty flag, no revision bump, values reaching the RT nodes through
+    // the ParamMsg ring. But transient also makes execute() skip broadcastChanges, and that
+    // half is only right when the BROWSER is the source of the value (it already draws the
+    // fader it is dragging, and an echo would fight the drag). A hardware control is not the
+    // UI: nothing on screen can learn this value any other way, which is the whole point of
+    // MIDI learn. So mirror just the touched track back, in the same granular shape
+    // broadcastChanges() would have sent. Only externally originated changes take this path,
+    // so UI drags are untouched.
+    auto echoTrack = [&](const Track* t, const char* scope) {
+        if (!t || !ec.empty())
+            return;
+        json tracks = json::array();
+        tracks.push_back(toJson(*t));
+        broadcastEvent("event/projectChanged", json{{"revision", cmd->revision()},
+                                                    {"scope", scope},
+                                                    {"tracks", std::move(tracks)}});
+    };
     if (m.paramRef.rfind("track:", 0) == 0) {
         const size_t colon = m.paramRef.find(':', 6);
         if (colon == std::string::npos)
@@ -1004,6 +1022,7 @@ void App::applyMidiMap(const MidiMap& m, int value) {
         else
             return;
         cmd->execute("cmd/track.set", json{{"trackId", trackId}, {"patch", patch}}, true, ec, em);
+        echoTrack(model.trackById(trackId), "mixer"); // volume/pan = trackSet's own scope
     } else if (m.paramRef.rfind("plugin:", 0) == 0) {
         const size_t colon = m.paramRef.find(':', 7);
         if (colon == std::string::npos)
@@ -1013,6 +1032,9 @@ void App::applyMidiMap(const MidiMap& m, int value) {
             static_cast<uint32_t>(std::strtoul(m.paramRef.substr(colon + 1).c_str(), nullptr, 10));
         cmd->execute("cmd/plugin.setParam",
                      json{{"instanceId", iid}, {"paramId", pid}, {"value", norm}}, true, ec, em);
+        Track* owner = nullptr;
+        model.pluginByInstanceId(iid, &owner); // the insert's paramValues ride on its track
+        echoTrack(owner, "track");
     }
 }
 
@@ -1102,6 +1124,7 @@ int App::run() {
     auto lastClientPresent = now; // for --exit-when-idle child instances
     bool everConnected = false;
     TransportState lastState = transport.state();
+    uint32_t lastWrapSeq = transport.wrapSeq();
 
     while (!stopping_.load(std::memory_order_acquire)) {
         std::vector<std::function<void()>> jobs;
@@ -1148,6 +1171,19 @@ int App::run() {
         if (now - lastPump >= 33ms) { // ~30 Hz
             lastPump = now;
             host->pump();
+        }
+
+        // Cycle wrap / arranger jump: the RT thread moved the playhead BACKWARDS, and the
+        // recorder times everything off that playhead. Split the take at the seam before
+        // the next pump — otherwise the note-off of a key held across the loop end is
+        // timestamped before its own note-on and the note commits as a 1/128-beat stub.
+        // Checked every tick (not at the 20 ms pump) so the boundary stays tight.
+        const uint32_t wrapSeq = transport.wrapSeq();
+        if (wrapSeq != lastWrapSeq) {
+            lastWrapSeq = wrapSeq;
+            if (recordingActive_ && midiRecorder.active())
+                midiRecorder.wrapTake(tempoMap.samplesToBeats(transport.wrapFromSamples()),
+                                      transport.playheadBeats());
         }
 
         if (recordingActive_ && midiRecorder.active() && now - lastMidiPump >= 20ms) {

@@ -19,12 +19,17 @@
   overflow-y: auto;
   overflow-x: hidden;
 }
-/* auto-height inner row: when the dock is shorter than a strip, the rail scrolls
-   vertically instead of clipping (stretch resolves against the tallest child) */
+/* DEFINITE height (not just a floor): a dock too short for a full-size strip must
+   COMPRESS the strips — each one scrolls its own rack, see .mxstrip-rack — instead of
+   growing to their natural height, which pushed the fader, its dB readout and the
+   M/S/R row below the rail with no way to reach them. The min-height is the shortest
+   strip that still shows the whole fader block (mirrors RAIL_MIN_H in Mixer.tsx);
+   below that the rail itself scrolls. */
 .mixer-rail-inner {
   display: flex;
   align-items: stretch;
-  min-height: 100%;
+  height: 100%;
+  min-height: 220px;
 }
 
 /* slim left edge bar: wide/narrow toggle + strip count */
@@ -61,13 +66,7 @@
   width: max-content;
   min-width: 100%;
   height: 100%;
-  min-height: 380px;
   box-sizing: border-box;
-}
-.mixer-scroll,
-.mixer-toolbar,
-.mixer-master-wrap {
-  min-height: 380px;
 }
 
 /* master pinned at the right behind a separator */
@@ -76,7 +75,6 @@
   display: flex;
   align-items: stretch;
   padding: 2px;
-  min-height: 380px;
   border-left: 2px solid var(--border-light);
   background: var(--panel);
 }
@@ -206,6 +204,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- routing + rack area (io selects, inserts, sends) ----
+   The flexible part of the strip: Mixer.tsx sizes the fader from the measured rail, so
+   whatever no longer fits scrolls HERE instead of pushing the level controls off the
+   bottom. Its children keep their own heights (shrink 0) — letting them squeeze would
+   leave unreadable slivers of every section instead of a scrollable rack. */
+.mxstrip-rack {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.mxstrip-rack > .mxstrip-io,
+.mxstrip-rack > .mxsec {
+  flex-shrink: 0;
 }
 
 /* ---- sections (inserts / sends) ---- */
@@ -524,9 +540,14 @@
 .mxstrip.narrow .mxbtn {
   flex: 1 1 40%;
 }
+/* Master's latency line stands in for the M/S/R row — same height, so the master's
+   fader and dB readout line up with every other strip (both are bottom-anchored). */
 .mxstrip-lat {
   flex: 0 0 auto;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
   font-size: 9px;
   color: var(--text-faint);
   padding: 1px 0 3px;

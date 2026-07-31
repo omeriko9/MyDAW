@@ -27,6 +27,7 @@ import { Knob } from "../common/Knob";
 import { Meter } from "../common/Meter";
 import { Select, SelectOption } from "../common/Select";
 import { TextInput } from "../common/TextInput";
+import { showToast } from "../common/ToastHost";
 import { Tooltip } from "../common/Tooltip";
 import { InsertSlots, applyInsertAreaDrop } from "./InsertSlots";
 import { SendsBlock } from "./SendsBlock";
@@ -60,13 +61,16 @@ function panText(v: number): string {
 
 function InputSelect({ track }: { track: Track }) {
   const audioDevices = useStore((s) => s.audioDevices);
+  const engineStatus = useStore((s) => s.engineStatus);
   const engineInfo = useStore((s) => s.engineInfo);
 
   const opts: SelectOption[] = [{ value: "", label: "No Input" }];
-  const driverName = (engineInfo?.driver ?? "").toLowerCase();
-  const driver =
-    audioDevices?.drivers.find((d) => d.available && d.type === driverName) ??
-    audioDevices?.drivers.find((d) => d.available);
+  // Only the RUNNING driver's capture channels are offerable — an inputDevice belonging
+  // to another backend can never be opened. engineStatus is authoritative after a driver
+  // switch, engineInfo is the hello-time fallback; a driver the engine doesn't enumerate
+  // ("null", or a build without ASIO) matches nothing and leaves just "No Input".
+  const driverName = (engineStatus?.driver ?? engineInfo?.driver ?? "").toLowerCase();
+  const driver = audioDevices?.drivers.find((d) => d.available && d.type === driverName);
   for (const dev of driver?.devices ?? []) {
     if (dev.maxInputs <= 0) continue;
     // NOTE(spec): inputChannel encoding is not pinned in SPEC; we use the 0-based index
@@ -128,7 +132,13 @@ function OutputSelect({ track, buses }: { track: Track; buses: Track[] }) {
       title="Output routing"
       onChange={(v) => {
         const outputTarget = v === "master" || v === "none" ? v : Number(v);
-        void actions.setTrack(track.id, { outputTarget });
+        // The engine refuses routings that would feed back on themselves; without this
+        // the select just snaps back and the rejection dies as an unhandled promise.
+        actions
+          .setTrack(track.id, { outputTarget })
+          .catch((e) =>
+            showToast(`Output routing failed: ${e instanceof Error ? e.message : e}`, "error"),
+          );
       }}
     />
   );
@@ -199,6 +209,8 @@ export interface ChannelStripProps {
   /** Bus tracks, for output routing + sends destinations. */
   buses: Track[];
   wide: boolean;
+  /** Fader (and meter) height, sized by Mixer from the rail it has to fit in. */
+  faderH: number;
   isMaster?: boolean;
 }
 
@@ -206,6 +218,7 @@ export const ChannelStrip = React.memo(function ChannelStrip({
   track,
   buses,
   wide,
+  faderH,
   isMaster,
 }: ChannelStripProps) {
   const selected = useStore((s) => s.selection.trackIds.includes(track.id));
@@ -220,7 +233,6 @@ export const ChannelStrip = React.memo(function ChannelStrip({
   const pan = useGestureValue(track.pan);
   const frozen = !!track.frozen;
   const width = wide ? 84 : 56;
-  const faderH = wide ? 150 : 120;
   const meterW = wide ? 12 : 8;
 
   const getLevels = () =>
@@ -425,33 +437,39 @@ export const ChannelStrip = React.memo(function ChannelStrip({
         )}
       </div>
 
-      {/* IO (wide only — narrow strips drop detail sections) */}
-      {wide && !isMaster && (
-        <div className="mxstrip-io">
-          {track.kind === "audio" ? (
-            <InputSelect track={track} />
-          ) : track.kind === "midi" || track.kind === "instrument" ? (
-            <div className="mxstrip-static" title="MIDI input: all enabled devices, all channels">
-              In: Omni
+      {/* IO + inserts + sends (wide only — narrow strips drop detail sections). They live
+          in one scroller so a dock too short for all of it never eats the fader block
+          below: the rack scrolls, the level controls stay put. */}
+      {wide && (
+        <div className="mxstrip-rack">
+          {!isMaster && (
+            <div className="mxstrip-io">
+              {track.kind === "audio" ? (
+                <InputSelect track={track} />
+              ) : track.kind === "midi" || track.kind === "instrument" ? (
+                <div className="mxstrip-static" title="MIDI input: all enabled devices, all channels">
+                  In: Omni
+                </div>
+              ) : null}
+              <OutputSelect track={track} buses={buses} />
             </div>
-          ) : null}
-          <OutputSelect track={track} buses={buses} />
-        </div>
-      )}
-      {wide && isMaster && (
-        <div className="mxstrip-io">
-          <div
-            className="mxstrip-static"
-            title={`Hardware output${engineStatus?.device ? `: ${engineStatus.device}` : ""}`}
-          >
-            Out: {engineStatus?.device || engineInfo?.driver || "device"}
-          </div>
-        </div>
-      )}
+          )}
+          {isMaster && (
+            <div className="mxstrip-io">
+              <div
+                className="mxstrip-static"
+                title={`Hardware output${engineStatus?.device ? `: ${engineStatus.device}` : ""}`}
+              >
+                Out: {engineStatus?.device || engineInfo?.driver || "device"}
+              </div>
+            </div>
+          )}
 
-      {/* inserts + sends (MIDI channels host no audio plugins — no insert section) */}
-      {wide && track.kind !== "midi" && <InsertSlots track={track} />}
-      {wide && !isMaster && <SendsBlock track={track} buses={buses} />}
+          {/* MIDI channels host no audio plugins — no insert section */}
+          {track.kind !== "midi" && <InsertSlots track={track} />}
+          {!isMaster && <SendsBlock track={track} buses={buses} />}
+        </div>
+      )}
       {!wide && <div className="mxstrip-flexspace" />}
 
       {/* pan */}
@@ -485,6 +503,7 @@ export const ChannelStrip = React.memo(function ChannelStrip({
           width={wide ? 34 : 24}
           noTicks={!wide}
           title={`${gainToDbText(vol.value)} dB — double-click resets to 0 dB`}
+          ariaLabel={`${track.name} volume`}
           onChange={(v) => {
             vol.drag(v);
             actions.dragTrack(track.id, { volume: v });

@@ -15,7 +15,7 @@
  * frozen, SPEC §5.5) and reject insert drops without treating them as "nothing".
  */
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { PluginInstance, PluginStateEvent, Track } from "../../protocol/types";
 import { useStore } from "../../store/store";
@@ -202,6 +202,14 @@ export function InsertSlots({ track }: { track: Track }) {
     }
     void openBestEditor(ins);
   };
+  // The strip can vanish inside that 230ms window (mix-view filter, wide→narrow, dock
+  // closed) — drop the pending timer so no editor pops for a channel that is gone.
+  useEffect(
+    () => () => {
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+    },
+    [],
+  );
 
   /* ---- drag & drop -----------------------------------------------------------
    * Accepts two payloads: a plugin dragged from the Browser (adds a new insert), and an

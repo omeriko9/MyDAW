@@ -142,7 +142,7 @@ export default function ClipEditor() {
   const [envMode, setEnvMode] = useState(false);
 
   const viewRef = useRef<View | null>(null);
-  const fitForRef = useRef<number | null>(null); // clip id the view was last fitted for
+  const fitForRef = useRef<string | null>(null); // clip+asset the view was last fitted for
   const dragRef = useRef<Drag | null>(null);
   /** in-gesture values so the waveform tracks toolbar/handle drags before the engine echo */
   const gainPreviewRef = useRef<number | null>(null);
@@ -292,10 +292,14 @@ export default function ClipEditor() {
       return;
     }
 
-    // (re)fit when the active clip changed or the view was reset
-    if (!viewRef.current || fitForRef.current !== c.id) {
+    // (re)fit when the active clip changed or the view was reset. The asset is part of
+    // the key because spp/scroll live in the SOURCE samples of c.assetId: an offline
+    // process mints a new derived render (and resample changes the span length too), so
+    // the old view no longer frames the clip.
+    const fitKey = `${c.id}:${c.assetId}`;
+    if (!viewRef.current || fitForRef.current !== fitKey) {
       viewRef.current = fitView(c, w);
-      fitForRef.current = c.id;
+      fitForRef.current = fitKey;
     }
     const g = geomNow();
     if (!g) return;
@@ -1115,7 +1119,11 @@ export default function ClipEditor() {
           <Icon name="split" size={13} />
           Split at Cursor
         </button>
-        {cursorSmp !== null ? (
+        {/* only while the cursor is inside the audible range — a left-trim past it would
+            otherwise print a negative "from clip start" for a cursor that is not drawn */}
+        {cursorSmp !== null &&
+        cursorSmp >= clip.srcOffsetSamples &&
+        cursorSmp <= clip.srcOffsetSamples + clip.lengthSamples ? (
           <span className="ce-cursor mono dim" title="Cursor position from clip start">
             {((cursorSmp - clip.srcOffsetSamples) / sr).toFixed(3)} s
           </span>

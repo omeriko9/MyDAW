@@ -229,6 +229,10 @@
   align-items: center;
   gap: 4px;
   padding: 5px 3px 0;
+  /* Rows are never shorter than MIN_LANE_H (PianoRoll.tsx caps the lane COUNT to what
+     fits), so everything here is reachable; this only clips the frame between a pane
+     resize and the ResizeObserver recount, where a row can still be mid-shrink. */
+  overflow: hidden;
 }
 
 .pr-lane-btn {

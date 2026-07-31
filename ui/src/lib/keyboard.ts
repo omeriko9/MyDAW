@@ -127,6 +127,8 @@ export interface KeyContextHandlers {
   nudge?: (dx: -1 | 0 | 1, dy: -1 | 0 | 1, big: boolean) => boolean | void;
   /** F — fit the selection (or all content) into view. Return true to consume. */
   zoomToFit?: () => boolean | void;
+  /** Q — the pane's OWN quantize (its toolbar grid/strength/swing), else project grid. */
+  quantize?: () => void;
 }
 
 export type KeyContextName = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic";
@@ -243,6 +245,22 @@ function isEditableTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+/**
+ * True when Space belongs to the focused control while the UI is blocked. Blink only
+ * runs a button's native activation (keydown default → click on keyup) if the keydown
+ * was not defaultPrevented, so preventing it blanket-killed Space on every button in
+ * every dialog. Keep it for a control the user deliberately tabbed to — but NOT for a
+ * modal's title-bar X, which Modal focuses on open: there the DAW's Space reflex would
+ * dismiss the dialog and discard everything typed into it. Anything else (the panel,
+ * the overlay, a role="button" div that handles Space itself) has no native Space
+ * action, so preventDefault there only stops the page from scrolling.
+ */
+function spaceActivatesTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const btn = el.closest("button, a[href]");
+  return !!btn && !btn.closest(".modal-title");
 }
 
 /** True when the user has a non-empty DOM text selection (e.g. highlighted chat text). */
@@ -412,9 +430,10 @@ function soloSelectedTracks(): void {
 }
 
 /**
- * "Q" / transport Q button (PINNED name — TransportBar imports this): quantize the
- * piano roll's selected notes (or the whole active clip) when it is visible, else the
- * notes of every selected MIDI clip. Grid step/swing come from project.grid.
+ * Transport Q button, and Q from panes with no quantize handler of their own (PINNED
+ * name — TransportBar imports this): quantize the piano roll's selected notes (or the
+ * whole active clip) when it is visible, else the notes of every selected MIDI clip.
+ * Grid step/swing come from project.grid.
  */
 export function quantizeSelection(): void {
   const s = useStore.getState();
@@ -511,7 +530,10 @@ function onKeyDown(e: KeyboardEvent): void {
   if (isEditableTarget(e.target)) return;
   // Menus/modals own the keyboard (incl. their Esc) — except transport keys inside
   // modals that opt in (Room View): play/stop/locate must work in every view.
-  if (uiBlocked() && !(blockedButTransportAllowed() && isTransportKey(e))) return;
+  if (uiBlocked() && !(blockedButTransportAllowed() && isTransportKey(e))) {
+    if (e.key === " " && !spaceActivatesTarget(e.target)) e.preventDefault();
+    return;
+  }
 
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -523,10 +545,20 @@ function onKeyDown(e: KeyboardEvent): void {
 
   // Layout presets (lib/layouts, UI_IMPROVE.md §6.3): Ctrl+Alt+1..4 apply,
   // Ctrl+Alt+Shift+1..4 save the current workspace into the slot.
-  if (ctrl && e.altKey && key >= "1" && key <= "4") {
+  // Match the PHYSICAL key: with Shift held, e.key is the digit's punctuation twin
+  // ("!@#$" on US), so comparing e.key against "1".."4" made the save half of this
+  // shortcut unreachable on a real keyboard. e.key stays as the fallback for
+  // synthetic events and layouts that report no usable code.
+  // AltGr must NOT count as Ctrl+Alt: Windows reports it as ctrlKey+altKey, so matching
+  // the physical code made AltGr+1..4 — how a German/Spanish/… layout types | @ # ~ —
+  // swap the whole workspace.
+  const slotKey =
+    /^(?:Digit|Numpad)([1-4])$/.exec(e.code)?.[1] ??
+    (key >= "1" && key <= "4" ? key : undefined);
+  if (ctrl && e.altKey && slotKey && !e.getModifierState("AltGraph")) {
     consume();
     if (e.repeat) return;
-    const slot = Number(key) as LayoutSlotIndex;
+    const slot = Number(slotKey) as LayoutSlotIndex;
     if (e.shiftKey) {
       const snap = saveLayoutSlot(slot);
       showToast(`Layout ${slot} saved — ${snap.name}`, "success");
@@ -703,7 +735,12 @@ function onKeyDown(e: KeyboardEvent): void {
     }
     case "q":
       consume();
-      if (!e.repeat) quantizeSelection();
+      // The piano roll advertises Q for ITS quantize button (own grid/strength/swing);
+      // panes without a handler fall back to the project-grid quantize below.
+      if (!e.repeat) {
+        if (ctx?.quantize) ctx.quantize();
+        else quantizeSelection();
+      }
       return;
     case "p":
       consume();

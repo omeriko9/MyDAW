@@ -17,7 +17,7 @@
  * shift = h-scroll, ctrl = h-zoom, alt = v-zoom. Middle-drag pans.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CcUpdate, MidiCc, MidiClip, Note, NoteInput, NoteUpdate, Project, Track, TransportEvent } from "../../protocol/types";
 import { transportBus, useStore } from "../../store/store";
 import type { Tool } from "../../store/store";
@@ -298,6 +298,19 @@ function laneHeightFor(count: number): number {
   return Math.max(46, Math.round(M.VEL_LANE_H - (count - 1) * 12));
 }
 
+/** With lanes shown the notes/keys row never goes below this — six lanes in a
+    default-height dock used to leave the 1fr row at 0 px (no grid, no keys). The
+    shortfall comes out of the lane COUNT (laneCap below), never out of the lane
+    heights: rows squeezed under MIN_LANE_H clipped away their own +/− buttons, so a
+    lane could no longer be removed. Lanes off needs no floor: nothing competes. */
+const MIN_NOTES_H = 80;
+
+/** Shortest lane row whose corner still shows all of its controls: 1px top border +
+    5px padding + 18px selector + 4px gap + 14px +/− row = 42 (see .pr-lane-corner,
+    which clips the overflow). Kept at laneHeightFor's floor so a shown lane is never
+    squeezed below the height the lane stack was designed for. */
+const MIN_LANE_H = 46;
+
 const isLaneSpec = (l: unknown): l is LaneSpec =>
   l !== null &&
   typeof l === "object" &&
@@ -411,6 +424,7 @@ function EmptyState({ hasProject }: { hasProject: boolean }) {
     <div
       className="pr-root pr-empty"
       data-key-target={isKeyTarget || undefined}
+      onPointerDownCapture={() => useStore.getState().setFocusedPane("pianoRoll")}
       onContextMenu={(e) => {
         e.preventDefault();
         openContextMenu(e.clientX, e.clientY, [
@@ -507,6 +521,32 @@ function Editor({ track, clip }: EditorProps) {
   );
   const lanesRef = useRef(lanes);
   lanesRef.current = lanes;
+  /* ---- how many lane rows fit ----
+     The body grid is sized from this height, so it has to be measured: everything the
+     rows can't hold overflows the pane (grid rows don't scroll). Layout effect, not
+     effect, so the first paint after a clip switch (Editor remounts per clip id) is
+     already correct instead of flashing a lane-less body. */
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [bodyH, setBodyH] = useState(0);
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    setBodyH(el.clientHeight);
+    const ro = new ResizeObserver(() => setBodyH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  /** Lanes get only what is left once the notes/keys row keeps MIN_NOTES_H, at a height
+      where their corner controls stay clickable. Lanes past that stay in the pref (they
+      come back when the pane grows) — and can't be added, since an invisible lane would
+      be a lane you can no longer remove. Unmeasured (mount, or the pane hidden by its
+      dock tab) means "no cap": the notes row sits on its floor either way, so the
+      one-shot auto-scroll below still measures the height it always did. */
+  const laneCap =
+    bodyH > 0 ? Math.max(0, Math.floor((bodyH - M.RULER_H - MIN_NOTES_H) / MIN_LANE_H)) : MAX_LANES;
+  const shownLanes = laneOn ? Math.min(lanes.length, laneCap) : 0;
+  const hiddenLanes = laneOn ? lanes.length - shownLanes : 0;
+  const canAddLane = lanes.length < MAX_LANES && lanes.length < laneCap;
   /** §2.3B — tint notes blue→red by velocity instead of the opacity ramp. */
   const [velColors, setVelColors] = usePrefState("pianoRoll.velColors", false, isBool);
   const velColorsRef = useRef(velColors);
@@ -1013,8 +1053,8 @@ function Editor({ track, clip }: EditorProps) {
   };
 
   /* stable api for []-effects (keyboard context, escape listener) */
-  const apiRef = useRef({ cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected });
-  apiRef.current = { cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected };
+  const apiRef = useRef({ cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected, doQuantize });
+  apiRef.current = { cancelGesture, transposeSelected, transposeSelectedInScale, nudgeSelected, currentSelIn, deleteSelected, duplicateSelected, doQuantize };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1139,6 +1179,12 @@ function Editor({ track, clip }: EditorProps) {
         const x = ctx();
         if (x && x.sel.length > 0) x.api.deleteSelected();
       },
+      // Q — the toolbar's own quantize (pane grid/strength/swing), not the project
+      // grid: the pie/context menus advertise Q as the shortcut for THAT button.
+      quantize: () => {
+        const x = ctx();
+        if (x) x.api.doQuantize();
+      },
       // G/H zoom, routed here while the piano roll is the focused pane. Mutates the
       // LOCAL viewRef (center-anchored); clampView persists module-level zoom.
       zoomH: (factor) => {
@@ -1251,10 +1297,12 @@ function Editor({ track, clip }: EditorProps) {
     };
   }, [requestDraw]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keyed on shownLanes, not lanes.length: a pane resize alone mounts/unmounts lane
+  // canvases (see laneCap), and an unlistened canvas would swallow wheel scrolling.
   useEffect(() => {
     if (!laneOn) return;
     const els = laneCvs
-      .slice(0, lanes.length)
+      .slice(0, shownLanes)
       .map((cv) => cv.canvasRef.current)
       .filter((el): el is HTMLCanvasElement => el !== null);
     if (els.length === 0) return;
@@ -1277,7 +1325,7 @@ function Editor({ track, clip }: EditorProps) {
     return () => {
       for (const [el, fn] of pairs) el.removeEventListener("wheel", fn);
     };
-  }, [laneOn, lanes.length, requestDraw]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [laneOn, shownLanes, requestDraw]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ====================================================================== *
    * Notes canvas interactions
@@ -1566,7 +1614,7 @@ function Editor({ track, clip }: EditorProps) {
       }
       case "create": {
         const step = e.shiftKey ? 0 : stepRef.current;
-        g.note.pitch = M.yToPitch(y, v);
+        g.note.pitch = pitchAt(y); // press-drag must scale-snap like the click-to-add path
         const end = e.shiftKey ? M.xToBeat(x, v) : M.snapCeil(M.xToBeat(x, v), step);
         g.note.lengthBeats = Math.max(
           step > 0 ? step : M.MIN_NOTE_LEN,
@@ -2291,6 +2339,9 @@ function Editor({ track, clip }: EditorProps) {
   };
   const onVelMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const g = gestureRef.current;
+    // Drop any inline cursor a CC lane left behind (lanes can switch content on the
+    // same canvas) so the CSS ns-resize shows again.
+    if (!g) e.currentTarget.style.cursor = "";
     if (!g || g.kind !== "velocity") return;
     const { x, y } = localPt(e);
     applyVelGesture(g, x, y, e.currentTarget.clientHeight);
@@ -2525,8 +2576,12 @@ function Editor({ track, clip }: EditorProps) {
     if (laneCtlRef.current === null) onVelDown(e);
     else onCcDown(e);
   };
-  const onLaneMove = (e: React.PointerEvent<HTMLCanvasElement>) =>
-    laneCtlRef.current === null ? onVelMove(e) : onCcMove(e);
+  const onLaneMove = (i: number, e: React.PointerEvent<HTMLCanvasElement>) => {
+    // A plain hover must be answered by the lane UNDER the pointer, not by whichever
+    // lane was pressed last (a gesture keeps its own lane via pointer capture).
+    if (!gestureRef.current) laneCtlRef.current = lanesRef.current[i]?.ctl ?? null;
+    return laneCtlRef.current === null ? onVelMove(e) : onCcMove(e);
+  };
   const onLaneUp = (e: React.PointerEvent<HTMLCanvasElement>) =>
     laneCtlRef.current === null ? onVelUp(e) : onCcUp(e);
 
@@ -2686,11 +2741,13 @@ function Editor({ track, clip }: EditorProps) {
       {
         label: "Add Lane",
         icon: "plus",
-        disabled: lanesRef.current.length >= MAX_LANES,
+        disabled: !canAddLane,
         title:
           lanesRef.current.length >= MAX_LANES
             ? `Up to ${MAX_LANES} lanes`
-            : "Stack another controller lane below this one",
+            : !canAddLane
+              ? "No room for another lane — drag the pane taller"
+              : "Stack another controller lane below this one",
         onClick: () => setLanes((ls) => [...ls, nextLaneSpec()]),
       },
       {
@@ -2842,7 +2899,11 @@ function Editor({ track, clip }: EditorProps) {
         />
         <IconButton
           icon="sliders"
-          tooltip={`Velocity / CC lanes — stack up to ${MAX_LANES} (the + in a lane's corner) to see e.g. velocity + CC74 + CC10 at once`}
+          tooltip={
+            hiddenLanes > 0
+              ? `Velocity / CC lanes — ${hiddenLanes} of ${lanes.length} don't fit at this height; drag the pane taller to see them`
+              : `Velocity / CC lanes — stack up to ${MAX_LANES} (the + in a lane's corner) to see e.g. velocity + CC74 + CC10 at once`
+          }
           active={laneOn}
           onClick={() => setLaneOn((on) => !on)}
         />
@@ -2850,10 +2911,17 @@ function Editor({ track, clip }: EditorProps) {
 
       <div
         className="pr-body"
+        ref={bodyRef}
         style={{
-          gridTemplateRows: laneOn
-            ? `${M.RULER_H}px 1fr ${lanes.map(() => `${laneHeightFor(lanes.length)}px`).join(" ")}`
-            : `${M.RULER_H}px 1fr`,
+          // Every row keeps its minimum here, and laneCap guarantees they all fit —
+          // so nothing is squeezed out of reach and nothing spills past the pane.
+          gridTemplateRows:
+            shownLanes > 0
+              ? `${M.RULER_H}px minmax(${MIN_NOTES_H}px, 1fr) ${Array.from(
+                  { length: shownLanes },
+                  () => `minmax(${MIN_LANE_H}px, ${laneHeightFor(shownLanes)}px)`,
+                ).join(" ")}`
+              : `${M.RULER_H}px 1fr`,
         }}
       >
         <div className="pr-corner" />
@@ -2895,7 +2963,7 @@ function Editor({ track, clip }: EditorProps) {
         </div>
 
         {laneOn &&
-          lanes.map((lane, i) => (
+          lanes.slice(0, shownLanes).map((lane, i) => (
             <React.Fragment key={i}>
               <div className="pr-vel-corner pr-lane-corner">
                 <button
@@ -2930,11 +2998,13 @@ function Editor({ track, clip }: EditorProps) {
                     <button
                       type="button"
                       className="pr-lane-mini-btn"
-                      disabled={lanes.length >= MAX_LANES}
+                      disabled={!canAddLane}
                       title={
                         lanes.length >= MAX_LANES
                           ? `Up to ${MAX_LANES} lanes`
-                          : "Add another controller lane (velocity / pitch bend / CC)"
+                          : !canAddLane
+                            ? "No room for another lane — drag the pane taller"
+                            : "Add another controller lane (velocity / pitch bend / CC)"
                       }
                       onClick={() => setLanes((ls) => [...ls, nextLaneSpec()])}
                     >
@@ -2960,7 +3030,7 @@ function Editor({ track, clip }: EditorProps) {
                 <canvas
                   ref={laneCvs[i].ref}
                   onPointerDown={(e) => onLaneDown(i, e)}
-                  onPointerMove={onLaneMove}
+                  onPointerMove={(e) => onLaneMove(i, e)}
                   onPointerUp={onLaneUp}
                   onPointerCancel={onLaneUp}
                   onContextMenu={(e) => onLaneContext(i, e)}

@@ -46,6 +46,7 @@ import { Select } from "../common/Select";
 import { NumberDrag } from "../common/NumberDrag";
 import { Meter } from "../common/Meter";
 import { Tooltip } from "../common/Tooltip";
+import { showToast } from "../common/ToastHost";
 import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
 import TempoMapEditor from "./TempoMapEditor";
@@ -182,6 +183,26 @@ export function SnapCluster() {
     setGridLocal({ swing: v });
   };
 
+  // "Bar" snap persists as an ABSOLUTE division in beats, so a time-signature change
+  // would otherwise leave it on the old bar length while the select falls back to a dead,
+  // disabled "custom" entry. Re-derive it only when the division still IS the previous bar
+  // length (i.e. bar mode) — genuine custom divisions are left alone.
+  // Keyed on the project NAME, not on null-ness: opening a project swaps A for B in one
+  // setState (project never passes through null), so a bare number would compare B's grid
+  // against A's bar length and silently rewrite the snap of a project nobody edited.
+  const prevBpbRef = useRef<{ name: string; beatsPerBar: number } | null>(null);
+  useEffect(() => {
+    const prev = prevBpbRef.current;
+    prevBpbRef.current = project ? { name: project.name, beatsPerBar } : null;
+    if (!project || prev === null || prev.name !== project.name) return;
+    if (prev.beatsPerBar === beatsPerBar) return;
+    // Transient: undo restores a whole-project snapshot, so the meter change's own entry
+    // already carries the old division — a second "Set Grid" entry would only let one
+    // Ctrl+Z land in the dead custom state this re-derive exists to avoid.
+    if (grid.snap && approx(grid.division, prev.beatsPerBar))
+      setGridLocal({ division: beatsPerBar }, true);
+  }, [project, beatsPerBar, grid.snap, grid.division]);
+
   // close swing popover on outside click / Escape
   useEffect(() => {
     if (!swingOpen) return;
@@ -290,7 +311,7 @@ export function SnapCluster() {
 export function TempoSigCluster() {
   const project = useStore((s) => s.project);
   const bpm = project?.tempoMap[0]?.bpm ?? 120;
-  const sig = project?.timeSigMap[0] ?? { bar: 1, num: 4, den: 4 };
+  const sig = project?.timeSigMap[0] ?? { bar: 0, num: 4, den: 4 }; // bar is 0-based on the wire
   const [bpmDrag, setBpmDrag] = useState<number | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const mapRef = useRef<HTMLSpanElement | null>(null);
@@ -355,8 +376,11 @@ export function TempoSigCluster() {
   );
 }
 
-/* Time signature — "N/D" text; double-click to type a new value (validated 1..32 / 1..32,
-   mirroring the engine's accepted range). Escape reverts, Enter/blur commits. */
+/** Denominators cmd/timesig.set accepts — anything else comes back as bad_request. */
+const SIG_DENS = [1, 2, 4, 8, 16, 32];
+
+/* Time signature — "N/D" text; double-click to type a new value (validated 1..32 over
+   SIG_DENS, mirroring the engine's accepted range). Escape reverts, Enter/blur commits. */
 function TimeSigField({
   sig,
   disabled,
@@ -382,12 +406,17 @@ function TimeSigField({
   };
   const commit = () => {
     const m = /^\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*$/.exec(draft);
-    if (m) {
-      const num = Number(m[1]);
-      const den = Number(m[2]);
-      if (num >= 1 && num <= 32 && den >= 1 && den <= 32 && (num !== sig.num || den !== sig.den)) {
-        fire(setTimeSig(num, den));
-      }
+    const num = m ? Number(m[1]) : 0;
+    const den = m ? Number(m[2]) : 0;
+    if (m && num >= 1 && num <= 32 && SIG_DENS.includes(den)) {
+      if (num !== sig.num || den !== sig.den) fire(setTimeSig(num, den));
+    } else if (draft.trim() !== "") {
+      // Reverting in silence reads as "the app ignored me" — and a bad denominator only
+      // ever failed at the engine, where the rejection was swallowed by fire().
+      showToast(
+        `Time signature must be 1-32 over ${SIG_DENS.join(", ")} — "${draft.trim()}" ignored`,
+        "error",
+      );
     }
     setEditing(false);
   };
@@ -644,7 +673,14 @@ export default function TransportBar() {
             icon="mixer"
             active={panels.bottomTab !== null}
             tooltip="Bottom dock"
-            onClick={() => setPanels({ bottomTab: panels.bottomTab === null ? "mixer" : null })}
+            onClick={() =>
+              // Reopen on the pane the dock was closed on (panels.bottomTabPrev), same as
+              // View → Bottom Dock: a hard-coded "mixer" lost that pane and could collide
+              // with bottomTab2, which App's normalizer resolves by dropping the split.
+              setPanels({
+                bottomTab: panels.bottomTab === null ? (panels.bottomTabPrev ?? "mixer") : null,
+              })
+            }
           />
           <IconButton
             icon="sliders"

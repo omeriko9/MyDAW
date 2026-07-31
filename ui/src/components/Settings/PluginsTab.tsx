@@ -64,11 +64,22 @@ function FolderList({
           style={{ fontSize: 11 }}
           value={draft}
           onChange={setDraft}
-          placeholder="C:\\Path\\To\\Plugins"
+          // A JSX attribute string is literal — no escape processing — so "\\" showed
+          // up as two visible backslashes in the field.
+          placeholder="C:\Path\To\Plugins"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
               add();
+            } else if (e.key === "Escape" && draft !== "") {
+              // Cancel the half-typed path instead of closing Settings: Modal answers
+              // Escape in the bubble phase, so consuming it here wins (a second Escape,
+              // with the draft already empty, falls through and closes the dialog).
+              // preventDefault also skips TextInput's own revert, which is a no-op here —
+              // the value it would revert TO is this draft.
+              e.preventDefault();
+              e.stopPropagation();
+              setDraft("");
             }
           }}
         />

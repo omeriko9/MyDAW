@@ -47,6 +47,7 @@ import { IconButton } from "../common/IconButton";
 import { Icon } from "../common/icons";
 import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
+import { cycleReason, wouldCycle } from "../../lib/routing";
 
 function trackNameById(project: Project, id: number): string {
   if (project.masterTrack.id === id) return "Master";
@@ -98,18 +99,39 @@ const midiChannelOptions: SelectOption[] = [
 function MidiLearnChip({ paramRef, label }: { paramRef: string; label: string }) {
   const armed = useStore((s) => s.midiLearnArm === paramRef);
   const map = useStore((s) => s.midiMaps.find((m) => m.paramRef === paramRef));
+  // An arm swallows the next CC from any channel and this chip is the only place it is
+  // visible, so it must not outlive the chip: disarm when we go away (track deselected,
+  // Inspector tab switched). Only when WE armed it — a remount must not cancel someone
+  // else's arm — and only while the engine still reports our paramRef.
+  const armedHere = React.useRef(false);
+  React.useEffect(
+    () => () => {
+      if (armedHere.current && useStore.getState().midiLearnArm === paramRef) void midiLearn("");
+    },
+    [paramRef],
+  );
   return (
     <button
       type="button"
       className={"btn" + (armed ? " primary" : map ? " active" : "")}
       title={
         armed
-          ? `Move a MIDI control to bind it to ${label}…`
+          ? `Move a MIDI control to bind it to ${label}… — click to cancel`
           : map
             ? `${label} ← CC ${map.cc} — click to unmap`
             : `MIDI Learn ${label}`
       }
-      onClick={() => void (map ? midiUnlearn(paramRef) : midiLearn(paramRef))}
+      onClick={() => {
+        if (armed) {
+          armedHere.current = false;
+          void midiLearn(""); // the protocol's disarm: an empty paramRef clears the arm
+        } else if (map) {
+          void midiUnlearn(paramRef);
+        } else {
+          armedHere.current = true;
+          void midiLearn(paramRef);
+        }
+      }}
     >
       {armed ? "…" : map ? `CC ${map.cc}` : "MIDI"}
     </button>
@@ -182,15 +204,32 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
     : [];
 
   const addSendMenu = (e: React.MouseEvent) => {
+    // Same rules as the mixer strip's '+' (SendsBlock), via lib/routing so the two menus
+    // cannot drift: a bus this track already sends to is not offered (the engine has no
+    // duplicate check, so it would just stack a second send), and one that would close a
+    // routing loop is shown greyed out with the reason rather than as a live item whose
+    // only feedback is an error line at the bottom of the pane.
+    const used = new Set(track.sends.map((s) => s.destTrackId));
+    const candidates = buses.filter((b) => !used.has(b.id));
     const items: MenuEntry[] =
-      buses.length > 0
-        ? buses.map((b) => ({
-            label: b.name,
-            onClick: () => {
-              void addSend(id, b.id).catch((er) => setErr(errText(er)));
+      candidates.length > 0
+        ? candidates.map((b) => {
+            const cycles = wouldCycle(buses, id, b.id);
+            return {
+              label: b.name,
+              disabled: cycles,
+              title: cycles ? cycleReason(b.name) : undefined,
+              onClick: () => {
+                void addSend(id, b.id).catch((er) => setErr(errText(er)));
+              },
+            };
+          })
+        : [
+            {
+              label: buses.length === 0 ? "No bus tracks — add a bus first" : "All buses already used",
+              disabled: true,
             },
-          }))
-        : [{ label: "No bus tracks — add a bus first", disabled: true }];
+          ];
     openContextMenu(e.clientX, e.clientY, items);
   };
 

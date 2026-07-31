@@ -24,7 +24,10 @@ import type { TempoPoint, TimeSigEntry } from "../../protocol/types";
 
 type PosMode = "bars" | "time";
 
-const DEFAULT_SIG: TimeSigEntry[] = [{ bar: 1, num: 4, den: 4 }];
+// Wire space like every map lib/time.ts receives (bar is 0-BASED — it renders as bar 1).
+// A 1-based literal here shifted the whole readout by a bar whenever project is null,
+// i.e. before the engine connects: beat 0 read "2.1.000".
+const DEFAULT_SIG: TimeSigEntry[] = [{ bar: 0, num: 4, den: 4 }];
 const DEFAULT_TEMPO: TempoPoint[] = [{ beat: 0, bpm: 120 }];
 
 export default function PositionDisplay() {

@@ -110,6 +110,40 @@ void MidiRecorder::pump(const TempoMap& tempoMap, double currentBeat) {
     }
 }
 
+void MidiRecorder::wrapTake(double boundaryBeat, double resumeBeat) {
+    if (!active_)
+        return;
+    double relEnd = boundaryBeat - startBeat_;
+    if (relEnd < 0.0)
+        relEnd = 0.0;
+    double relResume = resumeBeat - startBeat_;
+    if (relResume < 0.0)
+        relResume = 0.0;
+
+    for (int ch = 0; ch < 16; ++ch) {
+        for (int p = 0; p < 128; ++p) {
+            const int idx = pending_[ch][p];
+            if (idx < 0)
+                continue;
+            // Read the velocity out before push_back invalidates the reference; closing
+            // first also clears the pending slot, so the re-opened note owns it after.
+            const int velocity = notes_[static_cast<size_t>(idx)].velocity;
+            closePending(ch, p, relEnd);
+            Note n;
+            n.id = 0;
+            n.pitch = p;
+            n.velocity = velocity;
+            n.startBeat = relResume;
+            n.lengthBeats = 0.0; // still held — the next lap closes it
+            n.channel = ch;
+            pending_[ch][p] = static_cast<int>(notes_.size());
+            notes_.push_back(n);
+        }
+    }
+    // A finalize before the next pump must close held notes here, not back at the seam.
+    lastPumpBeat_ = resumeBeat;
+}
+
 MidiRecorder::RecordedNotes MidiRecorder::finalize(const TempoMap& tempoMap) {
     RecordedNotes out;
     out.startBeat = startBeat_;
