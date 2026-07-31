@@ -29,6 +29,7 @@ import {
   redo,
   setAutomationWrite,
   setLoop,
+  setPunch,
   setTimeSig,
   stop,
   transientParam,
@@ -529,6 +530,9 @@ export default function TransportBar() {
   const playing = transport.state === "playing";
   const recording = transport.state === "recording";
   const loop = project?.loop ?? transport.loop;
+  // Engine-derived: the transport object always carries the region the RT gate is using,
+  // including after a tempo edit re-derived it. project.punch is the persisted mirror.
+  const punch = project?.punch ?? transport.punch ?? { startBeat: 0, endBeat: 0, enabled: false };
   const xruns = status?.xruns ?? 0;
   const cpu = Math.round(status?.cpuPercent ?? 0);
 
@@ -608,6 +612,22 @@ export default function TransportBar() {
           onChange={(on) => fire(setLoop(loop.startBeat, loop.endBeat, on))}
           icon="loop"
           tooltip="Loop (L)"
+          disabled={!project}
+        />
+        <Toggle
+          on={punch.enabled}
+          onChange={(on) => {
+            // Arming with no region yet would be a dead button (SPEC §10), so seed it from
+            // the cycle — the span the user has already framed — and fall back to the
+            // first two bars when there is no cycle either.
+            const empty = !(punch.endBeat > punch.startBeat);
+            const s0 = empty ? (loop.endBeat > loop.startBeat ? loop.startBeat : 0) : punch.startBeat;
+            const e0 = empty ? (loop.endBeat > loop.startBeat ? loop.endBeat : 8) : punch.endBeat;
+            fire(setPunch(s0, e0, on));
+          }}
+          variant="danger"
+          icon="record"
+          tooltip="Punch — record only inside the punch region"
           disabled={!project}
         />
         <MetronomeControl />

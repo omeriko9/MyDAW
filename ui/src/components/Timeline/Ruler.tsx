@@ -49,6 +49,7 @@ type RulerDrag =
       end: number;
       moved: boolean;
     }
+  | { kind: "punch"; anchorBeat: number; start: number; end: number; moved: boolean }
   | { kind: "marker"; markerId: number; beat: number; grabOffsetBeats: number; moved: boolean };
 
 interface MarkerHit {
@@ -73,6 +74,11 @@ export default function Ruler() {
   const transportLoop = useStore((s) => s.transport.loop);
 
   const loop = project?.loop ?? transportLoop;
+  // Punch region — drawn INSIDE the loop lane rather than in a lane of its own: a new lane
+  // would move RULER_H and the marker-lane origin, which is hardcoded in nine places here,
+  // and a missed one draws markers where they are not hit-tested.
+  const transportPunch = useStore((s) => s.transport.punch);
+  const punch = project?.punch ?? transportPunch ?? { startBeat: 0, endBeat: 0, enabled: false };
   const vp: HViewport = { zoomX: viewport.zoomX, scrollX: viewport.scrollX };
 
   const dragRef = useRef<RulerDrag | null>(null);
@@ -80,8 +86,8 @@ export default function Ruler() {
   const lastSeekRef = useRef(0);
   const [input, setInput] = useState<InputState | null>(null);
 
-  const stateRef = useRef({ project, loop, vp });
-  stateRef.current = { project, loop, vp };
+  const stateRef = useRef({ project, loop, punch, vp });
+  stateRef.current = { project, loop, punch, vp };
 
   /* ---------------------------------------------------------------- draw */
 
@@ -92,7 +98,7 @@ export default function Ruler() {
   const draw = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    const { project: proj, loop: lp, vp: v } = stateRef.current;
+    const { project: proj, loop: lp, punch: pk, vp: v } = stateRef.current;
     const w = size.width;
     if (w <= 0) return;
     const colors = tlColors();
@@ -151,6 +157,32 @@ export default function Ruler() {
         ctx.strokeStyle = enabled ? colors.accent : colors.textFaint;
         lineV(ctx, x0, 0, RULER_LOOP_H);
         lineV(ctx, x1, 0, RULER_LOOP_H);
+      }
+    }
+
+    // punch region: a sliver along the bottom of the loop lane, in the record colour, so
+    // it reads as "recording happens here" without competing with the cycle band above it.
+    {
+      let ps = pk.startBeat;
+      let pe = pk.endBeat;
+      let pen = pk.enabled;
+      if (d && d.kind === "punch") {
+        ps = d.start;
+        pe = d.end;
+        pen = true;
+      }
+      if (pe > ps) {
+        const x0 = beatToPx(ps, v);
+        const x1 = beatToPx(pe, v);
+        if (x1 > 0 && x0 < w) {
+          const hh = Math.max(3, Math.round(RULER_LOOP_H * 0.34));
+          const y0 = RULER_LOOP_H - hh - 1;
+          ctx.fillStyle = pen ? withAlpha(colors.danger, 0.55) : withAlpha(colors.textFaint, 0.22);
+          ctx.fillRect(x0, y0, x1 - x0, hh);
+          ctx.strokeStyle = pen ? colors.danger : colors.textFaint;
+          lineV(ctx, x0, y0, RULER_LOOP_H - 1);
+          lineV(ctx, x1, y0, RULER_LOOP_H - 1);
+        }
       }
     }
 
@@ -286,6 +318,16 @@ export default function Ruler() {
       return;
     }
 
+    if (y < RULER_LOOP_H && e.button === 0 && e.ctrlKey && e.altKey) {
+      // Ctrl+Alt+drag = punch region. Ctrl alone sets the loop start and Alt alone sets
+      // the loop end (handled above), and Shift is the snap override — both modifiers
+      // together is the free combination, and it reads as "the loop gesture, for punch".
+      const anchor = snapB(rawBeat, grid, e.shiftKey);
+      dragRef.current = { kind: "punch", anchorBeat: anchor, start: anchor, end: anchor, moved: false };
+      el.setPointerCapture(e.pointerId);
+      return;
+    }
+
     if (y < RULER_LOOP_H) {
       // loop strip
       const x0 = beatToPx(lp.startBeat, v);
@@ -366,6 +408,20 @@ export default function Ruler() {
       return;
     }
 
+    if (d.kind === "punch") {
+      d.moved = true;
+      const snapped = snapB(rawBeat, grid, e.shiftKey);
+      d.start = Math.max(0, Math.min(d.anchorBeat, snapped));
+      d.end = Math.max(0, Math.max(d.anchorBeat, snapped));
+      // Transient while dragging: the engine gate follows live, without an undo entry per
+      // pointermove — the same contract the loop drag uses. The key pairs this stream with
+      // the commit below, so the final value wins over anything still queued.
+      if (d.end > d.start)
+        transientParam("cmd/punch.set", { startBeat: d.start, endBeat: d.end, enabled: true }, "punch");
+      draw();
+      return;
+    }
+
     if (d.kind === "loop") {
       d.moved = true;
       const snapped = snapB(rawBeat, grid, e.shiftKey);
@@ -411,6 +467,21 @@ export default function Ruler() {
 
     if (d.kind === "seek") {
       seekTo(snapB(beatAt(e.clientX, el), grid, e.shiftKey), true);
+      return;
+    }
+
+    if (d.kind === "punch") {
+      if (!d.moved) {
+        draw();
+        return;
+      }
+      const minLen = grid && grid.division > 0 ? grid.division : 0.25;
+      // A region too small to hold anything is not a punch — SPEC §10 forbids arming
+      // something that would gate every sample out, so clear it instead.
+      if (d.end - d.start < minLen / 2)
+        commitParam("cmd/punch.set", { startBeat: 0, endBeat: 0, enabled: false }, "punch");
+      else
+        commitParam("cmd/punch.set", { startBeat: d.start, endBeat: d.end, enabled: true }, "punch");
       return;
     }
 
