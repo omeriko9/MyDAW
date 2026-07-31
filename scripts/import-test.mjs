@@ -5,10 +5,11 @@
  * Usage: node scripts/import-test.mjs [--port 8523]
  */
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, mkdtempSync} from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
+import { tmpdir as __tmpdir } from "node:os";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.argv.includes("--port") ? process.argv[process.argv.indexOf("--port") + 1] : "8523");
@@ -53,8 +54,14 @@ function makeSmf() {
 const smfPath = path.join(os.tmpdir(), "mydaw-import-test.mid");
 writeFileSync(smfPath, makeSmf());
 
+// ISOLATED %APPDATA%: this harness spawns a real engine, and an engine writes settings
+// (audio device, PLUGIN FOLDERS), plugin-cache.json, recent.json, autosave data and a
+// session.lock. Run against the developer's real profile it silently rewrites their DAW
+// configuration — and a hard kill leaves a lock that makes their next launch "recover"
+// this harness's throwaway project instead of their work.
+const APPDATA_ISO = mkdtempSync(path.join(__tmpdir(), "mydaw-iso-"));
 const engine = spawn(path.join(ROOT, "build", "bin", "Release", "mydaw-engine.exe"),
-  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] , env: { ...process.env, APPDATA: APPDATA_ISO } });
 let elog = ""; engine.stderr.on("data", (d) => { elog = (elog + d).slice(-4000); });
 const die = (code, msg) => { console.log(msg); try { engine.kill(); } catch {} setTimeout(() => process.exit(code), 300); };
 

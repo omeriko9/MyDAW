@@ -38,8 +38,14 @@ function makeSineWav(sr = 44100, secs = 2, freq = 440, amp = 0.5) {
   return buf;
 }
 
+// ISOLATED %APPDATA%: this harness spawns a real engine, and an engine writes settings
+// (audio device, PLUGIN FOLDERS), plugin-cache.json, recent.json, autosave data and a
+// session.lock. Run against the developer's real profile it silently rewrites their DAW
+// configuration — and a hard kill leaves a lock that makes their next launch "recover"
+// this harness's throwaway project instead of their work.
+const APPDATA_ISO = mkdtempSync(path.join(tmpdir(), "mydaw-iso-"));
 const engine = spawn(path.join(ROOT, "build", "bin", "Release", "mydaw-engine.exe"),
-  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] , env: { ...process.env, APPDATA: APPDATA_ISO } });
 let elog = "";
 engine.stderr.on("data", (d) => { elog = (elog + d).slice(-6000); });
 const die = (code, msg) => { console.log(msg); try { engine.kill(); } catch {} setTimeout(() => process.exit(code), 300); };
