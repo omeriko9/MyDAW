@@ -418,6 +418,25 @@ bool resolveBatchReferences(json& value, const std::map<std::string, json>& resu
     return true;
 }
 
+/**
+ * True for the paramRefs an automation lane may address (SPEC §5.3).
+ *
+ * THE ONLY spelling of this outside parseParamRef. It lives up here rather than beside
+ * its automation neighbours because automationSet is defined above them and could not
+ * see it there — which is exactly how the grammar came to be written out a third time,
+ * inline, and then drift: cc: lanes made by midi.extractAutomation were rejected by
+ * every edit because two of the three spellings had never heard of cc:.
+ *
+ * "send:" and "plugin:" match by PREFIX on purpose — a lane must be able to outlive
+ * (or predate) the send or plugin instance it addresses. The cc: bound is not restated
+ * here; parseParamRef owns it. scripts/automation-paramref-test.mjs asserts set/ramp/
+ * clear agree about every form.
+ */
+bool validParamRef(const std::string& ref) {
+    return ref == "volume" || ref == "pan" || startsWith(ref, "send:") ||
+           startsWith(ref, "plugin:") || parseParamRef(ref).kind == ParamRef::Kind::Cc;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -4436,13 +4455,9 @@ json CommandProcessor::automationSet(const json& p, CmdResult& r) {
         return r.fail("not_found", "unknown trackId");
     const std::string paramRef = getOr(p, "paramRef", "");
     // "cc:<0..129>" lanes are first-class: midi.extractAutomation creates them and the graph
-    // bakes them back to CC events, so they must be editable like any other lane. The bound
-    // check is parseParamRef's — re-spelling the grammar here is how it drifted in the first
-    // place (Kind::Cc is exact: "cc:1" passes, "cc:", "cc:x" and "cc:200" do not).
-    const bool valid = paramRef == "volume" || paramRef == "pan" ||
-                       startsWith(paramRef, "send:") || startsWith(paramRef, "plugin:") ||
-                       parseParamRef(paramRef).kind == ParamRef::Kind::Cc;
-    if (!valid)
+    // bakes them back to CC events, so they must be editable like any other lane. Shared
+    // with ramp/clear rather than restated — restating it here is how it drifted before.
+    if (!validParamRef(paramRef))
         return r.fail("bad_request", "bad paramRef: " + paramRef);
 
     const bool laneExisted = m.automationLane(trackId, paramRef, false) != nullptr;
@@ -4528,14 +4543,6 @@ json CommandProcessor::automationSet(const json& p, CmdResult& r) {
 }
 
 namespace {
-
-/** True for the paramRefs an automation lane may address (SPEC §5.3). */
-bool validParamRef(const std::string& ref) {
-    // cc:<0..129> included — extracted MIDI-controller lanes are editable lanes (see
-    // automationSet); the exact bound is parseParamRef's, not re-spelled here.
-    return ref == "volume" || ref == "pan" || startsWith(ref, "send:") ||
-           startsWith(ref, "plugin:") || parseParamRef(ref).kind == ParamRef::Kind::Cc;
-}
 
 /**
  * Beat where a 0-based bar starts, honouring every time-signature change. Mirrors

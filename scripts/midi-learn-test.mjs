@@ -48,7 +48,10 @@ if (!up) die(2, "engine failed to boot:\n" + elog.slice(-800));
 let nextId = 1; const pending = new Map();
 const sock = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error("ws")); });
-sock.onmessage = (m) => { const j = JSON.parse(m.data); if (j.replyTo != null) { const p = pending.get(j.replyTo); if (p) { pending.delete(j.replyTo); j.ok ? p.res(j.payload ?? {}) : p.rej(new Error(`${p.t}: ${j.error?.code} ${j.error?.message}`)); } } };
+/* Broadcasts, not just replies: a hardware control is the ONLY source whose value nothing
+   on screen can learn any other way, so the echo it produces is part of the contract. */
+const events = [];
+sock.onmessage = (m) => { const j = JSON.parse(m.data); if (j.replyTo != null) { const p = pending.get(j.replyTo); if (p) { pending.delete(j.replyTo); j.ok ? p.res(j.payload ?? {}) : p.rej(new Error(`${p.t}: ${j.error?.code} ${j.error?.message}`)); } } else if (j.type) { events.push(j); } };
 const req = (t, payload = {}, ms = 60000) => { const id = nextId++; sock.send(JSON.stringify({ id, type: t, payload })); return new Promise((res, rej) => { pending.set(id, { res, rej, t }); setTimeout(() => { if (pending.delete(id)) rej(new Error(t + ": timeout")); }, ms); }); };
 
 const peakOf = (file) => { if (!existsSync(file)) return null; const w = readFileSync(file); if (w.toString("ascii", 0, 4) !== "RIFF") return null; let pk = 0; for (let i = 200; i + 1 < Math.min(w.length, 800000); i += 2) pk = Math.max(pk, Math.abs(w.readInt16LE(i))); return pk; };
@@ -89,6 +92,34 @@ try {
   await feed(7, 127);
   const full = await render();
   report("mapped CC 127 → full level", full != null && Math.abs(full - base) < base * 0.05, `base=${base} full=${full}`);
+
+  /* The mapped CC must also REACH THE SCREEN. applyMidiMap applies transiently so a
+     controller sweep behaves like a fader drag — no undo entry per CC, no revision bump —
+     but transient also makes execute() skip broadcastChanges, and that half is only right
+     when the browser is the source and already draws the value it is dragging. A hardware
+     controller is not the UI, so the touched track is mirrored back explicitly. The bug
+     was that nothing on screen ever learned the value, which is the whole point of learn. */
+  events.length = 0;
+  const sweep = [10, 40, 80, 120];
+  for (const v of sweep) { await feed(7, v); await sleep(60); }
+  await sleep(250);
+  const echoes = events.filter((e) => e.type === "event/projectChanged");
+  report("a hardware CC echoes a projectChanged per message", echoes.length >= sweep.length,
+    `${echoes.length} echo(es) for ${sweep.length} CCs`);
+  const scoped = echoes.filter((e) => (e.payload?.tracks ?? []).some((x) => x.id === t.id));
+  report("the echo carries the touched track", scoped.length >= sweep.length,
+    `${scoped.length} carried track ${t.id}`);
+  const lastVol = scoped.length
+    ? (scoped[scoped.length - 1].payload.tracks.find((x) => x.id === t.id) ?? {}).volume
+    : null;
+  report("the echoed volume is the value the controller sent",
+    lastVol != null && Math.abs(lastVol - 120 / 127) < 1e-6,
+    `echoed=${lastVol} expected=${120 / 127}`);
+  /* ...and the transient envelope survives: a sweep that bumped the revision per message
+     would be pushing an undo entry per CC, which is what transient exists to prevent. */
+  const revs = [...new Set(scoped.map((e) => e.payload?.revision))];
+  report("a CC sweep does not bump the revision per message", revs.length === 1,
+    `revisions seen: ${JSON.stringify(revs)}`);
 
   // an UNMAPPED cc does nothing
   const beforeVol = (await req("session/hello", {})).project.tracks.find((x) => x.id === t.id)?.volume;

@@ -22,7 +22,7 @@ node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up 
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
 | Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
-| Kept from regressing, unattended | **7 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 4 of 14 areas, ~10 s |
+| Kept from regressing, unattended | **18 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 11 of 14 areas, ~16 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -46,14 +46,20 @@ synthetic events silently pass shortcuts that are dead in real use.
 Four layers, cheapest first. Push every check down to the cheapest layer that can hold
 it — a browser is three orders of magnitude more expensive than a vitest case.
 
-- **`ui/ npm test`** — 401 vitest cases over the pure logic (time math, fade curves,
+- **`ui/ npm test`** — 403 vitest cases over the pure logic (time math, fade curves,
   MIDI functions, clipboard, catalog). Sub-second, deterministic, and the right home
   for anything that does not need a DOM.
-- **`scripts/*-test.mjs`** — 23 harnesses that speak the engine's WS/HTTP protocol
-  directly. The right home for anything that does not need a *browser*.
+- **`scripts/*-test.mjs`** — 25 harnesses that speak the engine's WS/HTTP protocol
+  directly. The right home for anything that does not need a *browser* — including
+  contract properties, which is what
+  [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs) does: it
+  asserts `automation.set`/`.ramp`/`.clear` agree about every paramRef, because the
+  grammar is stated in three places and drifting apart is exactly how cc: lanes once
+  became uneditable.
 - **`node scripts/ui-smoke.mjs`** — the unattended browser suite: one slot, every check
-  in order, non-zero exit on failure. ~9 s for the current 4 checks. This is where a
-  bug goes once it has been fixed, so it cannot come back silently.
+  in order, non-zero exit on failure. ~16 s for the current 18 checks, most of which
+  cost under 400 ms — the slot is the expensive part, and it is paid once. This is where
+  a bug goes once it has been fixed, so it cannot come back silently.
 - **This suite (`ui-cases.json`)** — everything left: rendering, event wiring, focus,
   keyboard routing, cross-pane consistency. Driven by a *coding agent*.
 
@@ -88,7 +94,31 @@ nothing.** Hoisting a selector to a `const` and using it inside `s.eval` raises 
 `ReferenceError` in the page on every poll, which used to surface as a plain timeout
 blaming whatever you were waiting for — a dialog that had in fact opened correctly.
 `waitFor` now carries the last predicate error into its timeout message, so this
-announces itself instead of costing an hour.
+announces itself instead of costing an hour. The same trap wears a second hat:
+`s.untilEval` polls **in the page**, `s.until` polls **here in Node** — so a wait on
+engine state (`await s.probe(...)`) must use `until`, or it raises that ReferenceError
+forever.
+
+**Every check must be able to fail.** A check that cannot distinguish the bug from
+correct behaviour is worse than none, because it reads as coverage. The habit that
+catches this is a second leg proving the discrimination is live: the piano-roll check
+repeats its drag with snapping off and requires the *raw* pitch, the refused-drop check
+repeats the identical drag onto a legal lane and requires the move to commit, and the
+add-track check asserts an enabled row beside the disabled one. Where the failing side
+could be produced directly it was: the minor-key vitest case was confirmed by
+reintroducing the bug and watching it go red.
+
+### Deliberately not covered: `pluginmanager`
+
+Favourites were keyed by a bare `uid`, which is not unique — one VST2 shell reports the
+same uid for every copy — so starring one row starred them all. That logic is already
+covered at the cheapest layer by `ui/src/lib/ids.test.ts` (all three read generations,
+move-survival, un-star, read-modify-write). A browser check on top could only assert the
+*wiring*, and on any realistic registry it cannot fail when the bug returns: no uid group
+spans more than one `format|bitness`, so a bare-uid regression lights exactly the same
+rows as the correct rule. The only discriminating signal is the persisted pref value, and
+seeing it needs a multi-copy uid that exists on one developer's machine. Left out on
+purpose rather than shipped as decorative coverage.
 
 ## Running an area
 
@@ -125,11 +155,23 @@ and executed checks for those in parallel slots — **126 checks, 113 PASS / 11 
   hardware controller, where nothing on screen knows. Fixed by echoing a granular
   `event/projectChanged` for externally-originated changes only, keeping the transient
   envelope so a CC sweep still does not push an undo entry per message.
+  *Now guarded by [midi-learn-test.mjs](../scripts/midi-learn-test.mjs), which asserts both
+  halves together — each is the other's failure mode.*
 - Undoing an offline render freed an asset id that the next render reused while the engine
   kept serving the old material — every AssetStore cache is keyed by id alone.
+  *Now guarded by [asset-recycle-test.mjs](../scripts/asset-recycle-test.mjs), which fails
+  loudly if the two renders stop receiving the same id — otherwise it would pass while
+  testing nothing.*
 - CC automation lanes (from Extract MIDI Automation) rejected every edit: the lane is
   created with paramRef `cc:<n>`, but `automationSet`'s inline check and `validParamRef`
   each re-spelled the grammar as `volume|pan|send:*|plugin:*`.
+  *Now guarded by [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs),
+  and the third spelling is gone — `automationSet` calls `validParamRef` instead of
+  restating it.*
+
+All three of the sweep's high-severity findings now have tests. None of them needed a
+browser: two are protocol harnesses and one is an assertion added to an existing harness
+that had been discarding every broadcast.
 
 Worth copying: coverage here was proven through the audio, not just the DOM. The transpose
 row was verified by rendering offline and running Goertzel analysis — a sustained A4 read
