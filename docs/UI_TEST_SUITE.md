@@ -22,7 +22,7 @@ node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up 
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
 | Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
-| Kept from regressing, unattended | **13 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 6 of 14 areas, ~12 s |
+| Kept from regressing, unattended | **18 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 11 of 14 areas, ~16 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -57,7 +57,7 @@ it — a browser is three orders of magnitude more expensive than a vitest case.
   grammar is stated in three places and drifting apart is exactly how cc: lanes once
   became uneditable.
 - **`node scripts/ui-smoke.mjs`** — the unattended browser suite: one slot, every check
-  in order, non-zero exit on failure. ~12 s for the current 13 checks, most of which
+  in order, non-zero exit on failure. ~16 s for the current 18 checks, most of which
   cost under 400 ms — the slot is the expensive part, and it is paid once. This is where
   a bug goes once it has been fixed, so it cannot come back silently.
 - **This suite (`ui-cases.json`)** — everything left: rendering, event wiring, focus,
@@ -94,7 +94,31 @@ nothing.** Hoisting a selector to a `const` and using it inside `s.eval` raises 
 `ReferenceError` in the page on every poll, which used to surface as a plain timeout
 blaming whatever you were waiting for — a dialog that had in fact opened correctly.
 `waitFor` now carries the last predicate error into its timeout message, so this
-announces itself instead of costing an hour.
+announces itself instead of costing an hour. The same trap wears a second hat:
+`s.untilEval` polls **in the page**, `s.until` polls **here in Node** — so a wait on
+engine state (`await s.probe(...)`) must use `until`, or it raises that ReferenceError
+forever.
+
+**Every check must be able to fail.** A check that cannot distinguish the bug from
+correct behaviour is worse than none, because it reads as coverage. The habit that
+catches this is a second leg proving the discrimination is live: the piano-roll check
+repeats its drag with snapping off and requires the *raw* pitch, the refused-drop check
+repeats the identical drag onto a legal lane and requires the move to commit, and the
+add-track check asserts an enabled row beside the disabled one. Where the failing side
+could be produced directly it was: the minor-key vitest case was confirmed by
+reintroducing the bug and watching it go red.
+
+### Deliberately not covered: `pluginmanager`
+
+Favourites were keyed by a bare `uid`, which is not unique — one VST2 shell reports the
+same uid for every copy — so starring one row starred them all. That logic is already
+covered at the cheapest layer by `ui/src/lib/ids.test.ts` (all three read generations,
+move-survival, un-star, read-modify-write). A browser check on top could only assert the
+*wiring*, and on any realistic registry it cannot fail when the bug returns: no uid group
+spans more than one `format|bitness`, so a bare-uid regression lights exactly the same
+rows as the correct rule. The only discriminating signal is the persisted pref value, and
+seeing it needs a multi-copy uid that exists on one developer's machine. Left out on
+purpose rather than shipped as decorative coverage.
 
 ## Running an area
 

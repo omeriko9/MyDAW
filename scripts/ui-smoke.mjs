@@ -48,6 +48,11 @@
  *   state or DOM facts.
  * - A page function passed to s.eval is stringified: it has no closure over the
  *   check's variables. Interpolate what it needs into the source.
+ * - s.until vs s.untilEval is the same trap wearing a different hat. untilEval
+ *   runs its predicate IN THE PAGE (stringified, no closure); until runs it here
+ *   in Node, so it can await s.probe() and see the check's own variables. Waiting
+ *   on engine state with untilEval raises a ReferenceError on every poll — which
+ *   waitFor now reports, instead of blaming whatever you were waiting for.
  */
 
 import { pathToFileURL } from "node:url";
@@ -736,6 +741,517 @@ export const checks = [
       // Restore the viewport and the fixture.
       for (let i = 0; i < 8; i++) await s.key("Shift+h");
       await s.probe("cmd/automation.clear", { trackId: midi.id, paramRef: "volume" }, { allowError: true });
+    },
+  },
+
+  {
+    id: "knob-click-without-drag-commits-nothing",
+    title: "a bare click on a mixer knob sends no command and keeps the redo tail",
+    area: "mixer",
+    guards: "1314840 — a click with no drag committed a non-transient cmd/track.set carrying the UNCHANGED value. UndoStack::push() does entries_.resize(cursor_), so that no-op entry DROPPED THE REDO TAIL: touching a knob after an undo silently destroyed the user's redo, and nothing on screen changed to hint at it. Knob.tsx is shared by every pan knob, the sends and the plugin/EQ knobs, so one regression spreads across the mixer",
+    run: async (s, tt) => {
+      const project = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const audioId = (await project()).tracks.find((t) => t.name === "Audio 1").id;
+
+      // (1) The mixer must be the visible dock pane. Panel prefs persist across reloads,
+      // so an earlier check that switched the dock would otherwise decide this one.
+      await s.eval(() => {
+        localStorage.setItem("mydaw.ui.panels", JSON.stringify(
+          { browser: true, browserTab: "plugins", inspector: true, bottomTab: "mixer" }));
+        localStorage.setItem("mydaw.ui.panels.bottomTab2", JSON.stringify(null));
+        return true;
+      });
+      // (2) Known pan, and (3) a redo tail — built over the WIRE, so the UI is not
+      // implicated in creating the very thing we are about to check it does not destroy.
+      await s.probe("cmd/track.set", { trackId: audioId, patch: { pan: 0 } });
+      await s.probe("cmd/track.set", { trackId: audioId, patch: { pan: 0.5 } });
+      await s.probe("edit/undo");
+      await s.reload();
+      tt.near((await project()).tracks.find((t) => t.id === audioId).pan, 0, 1e-9,
+        "the undo left pan back at centre, with a redo waiting");
+
+      await s.untilEval("the Audio 1 mixer strip renders", () =>
+        [...document.querySelectorAll(".mxstrip")]
+          .some((el) => el.querySelector("input.mxstrip-name")?.value === "Audio 1"));
+
+      const knob = await s.eval(() => {
+        const strip = [...document.querySelectorAll(".mxstrip")]
+          .find((el) => el.querySelector("input.mxstrip-name")?.value === "Audio 1");
+        strip.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const el = strip.querySelector('.knob svg[role="slider"][aria-label="Pan"]');
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2, value: el.getAttribute("aria-valuenow") };
+      });
+      tt.ok(knob, "found the Audio 1 pan knob");
+      tt.eq(knob.value, "0", "the knob shows the centred value it is about to be clicked at");
+
+      // Watch the socket itself: the assertion is about what the UI SENDS, and the engine
+      // cannot tell a no-op cmd/track.set from a real one.
+      await s.eval(() => {
+        if (!window.__knobSpy) {
+          window.__knobSpy = true;
+          window.__sent = [];
+          const orig = WebSocket.prototype.send;
+          WebSocket.prototype.send = function (d) {
+            if (typeof d === "string") window.__sent.push(d);
+            return orig.call(this, d);
+          };
+        }
+        window.__sent.length = 0;
+        return true;
+      });
+
+      // The gesture: press and release at the same point. No pointermove, so Knob's
+      // `moved` flag stays false and onPointerUp must not commit.
+      await s.click(knob.x, knob.y);
+
+      // Prove the click LANDED before concluding anything from its silence — otherwise a
+      // missed click would pass this check perfectly. Knob.onPointerDown focuses the svg
+      // by hand (it preventDefault()s the press), so focus is direct evidence of delivery.
+      await s.untilEval("the knob took focus, so the press was delivered", () =>
+        document.activeElement?.getAttribute?.("aria-label") === "Pan" &&
+        document.activeElement?.getAttribute?.("role") === "slider");
+
+      const sent = await s.eval(() =>
+        (window.__sent || []).filter((m) => m.includes("cmd/track.set")));
+      tt.eq(sent.length, 0, `no track command left the UI (got ${JSON.stringify(sent)})`);
+
+      tt.near((await project()).tracks.find((t) => t.id === audioId).pan, 0, 1e-9,
+        "the engine's pan is untouched");
+
+      // The consequence that made this destructive rather than merely noisy.
+      const redo = await s.probe("edit/redo", {}, { allowError: true });
+      tt.ok(redo.ok, `the redo tail survived the click (${JSON.stringify(redo.error ?? {})})`);
+      tt.near((await project()).tracks.find((t) => t.id === audioId).pan, 0.5, 1e-9,
+        "and the surviving redo was the pan edit, not something else");
+
+      await s.probe("cmd/track.set", { trackId: audioId, patch: { pan: 0 } });
+    },
+  },
+
+  {
+    id: "pianoroll-drag-draw-keeps-scale-snap",
+    title: "drawing a note by press-drag honours scale snapping, like click-draw always did",
+    area: "pianoroll",
+    guards: "1314840 — the create branch of onNotesMove recomputed the pitch RAW on every pointermove (g.note.pitch = M.yToPitch(y, v)), overwriting the scale-snapped pitch startCreate had chosen. So click-to-draw obeyed the Snap toggle and drag-to-draw silently ignored it, on a purely horizontal drag where the user never moved vertically at all",
+    run: async (s, tt) => {
+      const clipOf = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        return (p.tracks.find((t) => t.name === "MIDI 1").clips ?? [])[0];
+      };
+
+      // Follow-playhead can scroll the timeline out from under the clip geometry.
+      await s.probe("transport/locate", { beat: 0 });
+
+      // Beats 6..8 are the drawing area. A note left there by a crashed run turns the
+      // create gesture into a MOVE gesture, which hangs rather than failing cleanly.
+      let clip = await clipOf();
+      const stale = (clip.notes ?? []).filter((n) => n.startBeat >= 6).map((n) => n.id);
+      if (stale.length) await s.probe("cmd/notes.edit", { clipId: clip.id, remove: stale });
+      clip = await clipOf();
+      const baseIds = new Set((clip.notes ?? []).map((n) => n.id));
+      const added = async () => {
+        const c = await clipOf();
+        return (c.notes ?? []).filter((n) => !baseIds.has(n.id));
+      };
+
+      // Pin every geometry and scale pref this check computes with — all of them persist.
+      await s.eval(() => {
+        const P = {
+          "mydaw.pianoRoll.view": { zoomX: 28, rowH: 14 },
+          "mydaw.pianoRoll.division": "1/16",
+          "mydaw.pianoRoll.triplet": false,
+          "mydaw.pianoRoll.scale": "major",
+          "mydaw.pianoRoll.scaleRoot": 0,
+          "mydaw.pianoRoll.scaleSnap": true,
+          "mydaw.ui.tool": "select",
+        };
+        for (const [k, v] of Object.entries(P)) localStorage.setItem(k, JSON.stringify(v));
+        return true;
+      });
+      await s.reload();
+
+      // Open the clip: double-click it in the timeline (needs the SELECT tool, hence the
+      // pref order above). activeMidiClipId is store-only and is never persisted.
+      const clipXY = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        const rb = row.getBoundingClientRect(), cb = canvas.getBoundingClientRect();
+        return { x: cb.left + 55, y: rb.top + rb.height / 2 };
+      });
+      await s.click(clipXY.x, clipXY.y, { clicks: 2 });
+      await s.untilEval("the piano roll opens on the clip", () =>
+        !!document.querySelector(".pr-root:not(.pr-empty) .pr-notes-wrap canvas"));
+
+      await s.key("2");
+      await s.untilEval("the draw tool is armed", () =>
+        document.querySelector('[aria-label="Draw (2)"]')?.getAttribute("aria-pressed") === "true");
+
+      const geom = await s.eval(() => {
+        const c = document.querySelector(".pr-notes-wrap canvas:not(.pr-overlay-canvas)");
+        const snap = document.querySelector('button.btn-toggle[aria-label^="Snap to scale"]');
+        const b = c.getBoundingClientRect(), sb = snap.getBoundingClientRect();
+        return {
+          left: b.left, y0: b.top + Math.round(b.height / 2),
+          snap: { x: sb.left + sb.width / 2, y: sb.top + sb.height / 2 },
+        };
+      });
+      const X = (beat) => geom.left + beat * 28 + 1;
+      const setSnap = async (want) => {
+        const on = await s.eval(() =>
+          document.querySelector('button.btn-toggle[aria-label^="Snap to scale"]')
+            ?.getAttribute("aria-pressed") === "true");
+        if (on !== want) {
+          await s.click(geom.snap.x, geom.snap.y);
+          await s.untilEval(`snap toggles to ${want}`, `(() => document.querySelector('button.btn-toggle[aria-label^="Snap to scale"]')?.getAttribute("aria-pressed") === ${JSON.stringify(String(want))})()`);
+        }
+      };
+
+      // CALIBRATE. Never assume which pitch a y maps to — yToPitch depends on rowH and on
+      // a one-shot per-clip auto-scroll. Two click-only draws with snap OFF commit raw
+      // rows, so their difference proves the rowH pin actually took.
+      await setSnap(false);
+      await s.click(X(6.0), geom.y0);
+      await s.until("first calibration note lands", async () => (await added()).length >= 1);
+      await s.click(X(6.0), geom.y0 - 14);
+      await s.until("second calibration note lands", async () => (await added()).length >= 2);
+      let notes = (await added()).sort((a, b) => a.pitch - b.pitch);
+      tt.eq(notes.length, 2, "two calibration notes");
+      tt.eq(notes[1].pitch, notes[0].pitch + 1, "14 px is exactly one semitone (rowH pin verified)");
+      const p0 = notes[0].pitch;
+      await s.probe("cmd/notes.edit", { clipId: clip.id, remove: notes.map((n) => n.id) });
+
+      // An out-of-scale row: among any three consecutive semitones at least one is black.
+      const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+      let k = 0;
+      while (k < 3 && MAJOR.includes((p0 + k) % 12)) k++;
+      const rawTarget = p0 + k;
+      const yTarget = geom.y0 - 14 * k;
+      tt.ok(k < 3, `found an out-of-scale row (pitch ${rawTarget}, pc ${rawTarget % 12})`);
+
+      // REFERENCE: click-draw, the path that always honoured the scale.
+      await setSnap(true);
+      await s.click(X(6.5), yTarget);
+      await s.until("the reference note lands", async () => (await added()).length >= 1);
+      const clicked = (await added())[0];
+      tt.eq(clicked.pitch, rawTarget + 1, "click-draw snaps the out-of-scale row up into the scale");
+      tt.ok(MAJOR.includes(clicked.pitch % 12), "and the result really is in C major");
+
+      // THE REGRESSION: a purely HORIZONTAL press-drag on the same row. y never changes,
+      // which is what made the old behaviour so damning — the pitch moved anyway.
+      await s.drag([X(7.5), yTarget], [X(7.5) + 28, yTarget], 12);
+      await s.until("the dragged note lands", async () => (await added()).length >= 2);
+      const dragged = (await added()).find((n) => n.id !== clicked.id);
+      tt.eq(dragged.pitch, clicked.pitch, "press-drag agrees with click-draw about the pitch");
+      tt.ok(dragged.pitch !== rawTarget, `and did not commit the raw row ${rawTarget}`);
+
+      // NEGATIVE CONTROL: the same drag with snap OFF must commit the raw row — proof that
+      // rawTarget is reachable by this gesture, so the assertion above cannot pass vacuously.
+      await setSnap(false);
+      await s.drag([X(8.5), yTarget], [X(8.5) + 28, yTarget], 12);
+      await s.until("the control note lands", async () => (await added()).length >= 3);
+      const control = (await added()).find((n) => n.id !== clicked.id && n.id !== dragged.id);
+      tt.eq(control.pitch, rawTarget,
+        "with snap off the same drag commits the raw row, so the two outcomes are distinguishable");
+
+      // Cleanup: the notes, then every pref this check pinned.
+      const leftover = (await added()).map((n) => n.id);
+      if (leftover.length) await s.probe("cmd/notes.edit", { clipId: clip.id, remove: leftover });
+      tt.eq((await added()).length, 0, "the fixture clip is back to its original notes");
+      await s.eval(() => {
+        for (const k2 of ["mydaw.pianoRoll.view", "mydaw.pianoRoll.division", "mydaw.pianoRoll.triplet",
+          "mydaw.pianoRoll.scale", "mydaw.pianoRoll.scaleRoot", "mydaw.pianoRoll.scaleSnap", "mydaw.ui.tool"])
+          localStorage.removeItem(k2);
+        return true;
+      });
+    },
+  },
+
+  {
+    id: "inspector-fade-cannot-exceed-the-clip",
+    title: "the Inspector caps a clip fade at the clip's own length",
+    area: "browser-inspector",
+    guards: "1314840 — both fade fields render SecondsDrag, whose max defaults to 30 s, and ClipSection passed no cap. A 3 s clip accepted a 25 s fade-in, so the gain never reached unity — the clip sat ~22 dB down while the timeline drew an ordinary fade. The ENGINE has no cap of its own (cmd/clip.set {fadeInSec:25} on a 3 s clip is accepted and reported back), so the UI is the only place this can be enforced and the only place it can be tested",
+    run: async (s, tt) => {
+      const project = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      let p = await project();
+      const clip = (p.tracks.find((t) => t.name === "Audio 1").clips ?? [])[0];
+      tt.ok(clip, "the fixture audio clip is present");
+      const lenSec = clip.lengthSamples / p.sampleRate;
+
+      // Own precondition: fades persist, so an earlier run must not decide this one.
+      await s.probe("cmd/clip.set", { clipId: clip.id, patch: { fadeInSec: 0, fadeOutSec: 0 } });
+
+      // The Inspector is a TAB of the left Browser, and the active tab is persisted.
+      const tab = await s.eval(() => {
+        const el = document.querySelector('.browser-tabbar button.tab[data-tab-id="inspector"]');
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      tt.ok(tab, "the Browser has an Inspector tab");
+      await s.click(tab.x, tab.y);
+      await s.untilEval("the Inspector tab is active", () =>
+        document.querySelector('.browser-tabbar button.tab[data-tab-id="inspector"]')
+          ?.getAttribute("aria-selected") === "true");
+
+      // ClipSection only renders with a clip selected.
+      const clipXY = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Audio 1"));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        const rb = row.getBoundingClientRect(), cb = canvas.getBoundingClientRect();
+        return { x: cb.left + 55, y: rb.top + rb.height / 2 };
+      });
+      await s.click(clipXY.x, clipXY.y);
+      await s.untilEval("the Inspector shows the clip's fade fields", () =>
+        !!document.querySelector('.inspector .numdrag[title="Fade-in (seconds)"]'));
+
+      // The Inspector column scrolls, and the fade row lays out UNDER the mixer dock at
+      // the default window — elementFromPoint there returns a mixer strip. Scroll it into
+      // view and then verify what is actually at the point before clicking it.
+      const field = await s.eval(() => {
+        const el = document.querySelector('.inspector .numdrag[title="Fade-in (seconds)"]');
+        el.scrollIntoView({ block: "center" });
+        const b = el.getBoundingClientRect();
+        const cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+        const hit = document.elementFromPoint(cx, cy);
+        const out = document.querySelector('.inspector .numdrag[title="Fade-out (seconds)"]');
+        return {
+          cx, cy,
+          onTarget: hit === el || el.contains(hit),
+          hit: hit?.className ?? null,
+          max: el.getAttribute("aria-valuemax"),
+          outMax: out?.getAttribute("aria-valuemax") ?? null,
+        };
+      });
+      tt.ok(field.onTarget, `the click point really is the fade field (hit ${JSON.stringify(field.hit)})`);
+
+      // The cap itself, derived from the engine rather than hard-coded.
+      tt.eq(field.max, String(lenSec), "fade-in declares the clip's length as its ceiling");
+      tt.eq(field.outMax, String(lenSec), "fade-out carries the same cap — both fields had the bug");
+
+      // Ask for far more than the clip holds, through the type-in editor.
+      await s.click(field.cx, field.cy, { clicks: 2 });
+      await s.untilEval("the type-in editor opens", () => !!document.querySelector("input.numdrag-input"));
+      await s.key("Control+a");
+      await s.type("25");
+      await s.key("Enter");
+      await s.untilEval("the editor commits and closes", () => !document.querySelector("input.numdrag-input"));
+
+      const shown = await s.eval(() => {
+        const el = document.querySelector('.inspector .numdrag[title="Fade-in (seconds)"]');
+        return { text: el.textContent.trim(), now: el.getAttribute("aria-valuenow") };
+      });
+      tt.near(Number(shown.now), lenSec, 1e-6, `the field displays the clamped value (${shown.text})`);
+
+      // The assertion that carries the bug: the display could be right while the commit is
+      // wrong, which is precisely the failure mode the clamp-on-blur fix was about.
+      await s.until("the engine records the clamped fade", async () =>
+        ((await project()).tracks.find((t) => t.name === "Audio 1").clips ?? [])[0]?.fadeInSec > 0);
+      p = await project();
+      const after = (p.tracks.find((t) => t.name === "Audio 1").clips ?? [])[0];
+      tt.near(after.fadeInSec, lenSec, 1e-6, "the engine stored the clip's length, not the typed 25");
+      tt.ok(after.fadeInSec < 25, "and emphatically not the out-of-range value");
+
+      await s.probe("cmd/clip.set", { clipId: clip.id, patch: { fadeInSec: 0, fadeOutSec: 0 } });
+    },
+  },
+
+  {
+    id: "sheetmusic-right-click-retargets-the-menu",
+    title: "right-clicking an unselected note runs the menu against THAT note",
+    area: "sheetmusic",
+    guards: "1314840 — selectedRefs closed over the render-scoped selection, while openNoteMenu re-selects the clicked note after the callbacks are frozen. So every command ran against the PREVIOUS selection: Delete removed other notes and left the clicked one, while the menu header claimed '1 note selected'. A silent wrong-target edit that the header actively lied about",
+    run: async (s, tt) => {
+      // Dock prefs: shapeOf() rejects a partial panels object outright, and the dock then
+      // silently stays on the mixer — so all four fields have to be present.
+      await s.eval(() => {
+        localStorage.setItem("mydaw.ui.panels", JSON.stringify(
+          { browser: true, browserTab: "plugins", inspector: true, bottomTab: "sheetMusic" }));
+        localStorage.setItem("mydaw.ui.panels.bottomTab2", JSON.stringify(null));
+        localStorage.setItem("mydaw.ui.dockH", JSON.stringify(300));
+        return true;
+      });
+      await s.reload();
+      await s.untilEval("the Sheet Music pane mounts", () => !!document.querySelector(".sm-root"));
+      await s.untilEval("noteheads are engraved", () =>
+        document.querySelectorAll("[data-nid]").length >= 6);
+
+      const clipOf = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        return p.tracks.flatMap((t) => t.clips ?? []).find((c) => Array.isArray(c.notes) && c.notes.length);
+      };
+      const clip = await clipOf();
+      const before = clip.notes.map((n) => n.id);
+      tt.ok(before.length >= 6, `the fixture clip has notes to work with (${before.length})`);
+
+      // Unlike the timeline, the score is SVG — the noteheads are real queryable nodes and
+      // each carries the ENGINE note id, so DOM and engine can be compared by identity.
+      const heads = await s.eval(() => {
+        const box = document.querySelector(".sm-scroll").getBoundingClientRect();
+        return [...document.querySelectorAll("[data-nid]")]
+          .map((el) => {
+            const b = el.getBoundingClientRect();
+            return { nid: Number(el.dataset.nid), x: b.left + b.width / 2, y: b.top + b.height / 2, b };
+          })
+          .filter((h) => h.b.left >= box.left && h.b.right <= box.right &&
+                         h.b.top >= box.top && h.b.bottom <= box.bottom)
+          .map(({ nid, x, y }) => ({ nid, x, y }))
+          .sort((p1, p2) => p1.x - p2.x);
+      });
+      tt.ok(heads.length >= 6, `enough noteheads are on screen (${heads.length})`);
+      const A = heads[0], B = heads[2], victim = heads[5];
+
+      await s.click(A.x, A.y);
+      await s.untilEval("the first note is selected",
+        `(() => document.querySelector('[data-nid="${A.nid}"]')?.classList.contains("selected") === true)()`);
+
+      // s.click takes no modifiers, so shift-click goes through the Input domain directly.
+      for (const [type, button, buttons] of [["mouseMoved", "none", 0], ["mousePressed", "left", 1], ["mouseReleased", "left", 0]])
+        await s.send("Input.dispatchMouseEvent",
+          { type, x: B.x, y: B.y, button, buttons, clickCount: 1, modifiers: 8 });
+      await s.untilEval("the selection is now two notes", () =>
+        document.querySelectorAll("[data-nid].selected").length === 2);
+
+      // Right-click a note that is NOT in that selection.
+      await s.click(victim.x, victim.y, { button: "right" });
+      await s.untilEval("the note menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")]
+          .some((i) => (i.querySelector(".ellipsis")?.textContent ?? "").endsWith("selected")));
+
+      // Assert the retarget BEFORE acting — the header lying is what made this invisible.
+      const menu = await s.eval(() => ({
+        header: document.querySelector(".ctx-item .ellipsis")?.textContent ?? null,
+        selected: [...document.querySelectorAll("[data-nid].selected")].map((n) => Number(n.dataset.nid)),
+        count: document.querySelector(".sm-selcount")?.textContent ?? null,
+      }));
+      tt.eq(menu.header, "1 note selected", "the menu header claims a single note");
+      tt.eq(menu.selected, [victim.nid], "and the DOM selection really did retarget to the clicked note");
+
+      // The Delete row's textContent is "DeleteDel" — the shortcut hint lives inside it.
+      const del = await s.eval(() => {
+        const el = [...document.querySelectorAll(".ctx-item")]
+          .find((i) => i.querySelector(".ellipsis")?.textContent === "Delete");
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await s.click(del.x, del.y);
+
+      await s.until("the engine drops exactly one note", async () =>
+        (await clipOf()).notes.length === before.length - 1);
+      const afterIds = (await clipOf()).notes.map((n) => n.id);
+      const removed = before.filter((id) => !afterIds.includes(id));
+
+      // THE regression assertion. Pre-fix this fails twice over: A and B vanish and the
+      // clicked note survives.
+      tt.eq(removed, [victim.nid], "exactly the right-clicked note was deleted");
+      tt.ok(afterIds.includes(A.nid), "the previously selected note A is untouched");
+      tt.ok(afterIds.includes(B.nid), "the previously selected note B is untouched");
+
+      await s.probe("edit/undo");
+      await s.until("undo restores the clip", async () =>
+        (await clipOf()).notes.length === before.length);
+      await s.eval(() => {
+        localStorage.removeItem("mydaw.ui.dockH");
+        return true;
+      });
+    },
+  },
+
+  {
+    id: "refused-clip-drop-moves-nothing",
+    title: "a drop the timeline refuses does not commit the horizontal half of the drag",
+    area: "timeline-clips",
+    guards: "f9a5309 — the move-drop branch dropped the target track when d.valid was false but still fell through to moveClips(ids, deltaBeats, undefined), so a drop the UI had already drawn in red silently moved the clip to a different bar on its own lane (and with Alt held, left a stray copy behind). Fixed by an early return when the target exists and is invalid",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;            // px per beat, pinned below
+      const DRAG_PX = 120;          // 120/32 = 3.75 beats, a whole number of 1/16 steps
+      const expectBeat = DRAG_PX / ZOOM_X;
+
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      // The grid lives in the ENGINE project, which also survives the reload.
+      await s.probe("cmd/grid.set", { snap: true, division: 0.25, triplet: false, swing: 0 });
+      await s.reload();
+
+      const findClip = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        for (const track of p.tracks)
+          for (const c of track.clips ?? [])
+            if (c.assetId != null) return { track, clip: c };
+        return null;
+      };
+      let found = await findClip();
+      tt.ok(found, "the fixture's audio clip is present");
+      tt.eq(found.track.kind, "audio", "and it is on an audio track");
+      const clipId = found.clip.id, audioTrackId = found.track.id;
+
+      // Own precondition: an earlier run may have left it elsewhere, and the canvas
+      // hit-tests against the STORE's copy, so the reset must be visible before the press.
+      if (Math.abs(found.clip.startBeat) > 1e-9) {
+        await s.probe("cmd/clip.move", { clipIds: [clipId], deltaBeats: -found.clip.startBeat });
+        await s.reload();
+      }
+
+      const geom = await s.eval(`(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const row = (n) => rows.find((r) => r.textContent.trim().startsWith(n));
+        const a = row("Audio 1"), m = row("MIDI 1");
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        if (!a || !m || !canvas) return null;
+        const ab = a.getBoundingClientRect(), mb = m.getBoundingClientRect();
+        const cb = canvas.getBoundingClientRect();
+        return { fromX: cb.left + 55, toX: cb.left + 55 + ${DRAG_PX},
+                 audioY: ab.top + ab.height / 2, midiY: mb.top + mb.height / 2 };
+      })()`);
+      tt.ok(geom, "located both lanes and the clip surface");
+
+      // Toasts auto-dismiss, so the observer goes in BEFORE the gesture, never after.
+      await s.eval(() => {
+        window.__toasts = [];
+        window.__toastObs?.disconnect();
+        window.__toastObs = new MutationObserver(() => {
+          for (const el of document.querySelectorAll(".toast .toast-msg")) {
+            const m = el.textContent.trim();
+            if (!window.__toasts.includes(m)) window.__toasts.push(m);
+          }
+        });
+        window.__toastObs.observe(document.body, { childList: true, subtree: true });
+        return true;
+      });
+
+      // PHASE 1 — drag right AND up onto a lane that cannot hold an audio clip.
+      await s.drag([geom.fromX, geom.audioY], [geom.toX, geom.midiY], 12);
+      // The refusal doubles as the positive control: this toast is only reachable from the
+      // move-drop branch with a target set, so seeing it proves the press hit the clip and
+      // the drop handler ran to completion.
+      await s.untilEval("the drop is refused out loud", () =>
+        (window.__toasts ?? []).some((m) => /hold this clip/i.test(m)));
+
+      let after = await findClip();
+      tt.eq(after.track.id, audioTrackId, "the refused drop left the clip on its own track");
+      tt.near(after.clip.startBeat, 0, 1e-9,
+        "and did NOT commit the horizontal half of the same gesture");
+
+      // PHASE 2 — the identical horizontal distance onto a LEGAL target must commit.
+      // Without this, phase 1 would pass just as happily for a press that missed the clip.
+      await s.drag([geom.fromX, geom.audioY], [geom.toX, geom.audioY], 12);
+      await s.until(`the legal drag commits to beat ${expectBeat}`, async () =>
+        Math.abs((await findClip()).clip.startBeat - expectBeat) < 1e-9);
+      after = await findClip();
+      tt.near(after.clip.startBeat, expectBeat, 1e-9,
+        `${DRAG_PX}px at zoomX ${ZOOM_X} is ${expectBeat} beats — so the refused drag really was suppressed, not merely too small to see`);
+
+      await s.probe("cmd/clip.move", { clipIds: [clipId], deltaBeats: -expectBeat });
+      tt.near((await findClip()).clip.startBeat, 0, 1e-9, "the clip is back where the fixture put it");
     },
   },
 ];
