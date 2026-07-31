@@ -730,11 +730,22 @@ void App::stopRecordingAndCommit() {
     recordingActive_ = false;
 
     json audioArr = json::array();
-    for (const AudioRecorder::Recorded& r : audioRecorder.finalize())
+    for (const AudioRecorder::Recorded& r : audioRecorder.finalize()) {
+        // The ledger of contiguous runs. The take FILE is one stream, but the material is
+        // not necessarily continuous on the timeline (punch gaps, cycle wraps, dropped
+        // blocks), so the commit places each run by its own coordinates rather than
+        // assuming the whole file starts at one anchor.
+        json segs = json::array();
+        for (const AudioRecorder::Segment& s : r.segments)
+            segs.push_back(json{{"startSample", s.startSample},
+                                {"fileOffset", s.fileOffset},
+                                {"frames", s.frames}});
         audioArr.push_back(json{{"trackId", r.trackId},
                                 {"wavPath", r.wavPath},
                                 {"startSample", r.startSample},
-                                {"frames", r.frames}});
+                                {"frames", r.frames},
+                                {"segments", std::move(segs)}});
+    }
 
     json midiArr = json::array();
     if (midiRecorder.active()) {

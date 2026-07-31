@@ -173,6 +173,41 @@ try {
   report("a zero-width punch region refuses to enable", tp2.punch?.enabled === false,
     JSON.stringify(tp2.punch));
 
+  /* ---- multi-lap punch: the case the segment ledger exists for -------------------- */
+  // A cycle crosses the punch window once per lap. The old commit derived laps from
+  // arithmetic — laps = ceil(frames/loopLen), srcOffset = k*loopLen — which assumed the
+  // take began at the loop start and ran continuously. With punch that is plainly wrong:
+  // here it would compute loopLen 96000, frames ~72000, laps 1, and emit ONE oversized
+  // clip at the wrong position. The ledger records each contiguous run instead.
+  await req("cmd/loop.set", { startBeat: 0, endBeat: 4, enabled: true });
+  await req("cmd/punch.set", { startBeat: 1, endBeat: 2, enabled: true });
+  const lapFrames = 1 * framesPerBeat; // the punch window is one beat
+  const before = ((await req("session/hello", {})).payload.project.tracks
+    .find((t) => t.id === track.id).takeFolders ?? []).length;
+  const r3 = await recordPass(PROJECT, track.id, 5200); // ~2.5 cycles
+  const tr3 = (await req("session/hello", {})).payload.project.tracks.find((t) => t.id === track.id);
+  const folders = (tr3.takeFolders ?? []).slice(before);
+  report("cycle + punch stacks one take per lap", folders.length === 1 && folders[0].lanes.length >= 2,
+    `folders=${folders.length} lanes=${folders[0]?.lanes?.length}`);
+
+  if (folders.length === 1) {
+    const lanes = folders[0].lanes;
+    const clips = lanes.map((l) => l.clips[0]);
+    report("every lap is anchored at the punch-IN point",
+      clips.every((c) => Math.abs(c.startBeat - 1) < 1e-9),
+      JSON.stringify(clips.map((c) => c.startBeat)));
+    report("every lap captured exactly the punch window",
+      clips.every((c) => c.lengthSamples === lapFrames),
+      `${JSON.stringify(clips.map((c) => c.lengthSamples))}, expected all ${lapFrames}`);
+    // The runs are consecutive in the FILE even though they are not on the timeline —
+    // which is exactly the distinction the ledger keeps and the old arithmetic lost.
+    const offs = clips.map((c) => c.srcOffsetSamples);
+    report("laps read consecutive regions of the one take file",
+      offs.every((o, i) => o === i * lapFrames), JSON.stringify(offs));
+  }
+  await req("cmd/loop.set", { startBeat: 0, endBeat: 8, enabled: false });
+  await req("cmd/punch.set", { startBeat: 0, endBeat: 0, enabled: false });
+
   // Persistence: punch is part of the project, like the loop.
   await req("cmd/punch.set", { startBeat: 1, endBeat: 3, enabled: true });
   await req("project/saveAs", { path: PROJECT });

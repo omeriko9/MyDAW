@@ -4,6 +4,7 @@
 #include "project/Commands.h"
 
 #include <algorithm>
+#include <map>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -6323,6 +6324,14 @@ json CommandProcessor::recreatePlugins(const json& p, std::string& ec, std::stri
 // ---------------------------------------------------------------------------
 
 json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
+    // One contiguous run of captured material: where it belongs on the timeline, and where
+    // it lives inside the take file. Mirrors AudioRecorder::Segment on the wire; declared
+    // locally so the project layer keeps no dependency on the media layer.
+    struct RecSegment {
+        int64_t startSample = 0;
+        int64_t fileOffset = 0;
+        int64_t frames = 0;
+    };
     Model& m = model();
     const TempoMap& T = tm();
     const std::string pdir = projectIO_ ? projectIO_->projectDir() : std::string();
@@ -6364,51 +6373,84 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             const double startBeat = std::max(0.0, T.samplesToBeats(startSample));
             assetsOut.push_back(toJson(a));
 
-            // Loop-record → comping: a continuous take that spans >1 loop length is sliced by
-            // loop length into one lane (take) per lap, all pointing into the same recorded
-            // asset at increasing source offsets, stacked at the loop start. The comp defaults
-            // to the last (most recent) lap.
-            const int64_t loopLen =
-                m.project.loop.enabled
-                    ? (T.beatsToSamples(m.project.loop.endBeat) -
-                       T.beatsToSamples(m.project.loop.startBeat))
-                    : 0;
-            const int laps =
-                loopLen > 0 ? static_cast<int>((frames + loopLen - 1) / loopLen) : 1;
-            if (laps >= 2) {
-                TakeFolder folder;
-                folder.id = m.nextId();
-                folder.name = fileStem(wavPath);
-                folder.startBeat = startBeat;
-                folder.endBeat = startBeat + m.project.loop.endBeat - m.project.loop.startBeat;
-                for (int k = 0; k < laps; ++k) {
+            // Place material from the recorder's SEGMENT LEDGER rather than by arithmetic.
+            // The take file is one stream, but what it holds is not necessarily continuous
+            // on the timeline: a punch region withholds frames, a cycle wraps the playhead
+            // back, and a ring overrun drops frames outright. The previous version derived
+            // laps as ceil(frames/loopLen) with srcOffset = k*loopLen, which assumed the
+            // take began exactly at the loop start and ran without a gap — wrong for punch,
+            // and already silently wrong after any dropped block, because the file was
+            // treated as contiguous and everything after the gap slid earlier.
+            //
+            // Runs that share a start position are LAPS of the same region and stack as
+            // takes; runs at distinct positions are separate clips.
+            std::vector<RecSegment> segs;
+            if (ej.contains("segments") && ej["segments"].is_array()) {
+                for (const json& sj : ej["segments"]) {
+                    RecSegment sg;
+                    sg.startSample = getOr<int64_t>(sj, "startSample", 0);
+                    sg.fileOffset = getOr<int64_t>(sj, "fileOffset", 0);
+                    sg.frames = getOr<int64_t>(sj, "frames", 0);
+                    if (sg.frames > 0)
+                        segs.push_back(sg);
+                }
+            }
+            if (segs.empty())
+                segs.push_back(RecSegment{startSample, 0, frames});
+
+            // Group by timeline start, preserving first-seen order.
+            std::vector<int64_t> order;
+            std::map<int64_t, std::vector<RecSegment>> byStart;
+            for (const RecSegment& sg : segs) {
+                if (byStart.find(sg.startSample) == byStart.end())
+                    order.push_back(sg.startSample);
+                byStart[sg.startSample].push_back(sg);
+            }
+
+            for (int64_t key : order) {
+                const std::vector<RecSegment>& group = byStart[key];
+                const double groupBeat = std::max(0.0, T.samplesToBeats(key));
+                if (group.size() >= 2) {
+                    // Laps of a repeated region: one lane per pass, comp defaults to the
+                    // most recent, matching the previous loop-record behaviour.
+                    TakeFolder folder;
+                    folder.id = m.nextId();
+                    folder.name = fileStem(wavPath);
+                    folder.startBeat = groupBeat;
+                    int64_t longest = 0;
+                    for (const RecSegment& sg : group)
+                        longest = std::max(longest, sg.frames);
+                    folder.endBeat = groupBeat + T.samplesToBeats(longest);
+                    int k = 0;
+                    for (const RecSegment& sg : group) {
+                        AudioClip c;
+                        c.id = m.nextId();
+                        c.name = "Take " + std::to_string(++k);
+                        c.startBeat = groupBeat;
+                        c.assetId = a.id;
+                        c.srcOffsetSamples = sg.fileOffset;
+                        c.lengthSamples = sg.frames;
+                        TakeLane ln;
+                        ln.id = m.nextId();
+                        ln.name = c.name;
+                        ln.clips.push_back(std::move(c));
+                        folder.lanes.push_back(std::move(ln));
+                    }
+                    folder.comp.push_back(
+                        CompSegment{folder.startBeat, static_cast<int>(folder.lanes.size()) - 1});
+                    t->takeFolders.push_back(std::move(folder));
+                } else {
                     AudioClip c;
                     c.id = m.nextId();
-                    c.name = "Take " + std::to_string(k + 1);
-                    c.startBeat = startBeat;
+                    c.name = fileStem(wavPath);
+                    c.startBeat = groupBeat;
                     c.assetId = a.id;
-                    c.srcOffsetSamples = static_cast<int64_t>(k) * loopLen;
-                    c.lengthSamples = std::min(loopLen, frames - c.srcOffsetSamples);
-                    TakeLane ln;
-                    ln.id = m.nextId();
-                    ln.name = c.name;
-                    ln.clips.push_back(std::move(c));
-                    folder.lanes.push_back(std::move(ln));
+                    c.srcOffsetSamples = group[0].fileOffset;
+                    c.lengthSamples = group[0].frames;
+                    clipsOut.push_back(toJson(c));
+                    t->clips.emplace_back(std::move(c));
+                    sortClipsByStart(*t);
                 }
-                folder.comp.push_back(
-                    CompSegment{folder.startBeat, static_cast<int>(folder.lanes.size()) - 1});
-                t->takeFolders.push_back(std::move(folder));
-            } else {
-                AudioClip c;
-                c.id = m.nextId();
-                c.name = fileStem(wavPath);
-                c.startBeat = startBeat;
-                c.assetId = a.id;
-                c.srcOffsetSamples = 0;
-                c.lengthSamples = frames;
-                clipsOut.push_back(toJson(c));
-                t->clips.emplace_back(std::move(c));
-                sortClipsByStart(*t);
             }
             any = true;
         }
