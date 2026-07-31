@@ -49,7 +49,7 @@ it — a browser is three orders of magnitude more expensive than a vitest case.
 - **`ui/ npm test`** — 403 vitest cases over the pure logic (time math, fade curves,
   MIDI functions, clipboard, catalog). Sub-second, deterministic, and the right home
   for anything that does not need a DOM.
-- **`scripts/*-test.mjs`** — 25 harnesses that speak the engine's WS/HTTP protocol
+- **`scripts/*-test.mjs`** — 26 harnesses that speak the engine's WS/HTTP protocol
   directly. The right home for anything that does not need a *browser* — including
   contract properties, which is what
   [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs) does: it
@@ -177,10 +177,26 @@ Worth copying: coverage here was proven through the audio, not just the DOM. The
 row was verified by rendering offline and running Goertzel analysis — a sustained A4 read
 440 Hz, then 880 Hz at +12, then 1760 Hz at +24 applied at the note's onset.
 
-Still uncovered, and deliberately so: anything opening a native file dialog (it blocks the
-browser), project open/close/recovery, plugin rescan and audio-device switching, real VST
-editor windows, recording from real devices, and audio correctness in general — the test
-engine runs `--driver null`.
+Still uncovered *in the browser*, and deliberately so: anything opening a native file
+dialog (it blocks the browser), plugin rescan and audio-device switching, real VST editor
+windows, recording from real devices, and audio correctness in general — the test engine
+runs `--driver null`.
+
+**Crash recovery used to be on that list and no longer is.** It was the only data-loss
+path in the project with no test at all: seventeen harnesses call `project/saveAs` or
+`project/load` as setup and not one had ever asked for `recoveryInfo`. It looked
+untestable because in the UI it lives behind project open/close — but the browser was
+never the obstacle, only the assumption. [recovery-test.mjs](../scripts/recovery-test.mjs)
+kills the engine with `taskkill /F` (leaving the `session.lock` that makes recovery an
+offer), restarts on the same redirected `APPDATA`, and asserts the edits that were never
+saved come back — checked against the saved file, which still holds the older state, so a
+plain reload could not pass. It also asserts the negative: a clean `--exit-when-idle`
+shutdown leaves no offer at all.
+
+It is the slowest harness in the repo at ~80 s, and unavoidably so: autosave is
+timer-driven with no manual trigger and `setIntervalMinutes` takes an **int in minutes**,
+so 60 s is the floor. The harness polls for the autosave file rather than sleeping blind,
+so it waits exactly as long as the engine makes it.
 
 ## The 14 areas
 
