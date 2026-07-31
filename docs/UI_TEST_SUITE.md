@@ -22,7 +22,7 @@ node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up 
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
 | Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
-| Kept from regressing, unattended | **7 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 4 of 14 areas, ~10 s |
+| Kept from regressing, unattended | **8 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 4 of 14 areas, ~10 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -49,8 +49,13 @@ it — a browser is three orders of magnitude more expensive than a vitest case.
 - **`ui/ npm test`** — 401 vitest cases over the pure logic (time math, fade curves,
   MIDI functions, clipboard, catalog). Sub-second, deterministic, and the right home
   for anything that does not need a DOM.
-- **`scripts/*-test.mjs`** — 23 harnesses that speak the engine's WS/HTTP protocol
-  directly. The right home for anything that does not need a *browser*.
+- **`scripts/*-test.mjs`** — 24 harnesses that speak the engine's WS/HTTP protocol
+  directly. The right home for anything that does not need a *browser* — including
+  contract properties, which is what
+  [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs) does: it
+  asserts `automation.set`/`.ramp`/`.clear` agree about every paramRef, because the
+  grammar is stated in three places and drifting apart is exactly how cc: lanes once
+  became uneditable.
 - **`node scripts/ui-smoke.mjs`** — the unattended browser suite: one slot, every check
   in order, non-zero exit on failure. ~9 s for the current 4 checks. This is where a
   bug goes once it has been fixed, so it cannot come back silently.

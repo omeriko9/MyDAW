@@ -359,6 +359,84 @@ export const checks = [
         !document.querySelector(".modal-overlay"));
     },
   },
+
+  {
+    id: "escape-closes-topmost-modal-only",
+    title: "Escape closes only the top dialog of a stack, not everything under it",
+    area: "dialogs-modals",
+    guards: "1314840 — one Escape closed EVERY stacked modal, so cancelling the parameter editor also tore down the Offline Processes dialog beneath it. Stacked modals live in separate React roots, each with its own window listener, so the fix is an escStack where only the topmost token answers",
+    run: async (s, tt) => {
+      const audioClipId = async () => {
+        const hello = await s.probe("session/hello", { clientName: "smoke" });
+        const clip = (hello.payload.project.tracks ?? [])
+          .flatMap((t) => t.clips ?? [])
+          .find((c) => c.assetId != null);
+        return clip ?? null;
+      };
+      const clip = await audioClipId();
+      tt.ok(clip, "the fixture's audio clip is present");
+
+      // Own precondition: the chain survives reloads AND earlier runs of this check, so
+      // start from empty rather than stacking another entry every time. Clearing an
+      // already-empty chain is not a failure worth reporting.
+      await s.probe("cmd/clip.processChain", { clipId: clip.id, action: "clear" }, { allowError: true });
+      // One entry, added over the wire — driving the menus is the clamp check's job.
+      // builtin:utility because it HAS an editable parameter table, which is what puts
+      // the pencil on the row and so gives us a second modal to stack.
+      await s.probe("cmd/clip.processChain", {
+        clipId: clip.id, action: "addPlugin", uid: "builtin:utility",
+      });
+
+      const target = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Audio 1"));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        if (!row || !canvas) return null;
+        const rb = row.getBoundingClientRect(), cb = canvas.getBoundingClientRect();
+        return { x: cb.left + 55, y: rb.top + rb.height / 2 };
+      });
+      tt.ok(target, "found the Audio 1 lane and the clip surface");
+
+      await s.click(target.x, target.y, { button: "right" });
+      // The item counts the chain ("Offline Processes… (1)"), so match by prefix.
+      await s.untilEval("clip context menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")]
+          .some((i) => i.textContent.trim().startsWith("Offline Processes")));
+      const box = await s.eval(() => {
+        const el = [...document.querySelectorAll(".ctx-item")]
+          .find((i) => i.textContent.trim().startsWith("Offline Processes"));
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await s.click(box.x, box.y);
+
+      await s.untilEval("the Offline Processes dialog opens", () =>
+        document.querySelectorAll(".modal-overlay").length === 1);
+
+      // Second modal, on top of the first.
+      await s.eval(() => {
+        document.querySelector('.modal-overlay button.btn-icon[title="Edit parameters"]').click();
+        return true;
+      });
+      await s.untilEval("the parameter editor stacks on top", () =>
+        document.querySelectorAll(".modal-overlay").length === 2);
+
+      // One Escape: the top one goes, the one underneath stays.
+      await s.key("Escape");
+      await s.untilEval("exactly one dialog is left", () =>
+        document.querySelectorAll(".modal-overlay").length === 1);
+      const left = await s.eval(() => document.querySelector(".modal-title")?.textContent ?? "");
+      tt.match(left, /^Offline Processes/, "the dialog left standing is the one underneath");
+
+      // Second Escape closes that one — the two-Escape contract.
+      await s.key("Escape");
+      await s.untilEval("the second Escape closes the last dialog", () =>
+        document.querySelectorAll(".modal-overlay").length === 0);
+
+      // Put the clip back the way it was found.
+      await s.probe("cmd/clip.processChain", { clipId: clip.id, action: "clear" }, { allowError: true });
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */
