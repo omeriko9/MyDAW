@@ -77,6 +77,38 @@ describe("key signatures", () => {
   it("returns C for no input rather than throwing", () => {
     expect(detectKey([])).toEqual({ fifths: 0, minor: false });
   });
+
+  it("writes a minor key with its RELATIVE MAJOR's signature", () => {
+    // The regression this guards: F/Bb/Eb minor were engraved with the MAJOR signature
+    // for the same tonic (1/2/3 flats instead of 4/5/6), so the score read three fifths
+    // too sharp and the toolbar named the wrong key. Only these three were wrong, which
+    // is why a spot-check of one key would have missed it — all twelve are asserted.
+    const MINOR_FIFTHS: Record<number, number> = {
+      9: 0, 4: 1, 11: 2, 6: 3, 1: 4, 8: 5, 3: -6, 10: -5, 5: -4, 0: -3, 7: -2, 2: -1,
+    };
+    // Natural-minor scale, leaning on the tonic triad the way real music does: Krumhansl
+    // scores a weighted profile, and a flat scale is near-ambiguous with its relative major.
+    const minorScale = (tonicPc: number) =>
+      [0, 2, 3, 5, 7, 8, 10].map((d) => ({
+        pitch: 60 + tonicPc + d,
+        ticks: d === 0 ? 8 * TPQ : d === 3 || d === 7 ? 3 * TPQ : TPQ,
+      }));
+
+    for (const [pc, fifths] of Object.entries(MINOR_FIFTHS)) {
+      const got = detectKey(minorScale(Number(pc)));
+      expect({ pc: Number(pc), ...got }).toEqual({ pc: Number(pc), fifths, minor: true });
+    }
+  });
+
+  it("gives the three keys that were wrong the right number of flats", () => {
+    // Stated separately from the table above so a failure reads in musical terms.
+    expect(keyName(-4, true)).toBe("F minor");
+    expect(keySignatureAccidentals(-4)).toHaveLength(4);
+    expect(keyName(-5, true)).toBe("Bb minor");
+    expect(keySignatureAccidentals(-5)).toHaveLength(5);
+    expect(keyName(-6, true)).toBe("Eb minor");
+    expect(keySignatureAccidentals(-6)).toHaveLength(6);
+  });
 });
 
 describe("duration decomposition", () => {

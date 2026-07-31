@@ -437,6 +437,155 @@ export const checks = [
       await s.probe("cmd/clip.processChain", { clipId: clip.id, action: "clear" }, { allowError: true });
     },
   },
+
+  {
+    id: "track-header-click-retargets-M",
+    title: "clicking a track header drops the clip selection, so M mutes the track",
+    area: "timeline-tracks",
+    guards: "1314840 — a track-header click left a previously selected CLIP in the selection, and M routes to clips whenever any clip is selected (lib/keyboard.ts: tracks-and-no-clips mutes tracks, otherwise clips). So M silently muted a clip on a DIFFERENT track while the header's own M light stayed dark — a wrong-target edit with no error anywhere",
+    run: async (s, tt) => {
+      const project = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+
+      // Own preconditions: mute state survives reloads and earlier runs.
+      let p = await project();
+      const audio = p.tracks.find((t) => t.name === "Audio 1");
+      const midi = p.tracks.find((t) => t.name === "MIDI 1");
+      tt.ok(audio && midi, "fixture has both an audio and a MIDI track");
+      const clip = (audio.clips ?? [])[0];
+      tt.ok(clip, "the audio track has its fixture clip");
+      for (const t of p.tracks) await s.probe("cmd/track.set", { trackId: t.id, patch: { mute: false } });
+      await s.probe("cmd/clip.set", { clipId: clip.id, patch: { muted: false } }, { allowError: true });
+      await s.reload();
+
+      const geom = await s.eval(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const rowOf = (name) => rows.find((r) => r.textContent.trim().startsWith(name));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        const a = rowOf("Audio 1"), m = rowOf("MIDI 1");
+        if (!a || !m || !canvas) return null;
+        const ab = a.getBoundingClientRect(), mb = m.getBoundingClientRect();
+        const cb = canvas.getBoundingClientRect();
+        return {
+          clip: { x: cb.left + 55, y: ab.top + ab.height / 2 },
+          // The name label, not the row centre — the centre lands on the M/S/R buttons.
+          midiHeader: { x: mb.left + 60, y: mb.top + 10 },
+        };
+      });
+      tt.ok(geom, "located the two lanes and the clip surface");
+
+      // Phase 1 — prove the clip really is selected, by using the very routing that
+      // makes the bug possible: with a clip selected, M must mute the CLIP. Asserting
+      // "a clip is selected" any other way is guesswork, and if the click missed, phase
+      // 2 would pass for the wrong reason (no clip selected, so M trivially hits the track).
+      await s.click(geom.clip.x, geom.clip.y);
+      await s.key("m");
+      let clipMid = null;
+      await s.until("phase 1: M with a clip selected mutes the CLIP", async () => {
+        const mid = await project();
+        clipMid = (mid.tracks.find((t) => t.id === audio.id).clips ?? [])
+          .find((c) => c.id === clip.id);
+        return clipMid?.muted === true;
+      });
+      tt.ok(clipMid.muted, "the clip selection is real — confirmed via the routing the bug depends on");
+      await s.probe("cmd/clip.set", { clipId: clip.id, patch: { muted: false } });
+
+      // Phase 2 — the regression. Clicking a track header must DROP that clip selection.
+      await s.click(geom.midiHeader.x, geom.midiHeader.y);
+      await s.untilEval("the MIDI track header is selected", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        return row?.dataset.selected === "true";
+      });
+
+      await s.key("m");
+
+      // Engine truth: the clicked TRACK is muted and the clip is untouched.
+      await s.untilEval("the header's own M light comes on", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        const m = [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .find((b) => b.textContent.trim() === "M");
+        return m?.getAttribute("aria-pressed") === "true";
+      });
+
+      p = await project();
+      const midiAfter = p.tracks.find((t) => t.id === midi.id);
+      const audioAfter = p.tracks.find((t) => t.id === audio.id);
+      const clipAfter = (audioAfter.clips ?? []).find((c) => c.id === clip.id);
+      tt.eq(midiAfter.mute, true, "M muted the track whose header was clicked");
+      tt.eq(audioAfter.mute, false, "the other track was left alone");
+      tt.ok(!clipAfter.muted, "the previously selected clip was NOT muted instead");
+
+      // Leave the fixture as found.
+      await s.probe("cmd/track.set", { trackId: midi.id, patch: { mute: false } });
+    },
+  },
+
+  {
+    id: "settings-audio-shows-the-real-driver",
+    title: "Settings ▸ Audio reports the driver the engine is actually running",
+    area: "settings",
+    guards: "1314840 — the tab showed a fabricated WASAPI config while the engine ran on the Null driver, because a driver the engine never ENUMERATES was missing from the option list and the form fell back to the first available one. The status strip below it read 'null' at the same time, and pressing Apply would have switched the engine off Null",
+    run: async (s, tt) => {
+      const status = await s.probe("engine/getStatus");
+      const driver = status.payload.driver;
+      tt.ok(driver, `the engine reports a driver (${driver})`);
+
+      // Settings remembers its last tab; seed it so this opens where the check looks.
+      await s.eval(() => {
+        localStorage.setItem("mydaw.ui.settingsTab", JSON.stringify("audio"));
+        return true;
+      });
+      await s.reload();
+
+      const menu = await s.eval(() => {
+        const el = document.querySelector('[aria-label="File"]');
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      tt.ok(menu, "the File menu button is present");
+      await s.click(menu.x, menu.y);
+      await s.untilEval("the File menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Settings…"));
+      const entry = await s.eval(() => {
+        const el = [...document.querySelectorAll(".ctx-item")]
+          .find((i) => i.textContent.trim() === "Settings…");
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await s.click(entry.x, entry.y);
+
+      await s.untilEval("the Audio tab renders its Driver row", () =>
+        [...document.querySelectorAll(".sett-label")].some((l) => l.textContent.trim() === "Driver"));
+
+      // The control is whatever sits beside the "Driver" label — report what was found
+      // rather than assuming a tag, so a markup change explains itself.
+      const found = await s.eval(() => {
+        const label = [...document.querySelectorAll(".sett-label")]
+          .find((l) => l.textContent.trim() === "Driver");
+        const ctrl = label?.nextElementSibling;
+        const sel = ctrl?.tagName === "SELECT" ? ctrl : ctrl?.querySelector("select");
+        return {
+          tag: ctrl?.tagName ?? null,
+          value: sel?.value ?? null,
+          options: sel ? [...sel.options].map((o) => `${o.value}|${o.text}`) : null,
+          text: (ctrl?.textContent ?? "").trim().slice(0, 60),
+        };
+      });
+
+      tt.eq(found.value, driver,
+        `the Driver control selects the running driver (found ${JSON.stringify(found)})`);
+      tt.ok(
+        (found.options ?? []).some((o) => o.startsWith(driver + "|")),
+        `the running driver has an option of its own (options=${JSON.stringify(found.options)})`,
+      );
+
+      await s.key("Escape");
+      await s.untilEval("settings closes", () => !document.querySelector(".modal-overlay"));
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */
