@@ -61,17 +61,33 @@ traces, interactive control), see [DEBUGGING_UI.md](DEBUGGING_UI.md).
 ## Tests
 
 ```powershell
-node scripts/smoke-test.mjs       # spawns engine (null driver), 42 protocol checks
-node scripts/vst-load-test.mjs    # real plugin scan + out-of-process load + RT bridge run
-node scripts/ui-smoke.mjs         # engine + real Chrome, browser regression checks
-cd ui; npm test                   # 401 vitest cases over the pure UI logic
+node scripts/gate.mjs             # 23 suites, ~70 s — run this before every commit
+node scripts/gate.mjs --full      # +recovery, real-plugin and CPR corpus suites, ~3 min
+node scripts/gate.mjs --list      # the table: which suite is in which tier, and why
+node scripts/gate.mjs --only ui-smoke,smoke
 ```
 
-`ui-smoke.mjs` needs `ui/dist` and the engine already built — it serves the former and
-spawns the latter. See [UI_TEST_SUITE.md](UI_TEST_SUITE.md) for what belongs in it.
+This is a gate, not a suggestion: **a change is not done until `gate.mjs` is green**, and a
+UI bug that no unit test can reach should leave a new `ui-smoke` check behind it. Run
+`--full` before a merge or a release.
 
-These are gates, not suggestions: a change is not done until all four are green, and a
-UI bug that no unit test can reach should leave a new `ui-smoke` check behind it.
+Individual suites still run standalone (`node scripts/ui-smoke.mjs`, `cd ui; npm test`,
+and the 26 harnesses in `scripts/*-test.mjs`) — the gate is a runner over them, not a
+replacement. See [UI_TEST_SUITE.md](UI_TEST_SUITE.md) for which layer a new check belongs in.
+
+Three things the gate does that are easy to get wrong by hand:
+
+- **It runs suites sequentially, and must.** Each harness spawns an engine on its own
+  hard-coded default port, and several collide — 8547 is shared by `dop-vst` and
+  `export-formats`, 8561 by `midi-learn` and `sidechain`, and 8562 by `comping`,
+  `midi-out-channel` *and* `timestretch`. Run concurrently they fail in ways that look
+  like flakiness.
+- **A missing prerequisite is a SKIP, not a failure.** `vst-load` and `dop-vst` need a
+  scanned plugin registry, which is machine state a fresh clone does not have; `cpr-write`
+  falls back to `--skip-corpus` when the gitignored corpus harness is absent. A runner
+  that is red on every machine but one teaches people to ignore it.
+- **It builds nothing.** If `ui/dist` or the engine is stale the gate tests the stale
+  thing, so build first — and never while `ui-drive` slots are running.
 
 ## Notes
 
