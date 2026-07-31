@@ -619,6 +619,56 @@ export const checks = [
         "the transport lands on the beat the row named, not the one typed");
     },
   },
+
+  {
+    id: "add-track-menu-has-no-dead-items",
+    title: "a track kind the engine would refuse is disabled with a reason, not silently dead",
+    area: "timeline-tracks",
+    guards: "1314840 and SPEC §10 (no dead buttons) — the one-per-project view-row kinds stayed enabled once one existed, so choosing them did nothing at all and the engine's refusal only reached console.warn. Now greyed out with a tooltip saying why",
+    run: async (s, tt) => {
+      // Own precondition: exactly one marker track, whatever earlier checks left behind.
+      let project = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const markers = project.tracks.filter((t) => t.kind === "marker");
+      for (const extra of markers.slice(1))
+        await s.probe("cmd/track.remove", { trackId: extra.id }, { allowError: true });
+      let markerId = markers[0]?.id;
+      if (markerId == null)
+        markerId = (await s.probe("cmd/track.add", { kind: "marker" })).payload.track.id;
+      await s.reload();
+
+      const plus = await s.eval(() => {
+        const el = document.querySelector('.tl-corner [aria-label="Add track"], .tl-corner button');
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      tt.ok(plus, "the Add-track button is present in the tracks corner");
+      await s.click(plus.x, plus.y);
+      await s.untilEval("the add-track menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")]
+          .some((i) => i.textContent.trim().startsWith("Add Marker Track")));
+
+      const rows = await s.eval(() => {
+        const pick = (label) => {
+          const el = [...document.querySelectorAll(".ctx-item")]
+            .find((i) => i.textContent.trim().startsWith(label));
+          return el ? { disabled: el.classList.contains("disabled"), title: el.getAttribute("title") } : null;
+        };
+        return { marker: pick("Add Marker Track"), audio: pick("Add Audio Track") };
+      });
+
+      tt.ok(rows.marker, "the menu offers a Marker Track row");
+      tt.eq(rows.marker.disabled, true, "the already-present kind is disabled");
+      tt.match(rows.marker.title ?? "", /already has/i,
+        `the disabled row says why (title=${JSON.stringify(rows.marker.title)})`);
+      // Discrimination: prove the menu is not simply disabled wholesale.
+      tt.ok(rows.audio, "the menu offers an Audio Track row");
+      tt.eq(rows.audio.disabled, false, "a kind the engine WOULD accept stays enabled");
+
+      await s.key("Escape");
+      await s.probe("cmd/track.remove", { trackId: markerId }, { allowError: true });
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */
