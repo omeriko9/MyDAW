@@ -586,6 +586,39 @@ export const checks = [
       await s.untilEval("settings closes", () => !document.querySelector(".modal-overlay"));
     },
   },
+
+  {
+    id: "palette-bar-jump-labels-where-it-goes",
+    title: "the palette's bar-jump promises the beat it actually locates to",
+    area: "palette-keyboard",
+    guards: "1314840 — the row printed the RAW typed beat while locating to a clamped one, so \"1.9\" in 4/4 offered \"beat 9\" and went to beat 4. The label and the locate are both derived from the clamped index now; this asserts they cannot diverge again",
+    run: async (s, tt) => {
+      await s.probe("transport/locate", { beat: 0 });
+      await s.key("Control+k");
+      await s.untilEval("palette opens", () => !!document.querySelector(".cp-overlay"));
+
+      // 4/4, so beat 9 of bar 1 does not exist — it clamps to the bar's last beat, 4.
+      await s.type("1.9");
+      await s.untilEval("the bar-jump row appears", () =>
+        [...document.querySelectorAll(".cp-label")].some((l) => /Go to bar 1/.test(l.textContent)));
+
+      const label = await s.eval(() => {
+        const el = [...document.querySelectorAll(".cp-label")]
+          .find((l) => /Go to bar 1/.test(l.textContent));
+        return el.textContent.trim();
+      });
+      tt.match(label, /beat 4\b/, `the row names the CLAMPED beat (got ${JSON.stringify(label)})`);
+      tt.ok(!/beat 9\b/.test(label), "the row does not promise the raw typed beat");
+
+      await s.key("Enter");
+      await s.untilEval("the palette closes on Enter", () => !document.querySelector(".cp-overlay"));
+
+      // Bar 1 beat 4, zero-based on the wire, is beat 3 at 4/4.
+      const reply = await s.probe("transport/pause");
+      tt.near(reply.payload.beat, 3, 1e-6,
+        "the transport lands on the beat the row named, not the one typed");
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */
