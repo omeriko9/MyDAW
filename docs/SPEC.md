@@ -175,7 +175,12 @@ the entire drag.
 - **MIDI control surface / learn** (`Project.midiMaps: [{cc,channel,paramRef}]`): `midimap/learn
   {paramRef}` arms — the next incoming CC (from any hardware MIDI input) binds to it;
   `midimap/remove {paramRef}`; `midimap/feedCc {cc,channel?,value}` injects a CC through the same
-  path (real MIDI, a software surface, or tests). paramRef grammar: `track:<id>:volume|pan` |
+  path (real MIDI, a software surface, or tests). NOTE `midimap/feedCc` drives only this
+  MAPPING path; to inject a message that is RECORDABLE use `midi/feedEvent {status,data1,data2}`
+  (channel-voice status 0x80..0xEF; anything else is `bad_request`), which enters MidiInput's
+  QPC-timestamped mirror ring exactly where a hardware message does. It is deliberately not
+  wired to per-device RT rings — those belong to an open device session — so injected events
+  record and map but do not sound through MIDI-thru. paramRef grammar: `track:<id>:volume|pan` |
   `plugin:<instanceId>:<paramId>`. A mapped CC drives the param live (value 0..127 → 0..1;
   applied via a transient `cmd/track.set`/`cmd/plugin.setParam`, so audio AND the on-screen
   control move). Maps + the current arm ride `session/hello` and `event/midiMaps`; maps persist
@@ -379,6 +384,15 @@ the entire drag.
   (structural; clips keep raw pitches; export/midi is untransposed; audio is not stretched).
 - `cmd/tempo.set {bpm}` ; `cmd/timesig.set {num, den}` (v1: single tempo/timesig; schema is a map
   for future) ; `cmd/loop.set {startBeat,endBeat,enabled}`
+- `cmd/punch.set {startBeat,endBeat,enabled}` — the PUNCH region: recording captures only
+  inside it; playback is unaffected (unlike the loop, it never moves the playhead). Same
+  swap/clamp semantics as `cmd/loop.set`, and an empty region can never be enabled — a
+  zero-width punch would gate every sample out and present as a dead record button (§10).
+  Stored as `project.punch`, re-derived in samples on a tempo/timesig-map edit. The gate is
+  evaluated per RENDER SPAN in `AudioGraph`'s record tap, so it is sample-accurate at both
+  boundaries and composes with cycle recording (spans are already split at a loop wrap).
+  `AudioRecorder` anchors the committed clip at the first frame actually captured, which is
+  the punch-in point rather than where record was pressed.
 - `cmd/grid.set {division?, snap?, triplet?, swing?}` — patch semantics onto `project.grid` (§6);
   division in beats, must be in (0, 128] (snap mode "Bar" sends beatsPerBar, which can exceed 16,
   e.g. 32/1); swing clamped 0..1; persisted + undoable.
@@ -400,7 +414,10 @@ the entire drag.
   (the live value already rides the RT param ring). v1 is a single write arm (records what you
   move); per-mode touch/latch overwrite-of-untouched-regions needs a continuous writer (future).
 - `event/transport {state:"stopped"|"playing"|"recording", beat, timeSec, loop:{...},
-  metronome:{enabled:bool, countInBars:0|1|2}, automationWrite:bool} ` ~20 Hz while playing + on change.
+  punch:{startBeat,endBeat,enabled}, metronome:{enabled:bool, countInBars:0|1|2},
+  automationWrite:bool} ` ~20 Hz while playing + on change. `punch` is derived from the
+  TRANSPORT, not the model, so it reflects what the RT gate is using (including after a
+  tempo edit re-derived it).
   `project/importForeign` applies the source project's click state when the file carries one
   (cpr `clickEnable`) and broadcasts ONE `event/transport` right after the model swap; files
   without click state leave the session's metronome untouched.
@@ -587,6 +604,9 @@ Project = {
   timeSigMap: [{bar: number, num: number, den: number}],  // bar is 0-BASED (0 = project
                                                           // start, shown as bar 1); v1:
                                                           // single entry at bar 0
+  punch: {startBeat: number, endBeat: number, enabled: boolean},  // record gate (§5.3);
+                                                          // absent in projects saved before
+                                                          // it existed — defaults disabled
   loop: {startBeat: number, endBeat: number, enabled: boolean},
   grid: {division: number /*beats*/, snap: boolean, triplet: boolean, swing: number /*0..1*/},
   markers: [{id, beat, endBeat? /*> beat = cycle marker*/, name, color?}],
@@ -1067,6 +1087,16 @@ samples (metronome+any content; the smoke sends `transport/setMetronome {enabled
 with no audio device assumptions (engine falls back to null/silent driver if WASAPI init fails —
 `NullDriver` exists for CI/headless: real clock via waitable timer, processes graph, discards
 output; selectable via `--driver null`).
+
+`--null-input N` additionally makes the null driver SYNTHESIZE N capture channels (opt-in;
+default 0, so an ordinary fallback to the null driver is unchanged). Without it the driver
+advertises `maxInputs = 0` and calls back with `(nullptr, 0)`, which left every recording
+feature — punch, loop-record takes, input metering — unreachable by any automated test. The
+signal is a 1 Hz sawtooth over [-1, 1) with period == sampleRate, chosen because it is
+POSITION-RECOVERABLE: any captured sample's phase gives its absolute frame index modulo one
+second, so a test can assert WHICH samples were recorded, not merely that something was.
+Channel c is the same ramp scaled by 1/(c+1). Used by `scripts/record-capture-test.mjs` and
+`scripts/punch-test.mjs`.
 
 ## 12. AI Agent + MCP (see llm_feature.md)
 

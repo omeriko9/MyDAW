@@ -87,7 +87,20 @@ public:
     // the result. NOTE(spec): endBeat is rounded UP to the next bar boundary (via the
     // TempoMap's time signature) so the created clip covers whole bars — the simplest
     // musical interpretation; notes themselves are never moved.
-    RecordedNotes finalize(const TempoMap& tempoMap);
+    /**
+     * Ends the pass and returns ONE RecordedNotes PER LAP.
+     *
+     * A cycle-record crosses the same timeline span repeatedly, and wrapTake() already
+     * fires at every seam to close and re-open held notes — so the seams are exactly the
+     * lap boundaries and no new detection is needed. Previously every lap was merged into
+     * a single clip (docs/STUBS.md: "MIDI loop-record isn't lap-split"), which stacked
+     * three passes of the same bar on top of each other with no way to choose between
+     * them; audio has produced one take per lap since comping shipped.
+     *
+     * Always at least one entry when anything was recorded. A pass with no wrap yields
+     * exactly one, identical to the previous single-take result.
+     */
+    std::vector<RecordedNotes> finalize(const TempoMap& tempoMap);
 
 private:
     void closePending(int ch, int pitch, double relBeat);
@@ -99,6 +112,20 @@ private:
     bool active_ = false;
     double startBeat_ = 0.0;    // absolute beat where the pass began
     double lastPumpBeat_ = 0.0; // absolute beat of the most recent pump
+    // Lap boundaries in ABSOLUTE beats, one entry per pass over the recorded span. Opened
+    // by begin(), closed and re-opened by wrapTake() at each seam, closed by finalize().
+    struct Lap {
+        double startBeat = 0.0;
+        double endBeat = 0.0;
+    };
+    std::vector<Lap> laps_;
+    // Which lap each captured note/CC arrived in, parallel to notes_/cc_. Position CANNOT
+    // answer this: a cycle re-enters the same span every lap, so all laps share a start
+    // beat and every note of every pass lands at the same musical position. Only arrival
+    // order distinguishes them.
+    std::vector<int> noteLap_;
+    std::vector<int> ccLap_;
+    int curLap_ = 0;
     std::vector<Note> notes_;   // startBeat relative to startBeat_; lengthBeats 0 = open
     std::vector<MidiCc> cc_;    // beat relative to startBeat_; values normalized
     int pending_[16][128];      // [channel][pitch] -> index into notes_, -1 = none

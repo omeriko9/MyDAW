@@ -5,8 +5,10 @@
  * runs the transport so the RT shared-memory bridge exchanges real blocks.
  * Usage: node scripts/vst-load-test.mjs [--plugin Omnisphere] [--port 8521]
  */
+import { mkdtempSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,8 +19,14 @@ const WANT = argVal("--plugin", "Omnisphere").toLowerCase();
 const VST2DIR = argVal("--vst2", "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ISOLATED %APPDATA%: this harness spawns a real engine, and an engine writes settings
+// (audio device, PLUGIN FOLDERS), plugin-cache.json, recent.json, autosave data and a
+// session.lock. Run against the developer's real profile it silently rewrites their DAW
+// configuration — and a hard kill leaves a lock that makes their next launch "recover"
+// this harness's throwaway project instead of their work.
+const APPDATA_ISO = mkdtempSync(path.join(tmpdir(), "mydaw-iso-"));
 const engine = spawn(path.join(ROOT, "build", "bin", "Release", "mydaw-engine.exe"),
-  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+  ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] , env: { ...process.env, APPDATA: APPDATA_ISO } });
 let elog = "";
 engine.stderr.on("data", (d) => { elog = (elog + d).slice(-6000); });
 const die = (code, msg) => { console.log(msg); try { engine.kill(); } catch {} setTimeout(() => process.exit(code), 300); };
@@ -54,8 +62,20 @@ if (!registry) die(1, "\nFAIL: scan did not complete in 8min");
 console.log(`\nscan done: ${registry.length} plugins registered`);
 for (const p of registry.slice(0, 12)) console.log(`  - ${p.name} (${p.vendor}) ${p.format}${p.blacklisted ? " [BLACKLISTED: " + (p.blacklistReason ?? "") + "]" : ""}`);
 
-const target = registry.find((p) => p.name.toLowerCase().includes(WANT) && !p.blacklisted);
-if (!target) die(1, `FAIL: '${WANT}' not in registry`);
+// A failed-scan entry carries an error and no name; the developer's warm cache always had
+// one, so this only surfaced once the harness got its own empty profile.
+const target = registry.find((p) => (p.name ?? "").toLowerCase().includes(WANT) && !p.blacklisted);
+if (!target) {
+  // Plugin availability is MACHINE STATE, not repo state. A fresh profile scanning only the
+  // stock VST3 directory legitimately has nothing to load, and failing there would make the
+  // suite red on every machine but one — the same trap the gate's skip rule exists for.
+  // Immediate exit, not die(): die() defers via setTimeout and this is top-level module
+  // code, so execution would fall through to the load step with target === undefined.
+  console.log(`SKIP: '${WANT}' not present in this profile's scanned folders ` +
+              `(${registry.length} plugin(s) found). Set VST2DIR to a folder that has it.`);
+  try { engine.kill(); } catch { /* already gone */ }
+  process.exit(0);
+}
 console.log(`loading: ${target.name} (${target.vendor}), uid=${target.uid}`);
 
 const track = (await req("cmd/track.add", { kind: "instrument", name: "VST Test" })).track;

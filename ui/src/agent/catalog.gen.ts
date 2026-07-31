@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "f3530701778a7df7433f68af5f3b40594b7cd9699d93b119e45bf45775fbb475";
+export const AGENT_CATALOG_SHA256 = "21ce08fbf4d461006fbc04f78c55856a3623ffe065a3f7151ec0ed47c16acc1c";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -972,6 +972,39 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "ClipCrossfadeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "overlapSec": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "overlapSec"
+      ],
+      "type": "object"
+    },
+    "ClipCrossfadeRequest": {
+      "additionalProperties": false,
+      "description": "exactly two audio clips on one track; they must overlap on the timeline",
+      "properties": {
+        "clipIds": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "curve": {
+          "$ref": "#/schemas/FadeCurve"
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "type": "object"
+    },
     "ClipDeleteRequest": {
       "additionalProperties": false,
       "properties": {
@@ -1028,6 +1061,28 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "string"
     },
+    "ClipEnvPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "pos": {
+          "description": "normalized position 0..1 across the clip's audible span",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "value": {
+          "description": "linear gain 0..2 (1 = unity)",
+          "maximum": 2,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "pos",
+        "value"
+      ],
+      "type": "object"
+    },
     "ClipJoinReply": {
       "additionalProperties": false,
       "properties": {
@@ -1078,93 +1133,6 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
-    "ClipCrossfadeReply": {
-      "additionalProperties": false,
-      "properties": {
-        "overlapSec": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "overlapSec"
-      ],
-      "type": "object"
-    },
-    "ClipCrossfadeRequest": {
-      "additionalProperties": false,
-      "description": "exactly two audio clips on one track; they must overlap on the timeline",
-      "properties": {
-        "clipIds": {
-          "items": {
-            "type": "number"
-          },
-          "maxItems": 2,
-          "minItems": 2,
-          "type": "array"
-        },
-        "curve": {
-          "$ref": "#/schemas/FadeCurve"
-        }
-      },
-      "required": [
-        "clipIds"
-      ],
-      "type": "object"
-    },
-    "ClipProcess": {
-      "additionalProperties": false,
-      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "id": {
-          "type": "number"
-        },
-        "op": {
-          "type": "string"
-        },
-        "params": {
-          "additionalProperties": {
-            "type": "number"
-          },
-          "type": "object"
-        },
-        "sparams": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      },
-      "required": [
-        "id",
-        "op"
-      ],
-      "type": "object"
-    },
-    "ClipEnvPoint": {
-      "additionalProperties": false,
-      "properties": {
-        "pos": {
-          "description": "normalized position 0..1 across the clip's audible span",
-          "maximum": 1,
-          "minimum": 0,
-          "type": "number"
-        },
-        "value": {
-          "description": "linear gain 0..2 (1 = unity)",
-          "maximum": 2,
-          "minimum": 0,
-          "type": "number"
-        }
-      },
-      "required": [
-        "pos",
-        "value"
-      ],
-      "type": "object"
-    },
     "ClipPatch": {
       "additionalProperties": false,
       "properties": {
@@ -1200,6 +1168,38 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "ClipProcess": {
+      "additionalProperties": false,
+      "description": "One DOP chain entry: a length-preserving process replayed from the clip's original material. op = a processAudio op or \"plugin\" (built-in effect; sparams.uid).",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "number"
+        },
+        "op": {
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "sparams": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "op"
+      ],
       "type": "object"
     },
     "ClipResizeRequest": {
@@ -2160,6 +2160,27 @@ export const AGENT_CATALOG: AgentCatalog = {
         "startBeat",
         "lengthBeats",
         "notes"
+      ],
+      "type": "object"
+    },
+    "MidiFeedEventRequest": {
+      "additionalProperties": false,
+      "description": "Channel-voice MIDI injection from a non-port source. status is a channel-voice status byte (0x80..0xEF); data1/data2 are 0..127.",
+      "properties": {
+        "status": {
+          "type": "number"
+        },
+        "data1": {
+          "type": "number"
+        },
+        "data2": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "status",
+        "data1",
+        "data2"
       ],
       "type": "object"
     },
@@ -3181,6 +3202,9 @@ export const AGENT_CATALOG: AgentCatalog = {
           "$ref": "#/schemas/Grid"
         },
         "loop": {
+          "$ref": "#/schemas/LoopRegion"
+        },
+        "punch": {
           "$ref": "#/schemas/LoopRegion"
         },
         "markers": {
@@ -6603,6 +6627,41 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/punch.set",
+      "category": "arrangement",
+      "description": "Set the punch region and enable or disable it. Recording captures ONLY inside this region; playback is unaffected. An empty region can never be enabled.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/LoopSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 8,
+            "endBeat": 16,
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/take.create",
       "category": "takes",
       "description": "Group clips on a channel into a take folder.",
@@ -8353,6 +8412,36 @@ export const AGENT_CATALOG: AgentCatalog = {
           "input": {
             "assetId": 3,
             "newPath": "C:/Music/kick.wav"
+          }
+        }
+      ]
+    },
+    {
+      "name": "midi/feedEvent",
+      "category": "midi-mapping",
+      "description": "Inject one channel-voice MIDI message as if it arrived from a port. Unlike midimap/feedCc this reaches the RECORDER, so injected notes are recordable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MidiFeedEventRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "status": 144,
+            "data1": 60,
+            "data2": 100
           }
         }
       ]
@@ -10723,6 +10812,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/plugin.set",
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
+  "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
   "cmd/take.setComp",
@@ -10768,6 +10858,7 @@ export const ENGINE_OPERATION_NAMES = [
   "export/render",
   "media/import",
   "media/relink",
+  "midi/feedEvent",
   "midi/getInputs",
   "midi/preview",
   "midi/setInputEnabled",
@@ -10863,6 +10954,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/plugin.set",
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
+  "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
   "cmd/take.setComp",
@@ -11181,6 +11273,14 @@ export const REQUEST_COVERAGE = {
   "cmd/loop.set": {
     "kind": "operation",
     "operation": "cmd/loop.set"
+  },
+  "cmd/punch.set": {
+    "kind": "operation",
+    "operation": "cmd/punch.set"
+  },
+  "midi/feedEvent": {
+    "kind": "operation",
+    "operation": "midi/feedEvent"
   },
   "cmd/grid.set": {
     "kind": "operation",
@@ -11836,6 +11936,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "assetId": 3
     }
   ],
+  "cmd/punch.set": [
+    {
+      "startBeat": 8,
+      "endBeat": 16,
+      "enabled": true
+    }
+  ],
   "cmd/take.create": [
     {
       "trackId": 7,
@@ -12113,6 +12220,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "assetId": 3,
       "newPath": "C:/Music/kick.wav"
+    }
+  ],
+  "midi/feedEvent": [
+    {
+      "status": 144,
+      "data1": 60,
+      "data2": 100
     }
   ],
   "midi/getInputs": [

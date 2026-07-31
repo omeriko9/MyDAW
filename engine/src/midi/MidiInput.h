@@ -89,6 +89,22 @@ public:
 
     // Control-surface hook: invoked (non-RT, winmm thread) for EVERY channel-voice message
     // (not throttled) so MIDI-learn / CC→param mapping sees all values. Marshal to your loop.
+    /**
+     * Inject a channel-voice message from a source that is not a MIDI port — a software
+     * control surface, an on-screen keyboard, or a test.
+     *
+     * It enters at the same place a real winmm message does: the QPC-timestamped mirror
+     * ring that MidiRecorder drains, so recording accuracy is reconstructed from arrival
+     * time exactly as it is for hardware. The control-surface callback fires too, so
+     * MIDI-learn behaves identically.
+     *
+     * NOT wired to per-device RT rings, deliberately: those belong to an open device
+     * session and a virtual source has none, so injected events are recordable and
+     * mappable but do not sound through MIDI-thru. Anything claiming otherwise would be
+     * a dead affordance.
+     */
+    void feedExternal(const MidiEvent& e);
+
     void setControlCallback(std::function<void(const MidiEvent& ev)> cb);
 
     // ---- recorder mirror (E5-internal: consumed by MidiRecorder) ------------------

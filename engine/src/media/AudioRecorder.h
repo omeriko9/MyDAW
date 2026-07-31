@@ -36,11 +36,34 @@ struct RecordTarget {
 
 class AudioRecorder {
 public:
+    /**
+     * One contiguous run of captured material.
+     *
+     * The take file is a single stream of everything that was captured, but that stream is
+     * NOT necessarily continuous on the timeline: a punch region withholds frames between
+     * its out and the next in, a cycle wraps the playhead backwards, and a ring overrun
+     * drops frames outright. Without a ledger the file is assumed contiguous from one
+     * anchor, which silently shifts every sample after the first gap EARLIER — a real
+     * pre-existing bug, not just a punch limitation.
+     *
+     * So each segment records both coordinates: where it belongs on the TIMELINE, and
+     * where it lives in the FILE. A commit can then place material exactly, whatever the
+     * gaps were.
+     */
+    struct Segment {
+        int64_t startSample = 0;  // timeline position of this run's first frame
+        int64_t fileOffset = 0;   // frame offset of this run within the take file
+        int64_t frames = 0;
+    };
+
     struct Recorded {
         uint64_t trackId = 0;
         std::string wavPath; // absolute path of the written wav
         int64_t startSample = 0;
         int64_t frames = 0;
+        // Always at least one entry when frames > 0. A take with no gaps has exactly one,
+        // which is byte-for-byte the old behaviour.
+        std::vector<Segment> segments;
     };
 
     AudioRecorder() = default;
@@ -85,6 +108,22 @@ private:
     std::vector<TargetState> targets_;
     int sampleRate_ = 0;
     int64_t startSample_ = 0;
+    // Timeline position of the first frame the RT thread actually pushed. With no punch
+    // region this equals startSample_ (count-in pushes nothing), so reporting it is a
+    // strict refinement; with punch it is the punch-in point.
+    std::atomic<int64_t> firstSample_{0};
+    std::atomic<bool> firstSampleSet_{false};
+
+    // Segment ledger, written ONLY by the RT thread and read by the main thread after
+    // finalize() has stopped pushes. Fixed capacity so the RT path never allocates; a take
+    // needing more discontinuities than this is pathological, and the overflow is counted
+    // rather than silently truncating the ledger's meaning.
+    static constexpr int kMaxSegments = 1024;
+    Segment segs_[kMaxSegments]{};
+    std::atomic<int> segCount_{0};
+    std::atomic<int64_t> segOverflow_{0};
+    int64_t pushedFrames_ = 0;   // RT-only: running total written into the ring
+    int64_t nextExpected_ = 0;   // RT-only: playhead the next contiguous push would carry
     int ringChannels_ = 0;
     size_t capacityFrames_ = 0; // power of two
     size_t frameMask_ = 0;

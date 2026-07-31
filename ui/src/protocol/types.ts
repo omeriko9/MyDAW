@@ -443,6 +443,9 @@ export interface Project {
   tempoMap: TempoPoint[];
   timeSigMap: TimeSigEntry[];
   loop: LoopRegion;
+  /** Punch region: gates RECORDING only, never playback (SPEC §6). Absent on
+   *  projects saved before punch existed. */
+  punch?: LoopRegion;
   grid: Grid;
   markers: Marker[];
   /** Absent when empty (no sections/chain). */
@@ -1271,6 +1274,15 @@ export interface TimeSigMapSetRequest {
   entries: TimeSigEntry[];
 }
 
+/** Channel-voice injection from a non-port source (software keyboard / control surface /
+ *  test). `status` is a channel-voice status byte 0x80..0xEF. Reaches the RECORDER, unlike
+ *  midimap/feedCc which drives the mapping path. */
+export interface MidiFeedEventRequest {
+  status: number;
+  data1: number;
+  data2: number;
+}
+
 export interface LoopSetRequest {
   startBeat: number;
   endBeat: number;
@@ -1731,6 +1743,8 @@ export interface TransportEvent {
   beat: number;
   timeSec: number;
   loop: LoopRegion;
+  /** punch region driving the record gate — absent on older engines */
+  punch?: LoopRegion;
   /** authoritative metronome state — absent on older engines */
   metronome?: MetronomeState;
   /** automation-write arm — absent on older engines */
@@ -1922,6 +1936,8 @@ export interface RequestMap {
   "cmd/tempoMap.set": { req: TempoMapSetRequest; reply: EmptyObject };
   "cmd/timeSigMap.set": { req: TimeSigMapSetRequest; reply: EmptyObject };
   "cmd/loop.set": { req: LoopSetRequest; reply: EmptyObject };
+  "cmd/punch.set": { req: LoopSetRequest; reply: EmptyObject };
+  "midi/feedEvent": { req: MidiFeedEventRequest; reply: EmptyObject };
   "cmd/grid.set": { req: GridSetRequest; reply: EmptyObject };
   "edit/undo": { req: EmptyObject; reply: UndoRedoReply };
   "edit/redo": { req: EmptyObject; reply: UndoRedoReply };
@@ -2119,6 +2135,8 @@ export const ArrangeCmd = {
   tempoMapSet: "cmd/tempoMap.set",
   timeSigMapSet: "cmd/timeSigMap.set",
   loopSet: "cmd/loop.set",
+  punchSet: "cmd/punch.set",
+  feedMidiEvent: "midi/feedEvent",
   gridSet: "cmd/grid.set",
 } as const satisfies Record<string, RequestType>;
 

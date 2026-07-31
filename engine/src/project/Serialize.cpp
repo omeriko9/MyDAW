@@ -490,6 +490,9 @@ json toJson(const Project& p) {
         {"loop", json{{"startBeat", p.loop.startBeat},
                       {"endBeat", p.loop.endBeat},
                       {"enabled", p.loop.enabled}}},
+        {"punch", json{{"startBeat", p.punch.startBeat},
+                       {"endBeat", p.punch.endBeat},
+                       {"enabled", p.punch.enabled}}},
         {"grid", json{{"division", p.grid.division},
                       {"snap", p.grid.snap},
                       {"triplet", p.grid.triplet},
@@ -1026,6 +1029,14 @@ bool fromJson(const json& j, Project& out, std::string* err) {
         p.loop.startBeat = getOr<double>(lj, "startBeat", 0.0);
         p.loop.endBeat = getOr<double>(lj, "endBeat", 8.0);
         p.loop.enabled = getOr<bool>(lj, "enabled", false);
+    }
+    // Absent in projects saved before punch existed: the defaults leave it disabled and
+    // empty, so an old project records exactly as it always did.
+    if (hasKey(j, "punch")) {
+        const json& pj = *j.find("punch");
+        p.punch.startBeat = getOr<double>(pj, "startBeat", 0.0);
+        p.punch.endBeat = getOr<double>(pj, "endBeat", 0.0);
+        p.punch.enabled = getOr<bool>(pj, "enabled", false);
     }
     if (hasKey(j, "grid")) {
         const json& gj = *j.find("grid");

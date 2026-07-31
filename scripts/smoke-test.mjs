@@ -8,10 +8,11 @@
  * Requires Node >= 21 (global WebSocket, fetch/FormData). No npm deps.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, mkdtempSync} from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
+import { tmpdir as __tmpdir } from "node:os";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -99,7 +100,13 @@ async function main() {
 
   if (!NO_SPAWN) {
     if (!existsSync(EXE)) { console.error("engine exe not found: " + EXE); process.exit(2); }
-    engine = spawn(EXE, ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] });
+// ISOLATED %APPDATA%: this harness spawns a real engine, and an engine writes settings
+// (audio device, PLUGIN FOLDERS), plugin-cache.json, recent.json, autosave data and a
+// session.lock. Run against the developer's real profile it silently rewrites their DAW
+// configuration — and a hard kill leaves a lock that makes their next launch "recover"
+// this harness's throwaway project instead of their work.
+const APPDATA_ISO = mkdtempSync(path.join(__tmpdir(), "mydaw-iso-"));
+    engine = spawn(EXE, ["--driver", "null", "--no-browser", "--port", String(PORT)], { stdio: ["ignore", "ignore", "pipe"] , env: { ...process.env, APPDATA: APPDATA_ISO } });
     let stderrTail = "";
     engine.stderr.on("data", (d) => { stderrTail = (stderrTail + d.toString()).slice(-4000); });
     engine.on("exit", (c) => { if (c !== null && failCount + passCount > 0 === false) console.error("engine exited early, code", c, "\n", stderrTail); });

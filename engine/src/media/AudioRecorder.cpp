@@ -33,6 +33,12 @@ void AudioRecorder::begin(const std::vector<RecordTarget>& targets,
 
     sampleRate_ = std::max(1, sampleRate);
     startSample_ = startSample;
+    firstSample_.store(startSample, std::memory_order_release);
+    firstSampleSet_.store(false, std::memory_order_release);
+    segCount_.store(0, std::memory_order_release);
+    segOverflow_.store(0, std::memory_order_relaxed);
+    pushedFrames_ = 0;
+    nextExpected_ = 0;
     droppedFrames_.store(0, std::memory_order_relaxed);
     lastDropLogged_ = 0;
     lastDropLogTime_ = std::chrono::steady_clock::time_point{};
@@ -100,17 +106,45 @@ void AudioRecorder::begin(const std::vector<RecordTarget>& targets,
 }
 
 void AudioRecorder::pushFromRt(const float* const* in, int numIn, int frames,
-                               int64_t /*playheadSamples*/) noexcept {
+                               int64_t playheadSamples) noexcept {
     if (!active_.load(std::memory_order_acquire) || frames <= 0 || ringChannels_ <= 0)
         return;
+
+    // Where the FIRST captured frame actually landed on the timeline. begin() can only
+    // snapshot where record was PRESSED, which stopped being the same thing once the punch
+    // gate could withhold every frame until the punch-in point. Recorded once, so a
+    // mid-take punch edit cannot retroactively move the take's anchor.
+    if (!firstSampleSet_.load(std::memory_order_acquire)) {
+        firstSample_.store(playheadSamples, std::memory_order_release);
+        firstSampleSet_.store(true, std::memory_order_release);
+    }
 
     const uint64_t h = head_.load(std::memory_order_relaxed);
     const uint64_t t = tail_.load(std::memory_order_acquire);
     if (static_cast<size_t>(h - t) + static_cast<size_t>(frames) > capacityFrames_) {
         // Overrun: drop the whole block and count it (worker logs, never the RT thread).
+        // Leaving nextExpected_ alone is deliberate — the drop becomes a DISCONTINUITY, so
+        // the next push opens a new segment at its true timeline position instead of the
+        // dropped frames silently pulling everything after them earlier.
         droppedFrames_.fetch_add(frames, std::memory_order_relaxed);
         return;
     }
+
+    // Open a new segment whenever this push does not continue the previous one: the first
+    // push, a punch re-entry, a cycle wrap, or the gap left by a dropped block.
+    const int n = segCount_.load(std::memory_order_relaxed);
+    if (n == 0 || playheadSamples != nextExpected_) {
+        if (n < kMaxSegments) {
+            segs_[n] = Segment{playheadSamples, pushedFrames_, frames};
+            segCount_.store(n + 1, std::memory_order_release);
+        } else {
+            segOverflow_.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else {
+        segs_[n - 1].frames += frames; // extend the run in place
+    }
+    pushedFrames_ += frames;
+    nextExpected_ = playheadSamples + frames;
 
     const int rc = ringChannels_;
     for (int f = 0; f < frames; ++f) {
@@ -205,8 +239,29 @@ std::vector<AudioRecorder::Recorded> AudioRecorder::finalize() {
         Recorded r;
         r.trackId = ts.target.trackId;
         r.wavPath = ts.wavPath;
-        r.startSample = startSample_;
+        // Where material actually begins, not where record was pressed — they differ
+        // whenever a punch region withheld the opening frames.
+        r.startSample = firstSample_.load(std::memory_order_acquire);
         r.frames = ts.writer->framesWritten();
+        // The ledger is per-SESSION (every target sees the same pushes and the same gaps),
+        // so each Recorded carries a copy. Safe to read unsynchronised here: active_ was
+        // cleared and the worker joined before this loop, so the RT thread is long done.
+        {
+            const int n = segCount_.load(std::memory_order_acquire);
+            r.segments.assign(segs_, segs_ + n);
+            // Clamp the last run to what the writer actually got, so a segment can never
+            // claim frames past the end of the file.
+            int64_t acc = 0;
+            for (size_t k = 0; k < r.segments.size(); ++k) {
+                if (acc + r.segments[k].frames > r.frames)
+                    r.segments[k].frames = std::max<int64_t>(0, r.frames - acc);
+                acc += r.segments[k].frames;
+            }
+            while (!r.segments.empty() && r.segments.back().frames <= 0)
+                r.segments.pop_back();
+            if (r.segments.empty() && r.frames > 0)
+                r.segments.push_back(Segment{r.startSample, 0, r.frames});
+        }
         if (ts.writer->finalize())
             out.push_back(std::move(r));
         else

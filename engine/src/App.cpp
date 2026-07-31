@@ -136,6 +136,14 @@ bool App::init(std::string& err) {
         else
             Log::warn("App: unknown --driver '%s' ignored", opts.driver.c_str());
     }
+    // Before open(): enumerate() has to advertise the synthetic inputs for a capture path
+    // to exist at all. Opt-in via --null-input, so a real fallback to the null driver is
+    // unchanged.
+    if (opts.nullInputChannels > 0) {
+        driver->setNullTestInput(opts.nullInputChannels);
+        Log::info("App: null driver synthesizing %d test capture channel(s)",
+                  opts.nullInputChannels);
+    }
     if (!driver->open(currentConfig_, &App::audioCallback, this, err)) {
         err = "audio driver open failed: " + err;
         return false;
@@ -498,6 +506,8 @@ void App::prepareGraphFormat(const AudioConfig& actual) {
     } else {
         transport.setLoopBeats(model.project.loop.startBeat, model.project.loop.endBeat,
                                model.project.loop.enabled);
+        transport.setPunchBeats(model.project.punch.startBeat, model.project.punch.endBeat,
+                                model.project.punch.enabled);
         graph->rebuild(model);
     }
 }
@@ -720,17 +730,33 @@ void App::stopRecordingAndCommit() {
     recordingActive_ = false;
 
     json audioArr = json::array();
-    for (const AudioRecorder::Recorded& r : audioRecorder.finalize())
+    for (const AudioRecorder::Recorded& r : audioRecorder.finalize()) {
+        // The ledger of contiguous runs. The take FILE is one stream, but the material is
+        // not necessarily continuous on the timeline (punch gaps, cycle wraps, dropped
+        // blocks), so the commit places each run by its own coordinates rather than
+        // assuming the whole file starts at one anchor.
+        json segs = json::array();
+        for (const AudioRecorder::Segment& s : r.segments)
+            segs.push_back(json{{"startSample", s.startSample},
+                                {"fileOffset", s.fileOffset},
+                                {"frames", s.frames}});
         audioArr.push_back(json{{"trackId", r.trackId},
                                 {"wavPath", r.wavPath},
                                 {"startSample", r.startSample},
-                                {"frames", r.frames}});
+                                {"frames", r.frames},
+                                {"segments", std::move(segs)}});
+    }
 
     json midiArr = json::array();
     if (midiRecorder.active()) {
         midiRecorder.pump(tempoMap, transport.playheadBeats()); // final drain
-        const MidiRecorder::RecordedNotes rec = midiRecorder.finalize(tempoMap);
-        if (!rec.notes.empty() || !rec.cc.empty()) {
+        // One entry per LAP per armed track. wrapTake() split held notes at each cycle
+        // seam already, so each lap is a complete take of the span it covers; the commit
+        // stacks same-position laps into take lanes exactly as it does for audio.
+        const std::vector<MidiRecorder::RecordedNotes> laps = midiRecorder.finalize(tempoMap);
+        for (const MidiRecorder::RecordedNotes& rec : laps) {
+            if (rec.notes.empty() && rec.cc.empty())
+                continue;
             json notes = json::array();
             for (const Note& n : rec.notes)
                 notes.push_back(json{{"pitch", n.pitch},
@@ -921,6 +947,12 @@ json App::transportJson() const {
                 {"loop", json{{"startBeat", s.loopStartBeat},
                               {"endBeat", s.loopEndBeat},
                               {"enabled", s.loopEnabled}}},
+                // Additive: the punch region, in the same shape as loop. Derived from the
+                // transport (not the model) so it reflects what the RT gate is actually
+                // using, including after a tempo-map edit re-derived it.
+                {"punch", json{{"startBeat", tempoMap.samplesToBeats(transport.punchStartSamples())},
+                               {"endBeat", tempoMap.samplesToBeats(transport.punchEndSamples())},
+                               {"enabled", transport.punchEnabled()}}},
                 {"metronome", json{{"enabled", transport.metronomeEnabled()},
                                    {"countInBars", transport.countInBars()}}},
                 {"automationWrite", transport.automationWrite()}};

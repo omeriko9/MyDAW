@@ -34,7 +34,16 @@ cmake --preset host32-release   && cmake --build --preset host32-release
 ## Engine flags
 
 `--port N` (8417) · `--driver wasapi|null` (`asio` once enabled) · `--ui-root <dir>` ·
-`--host64-path/--host32-path <exe>` · `--project <Name.mydaw>` · `--no-browser`
+`--host64-path/--host32-path <exe>` · `--project <Name.mydaw>` · `--no-browser` ·
+`--exit-when-idle` · `--null-input N`
+
+`--null-input N` makes the null driver synthesize N capture channels (opt-in, default 0)
+so the RECORDING path is reachable headlessly — without it the driver reports no inputs at
+all and punch, loop-record takes and input metering cannot be tested by anything. The
+signal is a position-recoverable ramp; see SPEC §11.
+
+MIDI has the equivalent affordance over the wire rather than a flag: `midi/feedEvent`
+injects a channel-voice message into the recorder's mirror ring (SPEC §5.2).
 
 ## Options
 
@@ -61,8 +70,8 @@ traces, interactive control), see [DEBUGGING_UI.md](DEBUGGING_UI.md).
 ## Tests
 
 ```powershell
-node scripts/gate.mjs             # 23 suites, ~70 s — run this before every commit
-node scripts/gate.mjs --full      # +recovery, real-plugin and CPR corpus suites, ~3 min
+node scripts/gate.mjs             # 26 suites, ~90 s — run this before every commit
+node scripts/gate.mjs --full      # +recovery, real-plugin and CPR corpus suites, ~3.5 min
 node scripts/gate.mjs --list      # the table: which suite is in which tier, and why
 node scripts/gate.mjs --only ui-smoke,smoke
 ```
@@ -72,7 +81,7 @@ UI bug that no unit test can reach should leave a new `ui-smoke` check behind it
 `--full` before a merge or a release.
 
 Individual suites still run standalone (`node scripts/ui-smoke.mjs`, `cd ui; npm test`,
-and the 26 harnesses in `scripts/*-test.mjs`) — the gate is a runner over them, not a
+and the 29 harnesses in `scripts/*-test.mjs`) — the gate is a runner over them, not a
 replacement. See [UI_TEST_SUITE.md](UI_TEST_SUITE.md) for which layer a new check belongs in.
 
 Three things the gate does that are easy to get wrong by hand:

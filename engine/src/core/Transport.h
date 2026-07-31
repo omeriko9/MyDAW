@@ -57,6 +57,13 @@ public:
 
     void setLoopBeats(double startBeat, double endBeat, bool enabled); // converts via TempoMap
     void setLoopSamples(int64_t startSample, int64_t endSample, bool enabled);
+
+    // Punch region (SPEC §5.3). Unlike the loop it never moves the playhead — it only
+    // decides whether the recorder is CAPTURING at a given sample position, so it is
+    // evaluated per render span rather than in nextSpans().
+    void setPunchBeats(double startBeat, double endBeat, bool enabled);
+    void setPunchSamples(int64_t startSample, int64_t endSample, bool enabled);
+    void rederivePunch(double startBeat, double endBeat); // tempo-map change
     // Re-derives the loop sample region from the given beats (call after tempo changes).
     void rederiveLoop(double startBeat, double endBeat);
 
@@ -92,6 +99,38 @@ public:
     bool loopEnabled() const { return loopEnabled_.load(std::memory_order_acquire); }
     int64_t loopStartSamples() const { return loopStart_.load(std::memory_order_acquire); }
     int64_t loopEndSamples() const { return loopEnd_.load(std::memory_order_acquire); }
+
+    bool punchEnabled() const { return punchEnabled_.load(std::memory_order_acquire); }
+    int64_t punchStartSamples() const { return punchStart_.load(std::memory_order_acquire); }
+    int64_t punchEndSamples() const { return punchEnd_.load(std::memory_order_acquire); }
+
+    /**
+     * RT: how many frames of [pos, pos+frames) fall inside the punch window, and where
+     * they start. Returns false when the span contributes nothing.
+     *
+     * This is an INTERVAL INTERSECTION, deliberately, not an edge detector. The loop-wrap
+     * bug (fixed in f9a5309) was an edge test — `pos < end && pos+frames > end` — which
+     * silently failed whenever a boundary landed exactly on a block edge, and at 120 bpm
+     * / 48 kHz the default cycle does that on every single block. Punch has the same
+     * hazard at BOTH its boundaries, so it is expressed as an overlap and never as an
+     * edge crossing.
+     */
+    bool punchSpan(int64_t pos, int frames, int& offsetOut, int& countOut) const noexcept {
+        if (!punchEnabled_.load(std::memory_order_acquire)) {
+            offsetOut = 0;
+            countOut = frames;
+            return frames > 0;
+        }
+        const int64_t s = punchStart_.load(std::memory_order_acquire);
+        const int64_t e = punchEnd_.load(std::memory_order_acquire);
+        const int64_t from = pos > s ? pos : s;
+        const int64_t to = (pos + frames) < e ? (pos + frames) : e;
+        if (to <= from)
+            return false;
+        offsetOut = static_cast<int>(from - pos);
+        countOut = static_cast<int>(to - from);
+        return countOut > 0;
+    }
 
     // Timeline discontinuities published by the RT thread (loop wrap / arranger jump).
     // `wrapSeq` counts them and `wrapFromSamples` is the position the playhead LEFT.
@@ -150,6 +189,13 @@ private:
     std::atomic<int64_t> loopStart_{0};
     std::atomic<int64_t> loopEnd_{0};
     std::atomic<bool> loopEnabled_{false};
+
+    // Punch. Three independent atomics, so a drag that edits the region mid-take can gate
+    // one block on mixed values — the same accepted tradeoff the loop region documents
+    // above, and harmless because a mixed read still yields a valid sub-range.
+    std::atomic<int64_t> punchStart_{0};
+    std::atomic<int64_t> punchEnd_{0};
+    std::atomic<bool> punchEnabled_{false};
     std::atomic<int> countInBars_{0};
     // Default OFF (matching every imported/new project unless it says otherwise); state is
     // mirrored to the UI via the "metronome" object in transportJson()/session/hello.

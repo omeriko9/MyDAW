@@ -344,6 +344,11 @@ export const setTimeSigMap = (entries: TimeSigEntry[]) =>
 export const setLoop = (startBeat: number, endBeat: number, enabled: boolean, transient?: boolean) =>
   ws.request("cmd/loop.set", { startBeat, endBeat, enabled }, transient);
 
+/** Punch region — gates RECORDING only; playback is unaffected (SPEC §5.3). Same shape as
+ *  setLoop so a drag can stream transient updates and commit once on release. */
+export const setPunch = (startBeat: number, endBeat: number, enabled: boolean, transient?: boolean) =>
+  ws.request("cmd/punch.set", { startBeat, endBeat, enabled }, transient);
+
 /** Persisted grid/snap settings — patch semantics, engine writes project.grid. */
 export const setGrid = (patch: GridSetRequest, transient?: boolean) =>
   ws.request("cmd/grid.set", patch, transient);

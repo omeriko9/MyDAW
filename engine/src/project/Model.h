@@ -557,6 +557,10 @@ struct Project {
     std::vector<TempoEntry> tempoMap;     // v1: single entry at beat 0
     std::vector<TimeSigEntry> timeSigMap; // v1: single entry at bar 0
     LoopRegion loop;
+    // Punch region (SPEC §6). Same shape as the loop, different job: it never moves the
+    // playhead, it only gates whether the recorder captures. Disabled by default, and an
+    // empty region can never be enabled.
+    LoopRegion punch{0.0, 0.0, false};
     GridSettings grid;
     std::vector<Marker> markers;
     Arranger arranger;                          // sections + play chain (§3.6); omit-when-empty

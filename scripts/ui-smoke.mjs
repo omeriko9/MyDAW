@@ -593,6 +593,54 @@ export const checks = [
   },
 
   {
+    id: "punch-toggle-arms-the-record-gate",
+    title: "the Punch toggle arms the engine's record gate, seeded from the cycle",
+    area: "transport",
+    guards: "Phase 3 — punch in/out shipped protocol-only (cmd/punch.set + the RT gate) with no way to reach it from the UI. Arming with no region yet would be a dead button under SPEC §10, so the toggle seeds the region from the cycle the user has already framed",
+    run: async (s, tt) => {
+      // Own preconditions: both regions persist in the project.
+      await s.probe("cmd/punch.set", { startBeat: 0, endBeat: 0, enabled: false });
+      await s.probe("cmd/loop.set", { startBeat: 4, endBeat: 12, enabled: true });
+      await s.reload();
+
+      const btn = await s.eval(() => {
+        const el = [...document.querySelectorAll("button")]
+          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Punch"));
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2, pressed: el.getAttribute("aria-pressed") };
+      });
+      tt.ok(btn, "the transport has a Punch toggle");
+      tt.eq(btn.pressed, "false", "it starts disarmed");
+
+      await s.click(btn.x, btn.y);
+      await s.until("the engine arms the punch gate", async () =>
+        (await s.probe("transport/pause")).payload.punch?.enabled === true);
+
+      // Seeded from the cycle — not left empty, which would gate every sample out.
+      const p = (await s.probe("transport/pause")).payload.punch;
+      tt.near(p.startBeat, 4, 1e-9, `punch start seeded from the cycle (${JSON.stringify(p)})`);
+      tt.near(p.endBeat, 12, 1e-9, "punch end seeded from the cycle");
+
+      await s.untilEval("the toggle reflects the armed state", () =>
+        [...document.querySelectorAll("button")]
+          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Punch"))
+          ?.getAttribute("aria-pressed") === "true");
+
+      // Disarming must keep the region — the user framed it; only the gate turns off.
+      await s.click(btn.x, btn.y);
+      await s.until("the engine disarms", async () =>
+        (await s.probe("transport/pause")).payload.punch?.enabled === false);
+      const p2 = (await s.probe("transport/pause")).payload.punch;
+      tt.near(p2.startBeat, 4, 1e-9, "the region survives disarming");
+      tt.near(p2.endBeat, 12, 1e-9, "the region survives disarming");
+
+      await s.probe("cmd/punch.set", { startBeat: 0, endBeat: 0, enabled: false });
+      await s.probe("cmd/loop.set", { startBeat: 0, endBeat: 8, enabled: false });
+    },
+  },
+
+  {
     id: "palette-bar-jump-labels-where-it-goes",
     title: "the palette's bar-jump promises the beat it actually locates to",
     area: "palette-keyboard",

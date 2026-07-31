@@ -54,12 +54,22 @@ const SUITES = [
   { id: "vitest", tier: "fast", cmd: "npm", args: ["test", "--silent"], cwd: path.join(ROOT, "ui"),
     shell: true, note: "pure logic, no engine" },
 
+  // FIRST, and needs no engine: a static check that no harness can write the developer's
+  // real profile. It exists because the suite once erased a live plugin-folder list.
+  { id: "harness-isolation", tier: "fast", script: "harness-isolation-test.mjs",
+    note: "static guard: every engine spawn must redirect APPDATA" },
   { id: "smoke", tier: "fast", script: "smoke-test.mjs", requires: needsEngine },
   { id: "import", tier: "fast", script: "import-test.mjs", requires: needsEngine },
   { id: "peaks", tier: "fast", script: "peaks-test.mjs", requires: needsEngine },
   { id: "automation-paramref", tier: "fast", script: "automation-paramref-test.mjs", requires: needsEngine },
   { id: "automation-write", tier: "fast", script: "automation-write-test.mjs", requires: needsEngine },
   { id: "asset-recycle", tier: "fast", script: "asset-recycle-test.mjs", requires: needsEngine },
+  { id: "record-capture", tier: "fast", script: "record-capture-test.mjs", requires: needsEngine,
+    note: "headless recording via --null-input; the base every Phase 3 test builds on" },
+  { id: "punch", tier: "fast", script: "punch-test.mjs", requires: needsEngine,
+    note: "sample-exact record gate; leans on --null-input's position-recoverable ramp" },
+  { id: "midi-lap", tier: "fast", script: "midi-lap-test.mjs", requires: needsEngine,
+    note: "cycle-record lap splitting; needs midi/feedEvent to drive MIDI headlessly" },
   { id: "midi-learn", tier: "fast", script: "midi-learn-test.mjs", requires: needsEngine },
   { id: "midi-out-channel", tier: "fast", script: "midi-out-channel-test.mjs", requires: needsEngine },
   { id: "smf-logic", tier: "fast", script: "smf-logic-test.mjs", requires: needsEngine },
