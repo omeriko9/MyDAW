@@ -669,6 +669,75 @@ export const checks = [
       await s.probe("cmd/track.remove", { trackId: markerId }, { allowError: true });
     },
   },
+
+  {
+    id: "automation-lanes-stay-collapsible-when-short",
+    title: "expanded automation lanes can still be collapsed after a vertical zoom-out",
+    area: "timeline-tracks",
+    guards: "1314840 — the collapse affordance lived only in the track header's 'A' toggle, which is hidden with the rest of the controls once the row drops under 44 px. One Shift+G was enough to strand every expanded track permanently expanded, on every track at once. The lane row is a FIXED height, so it now carries its own collapse button",
+    run: async (s, tt) => {
+      const project = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const midi = project.tracks.find((t) => t.name === "MIDI 1");
+      tt.ok(midi, "fixture has the MIDI track");
+      // A lane only exists once it has automation on it.
+      await s.probe("cmd/automation.set", {
+        trackId: midi.id, paramRef: "volume", add: [{ beat: 0, value: 0.8 }],
+      });
+      await s.reload();
+
+      // Expand via the header 'A' toggle — the affordance that is about to disappear.
+      const a = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        const btn = [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .find((b) => b.textContent.trim() === "A");
+        if (!btn) return null;
+        const b = btn.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      tt.ok(a, "the header carries the automation-lanes toggle while the row is tall");
+      await s.click(a.x, a.y);
+      await s.untilEval("a lane row appears", () => !!document.querySelector(".tlh-lane"));
+
+      // Shrink until the controls are gone. Shift+G is vertical zoom-OUT (factor 0.8).
+      for (let i = 0; i < 8; i++) await s.key("Shift+g");
+      await s.untilEval("track rows fall below the 44px control threshold", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        return !!row && row.getBoundingClientRect().height < 44;
+      });
+
+      const state = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        const headerToggle = [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .some((b) => b.textContent.trim() === "A");
+        const lane = document.querySelector(".tlh-lane");
+        const collapse = lane?.querySelector('button[aria-label="Collapse automation lanes"]');
+        const cb = collapse?.getBoundingClientRect();
+        return {
+          rowH: row ? row.getBoundingClientRect().height : null,
+          headerToggle,
+          hasCollapse: !!collapse,
+          collapseAt: cb ? { x: cb.left + cb.width / 2, y: cb.top + cb.height / 2, w: cb.width } : null,
+        };
+      });
+
+      tt.ok(state.rowH < 44, `the row really is short (${state.rowH}px)`);
+      tt.eq(state.headerToggle, false,
+        "the header's own toggle is gone at this height — which is what made this a trap");
+      tt.ok(state.hasCollapse, "the lane row carries its own collapse control");
+      tt.ok(state.collapseAt && state.collapseAt.w > 0, "and that control is actually laid out");
+
+      // It must WORK, not merely exist.
+      await s.click(state.collapseAt.x, state.collapseAt.y);
+      await s.untilEval("clicking it collapses the lanes", () => !document.querySelector(".tlh-lane"));
+
+      // Restore the viewport and the fixture.
+      for (let i = 0; i < 8; i++) await s.key("Shift+h");
+      await s.probe("cmd/automation.clear", { trackId: midi.id, paramRef: "volume" }, { allowError: true });
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */
