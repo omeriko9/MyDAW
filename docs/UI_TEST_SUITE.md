@@ -22,7 +22,7 @@ node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up 
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
 | Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
-| Kept from regressing, unattended | **10 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 6 of 14 areas, ~11 s |
+| Kept from regressing, unattended | **13 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 6 of 14 areas, ~12 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -49,7 +49,7 @@ it — a browser is three orders of magnitude more expensive than a vitest case.
 - **`ui/ npm test`** — 403 vitest cases over the pure logic (time math, fade curves,
   MIDI functions, clipboard, catalog). Sub-second, deterministic, and the right home
   for anything that does not need a DOM.
-- **`scripts/*-test.mjs`** — 24 harnesses that speak the engine's WS/HTTP protocol
+- **`scripts/*-test.mjs`** — 25 harnesses that speak the engine's WS/HTTP protocol
   directly. The right home for anything that does not need a *browser* — including
   contract properties, which is what
   [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs) does: it
@@ -57,7 +57,7 @@ it — a browser is three orders of magnitude more expensive than a vitest case.
   grammar is stated in three places and drifting apart is exactly how cc: lanes once
   became uneditable.
 - **`node scripts/ui-smoke.mjs`** — the unattended browser suite: one slot, every check
-  in order, non-zero exit on failure. ~11 s for the current 10 checks, most of which
+  in order, non-zero exit on failure. ~12 s for the current 13 checks, most of which
   cost under 400 ms — the slot is the expensive part, and it is paid once. This is where
   a bug goes once it has been fixed, so it cannot come back silently.
 - **This suite (`ui-cases.json`)** — everything left: rendering, event wiring, focus,
@@ -131,11 +131,23 @@ and executed checks for those in parallel slots — **126 checks, 113 PASS / 11 
   hardware controller, where nothing on screen knows. Fixed by echoing a granular
   `event/projectChanged` for externally-originated changes only, keeping the transient
   envelope so a CC sweep still does not push an undo entry per message.
+  *Now guarded by [midi-learn-test.mjs](../scripts/midi-learn-test.mjs), which asserts both
+  halves together — each is the other's failure mode.*
 - Undoing an offline render freed an asset id that the next render reused while the engine
   kept serving the old material — every AssetStore cache is keyed by id alone.
+  *Now guarded by [asset-recycle-test.mjs](../scripts/asset-recycle-test.mjs), which fails
+  loudly if the two renders stop receiving the same id — otherwise it would pass while
+  testing nothing.*
 - CC automation lanes (from Extract MIDI Automation) rejected every edit: the lane is
   created with paramRef `cc:<n>`, but `automationSet`'s inline check and `validParamRef`
   each re-spelled the grammar as `volume|pan|send:*|plugin:*`.
+  *Now guarded by [automation-paramref-test.mjs](../scripts/automation-paramref-test.mjs),
+  and the third spelling is gone — `automationSet` calls `validParamRef` instead of
+  restating it.*
+
+All three of the sweep's high-severity findings now have tests. None of them needed a
+browser: two are protocol harnesses and one is an assertion added to an existing harness
+that had been discarding every broadcast.
 
 Worth copying: coverage here was proven through the audio, not just the DOM. The transpose
 row was verified by rendering offline and running Goertzel analysis — a sustained A4 read
