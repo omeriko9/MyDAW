@@ -1220,13 +1220,20 @@ void AudioGraph::processBlock(const float* const* in, int numIn, float* const* o
             ctx.looping = transport.loopEnabled();
             ctx.sampleRate = sr;
 
-            // Recording tap (SPEC §7): capture -> AudioRecorder ring.
+            // Recording tap (SPEC §7): capture -> AudioRecorder ring, gated by the punch
+            // region. This sits INSIDE the per-span loop, which is what makes punch
+            // sample-accurate for free: spans are already split at loop and arranger
+            // discontinuities, so each call carries its own correct playhead and a punch
+            // boundary landing mid-block simply shortens one span's contribution.
             if (recording && rec) {
-                const int nc = std::min(numIn, kMaxCapture);
-                for (int c = 0; c < nc; ++c)
-                    im.capScratch[c] = (in && in[c]) ? in[c] + outOffset : nullptr;
-                rec->pushFromRt(nc > 0 ? im.capScratch : nullptr, nc, ctx.frames,
-                                ctx.playheadSamples);
+                int pOff = 0, pCount = 0;
+                if (transport.punchSpan(ctx.playheadSamples, ctx.frames, pOff, pCount)) {
+                    const int nc = std::min(numIn, kMaxCapture);
+                    for (int c = 0; c < nc; ++c)
+                        im.capScratch[c] = (in && in[c]) ? in[c] + outOffset + pOff : nullptr;
+                    rec->pushFromRt(nc > 0 ? im.capScratch : nullptr, nc, pCount,
+                                    ctx.playheadSamples + pOff);
+                }
             }
 
             im.runPass(P, ctx, in, numIn, outOffset, liveMidi, out, numOut);

@@ -80,6 +80,7 @@ const REQUEST_TYPES = [
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
   "cmd/loop.set",
+  "cmd/punch.set",
   "cmd/grid.set",
   "edit/undo",
   "edit/redo",
@@ -287,9 +288,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(129);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(130);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(143);
+    expect(AGENT_CATALOG.operations).toHaveLength(144);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

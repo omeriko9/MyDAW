@@ -506,6 +506,8 @@ void App::prepareGraphFormat(const AudioConfig& actual) {
     } else {
         transport.setLoopBeats(model.project.loop.startBeat, model.project.loop.endBeat,
                                model.project.loop.enabled);
+        transport.setPunchBeats(model.project.punch.startBeat, model.project.punch.endBeat,
+                                model.project.punch.enabled);
         graph->rebuild(model);
     }
 }
@@ -929,6 +931,12 @@ json App::transportJson() const {
                 {"loop", json{{"startBeat", s.loopStartBeat},
                               {"endBeat", s.loopEndBeat},
                               {"enabled", s.loopEnabled}}},
+                // Additive: the punch region, in the same shape as loop. Derived from the
+                // transport (not the model) so it reflects what the RT gate is actually
+                // using, including after a tempo-map edit re-derived it.
+                {"punch", json{{"startBeat", tempoMap.samplesToBeats(transport.punchStartSamples())},
+                               {"endBeat", tempoMap.samplesToBeats(transport.punchEndSamples())},
+                               {"enabled", transport.punchEnabled()}}},
                 {"metronome", json{{"enabled", transport.metronomeEnabled()},
                                    {"countInBars", transport.countInBars()}}},
                 {"automationWrite", transport.automationWrite()}};

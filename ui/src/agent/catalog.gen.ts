@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "f3530701778a7df7433f68af5f3b40594b7cd9699d93b119e45bf45775fbb475";
+export const AGENT_CATALOG_SHA256 = "451bedddb1101fee6e172bddaaefc696a632872672327ecce88bd7c4a1ea7459";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -3181,6 +3181,9 @@ export const AGENT_CATALOG: AgentCatalog = {
           "$ref": "#/schemas/Grid"
         },
         "loop": {
+          "$ref": "#/schemas/LoopRegion"
+        },
+        "punch": {
           "$ref": "#/schemas/LoopRegion"
         },
         "markers": {
@@ -6598,6 +6601,41 @@ export const AGENT_CATALOG: AgentCatalog = {
           "input": {
             "instanceId": 31,
             "assetId": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/punch.set",
+      "category": "arrangement",
+      "description": "Set the punch region and enable or disable it. Recording captures ONLY inside this region; playback is unaffected. An empty region can never be enabled.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/LoopSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 8,
+            "endBeat": 16,
+            "enabled": true
           }
         }
       ]
@@ -10723,6 +10761,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/plugin.set",
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
+  "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
   "cmd/take.setComp",
@@ -10863,6 +10902,7 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/plugin.set",
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
+  "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
   "cmd/take.setComp",
@@ -11181,6 +11221,10 @@ export const REQUEST_COVERAGE = {
   "cmd/loop.set": {
     "kind": "operation",
     "operation": "cmd/loop.set"
+  },
+  "cmd/punch.set": {
+    "kind": "operation",
+    "operation": "cmd/punch.set"
   },
   "cmd/grid.set": {
     "kind": "operation",
@@ -11834,6 +11878,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "instanceId": 31,
       "assetId": 3
+    }
+  ],
+  "cmd/punch.set": [
+    {
+      "startBeat": 8,
+      "endBeat": 16,
+      "enabled": true
     }
   ],
   "cmd/take.create": [

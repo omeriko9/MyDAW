@@ -703,6 +703,7 @@ void CommandProcessor::syncEngineFromModel() {
         ctx_.tempoMap->setMap(p.tempoMap, p.timeSigMap);
     if (ctx_.transport)
         ctx_.transport->setLoopBeats(p.loop.startBeat, p.loop.endBeat, p.loop.enabled);
+        ctx_.transport->setPunchBeats(p.punch.startBeat, p.punch.endBeat, p.punch.enabled);
     syncArrangerToTransport(); // jump table follows the restored model + tempo
     pushEffectiveMutes();
     rebuildGraph();
@@ -1035,6 +1036,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/tempoMap.set")     return tempoMapSet(p, r);
     if (type == "cmd/timeSigMap.set")   return timeSigMapSet(p, r);
     if (type == "cmd/loop.set")         return loopSet(p, r);
+    if (type == "cmd/punch.set")        return punchSet(p, r);
     if (type == "cmd/grid.set")         return gridSet(p, r);
     // §5.6 plugins
     if (type == "cmd/plugin.add")       return pluginAdd(p, r);
@@ -5179,6 +5181,9 @@ json CommandProcessor::tempoSet(const json& p, CmdResult& r) {
         ctx_.tempoMap->setMap(m.project.tempoMap, m.project.timeSigMap);
     if (ctx_.transport) // loop region is stored in beats; sample window must follow tempo
         ctx_.transport->rederiveLoop(m.project.loop.startBeat, m.project.loop.endBeat);
+        // Punch is stored in beats and cached in samples, same as the loop — a tempo
+        // edit moves it on the timeline or the gate drifts against the music.
+        ctx_.transport->rederivePunch(m.project.punch.startBeat, m.project.punch.endBeat);
     syncArrangerToTransport(); // arranger jump samples follow tempo too
     r.label = "Set Tempo";
     r.structural = true; // audio clip beat lengths shift; plan re-derives sample positions
@@ -5233,6 +5238,9 @@ json CommandProcessor::tempoMapSet(const json& p, CmdResult& r) {
         ctx_.tempoMap->setMap(m.project.tempoMap, m.project.timeSigMap);
     if (ctx_.transport) // loop region is stored in beats; sample window must follow tempo
         ctx_.transport->rederiveLoop(m.project.loop.startBeat, m.project.loop.endBeat);
+        // Punch is stored in beats and cached in samples, same as the loop — a tempo
+        // edit moves it on the timeline or the gate drifts against the music.
+        ctx_.transport->rederivePunch(m.project.punch.startBeat, m.project.punch.endBeat);
     syncArrangerToTransport(); // arranger jump samples follow tempo too
     r.label = "Set Tempo Map";
     r.structural = true; // sample positions of every beat-anchored object change
@@ -5287,6 +5295,32 @@ json CommandProcessor::loopSet(const json& p, CmdResult& r) {
     if (ctx_.transport)
         ctx_.transport->setLoopBeats(start, end, m.project.loop.enabled);
     r.label = "Set Loop";
+    r.fullEvent = true;
+    return json::object();
+}
+
+/**
+ * cmd/punch.set {startBeat,endBeat,enabled} — the region within which recording actually
+ * captures. Deliberately mirrors cmd/loop.set, including the swap and the "an empty region
+ * is never enabled" rule: a zero-width punch would gate every sample out and present as a
+ * dead record button, which SPEC §10 forbids.
+ *
+ * Unlike the loop this does NOT affect playback in any way — the transport still plays the
+ * whole timeline; only the recorder is gated.
+ */
+json CommandProcessor::punchSet(const json& p, CmdResult& r) {
+    Model& m = model();
+    double start = std::max(0.0, getOr<double>(p, "startBeat", 0.0));
+    double end = std::max(0.0, getOr<double>(p, "endBeat", 0.0));
+    if (end < start)
+        std::swap(start, end);
+    const bool enabled = getOr<bool>(p, "enabled", false);
+    m.project.punch.startBeat = start;
+    m.project.punch.endBeat = end;
+    m.project.punch.enabled = enabled && end > start;
+    if (ctx_.transport)
+        ctx_.transport->setPunchBeats(start, end, m.project.punch.enabled);
+    r.label = "Set Punch";
     r.fullEvent = true;
     return json::object();
 }

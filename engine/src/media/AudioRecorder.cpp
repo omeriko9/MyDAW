@@ -33,6 +33,8 @@ void AudioRecorder::begin(const std::vector<RecordTarget>& targets,
 
     sampleRate_ = std::max(1, sampleRate);
     startSample_ = startSample;
+    firstSample_.store(startSample, std::memory_order_release);
+    firstSampleSet_.store(false, std::memory_order_release);
     droppedFrames_.store(0, std::memory_order_relaxed);
     lastDropLogged_ = 0;
     lastDropLogTime_ = std::chrono::steady_clock::time_point{};
@@ -100,9 +102,18 @@ void AudioRecorder::begin(const std::vector<RecordTarget>& targets,
 }
 
 void AudioRecorder::pushFromRt(const float* const* in, int numIn, int frames,
-                               int64_t /*playheadSamples*/) noexcept {
+                               int64_t playheadSamples) noexcept {
     if (!active_.load(std::memory_order_acquire) || frames <= 0 || ringChannels_ <= 0)
         return;
+
+    // Where the FIRST captured frame actually landed on the timeline. begin() can only
+    // snapshot where record was PRESSED, which stopped being the same thing once the punch
+    // gate could withhold every frame until the punch-in point. Recorded once, so a
+    // mid-take punch edit cannot retroactively move the take's anchor.
+    if (!firstSampleSet_.load(std::memory_order_acquire)) {
+        firstSample_.store(playheadSamples, std::memory_order_release);
+        firstSampleSet_.store(true, std::memory_order_release);
+    }
 
     const uint64_t h = head_.load(std::memory_order_relaxed);
     const uint64_t t = tail_.load(std::memory_order_acquire);
@@ -205,7 +216,9 @@ std::vector<AudioRecorder::Recorded> AudioRecorder::finalize() {
         Recorded r;
         r.trackId = ts.target.trackId;
         r.wavPath = ts.wavPath;
-        r.startSample = startSample_;
+        // Where material actually begins, not where record was pressed — they differ
+        // whenever a punch region withheld the opening frames.
+        r.startSample = firstSample_.load(std::memory_order_acquire);
         r.frames = ts.writer->framesWritten();
         if (ts.writer->finalize())
             out.push_back(std::move(r));

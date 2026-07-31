@@ -260,6 +260,7 @@ private:
     json tempoMapSet(const json& p, CmdResult& r);
     json timeSigMapSet(const json& p, CmdResult& r);
     json loopSet(const json& p, CmdResult& r);
+    json punchSet(const json& p, CmdResult& r);
     json gridSet(const json& p, CmdResult& r);
     // §5.6 plugins
     json pluginAdd(const json& p, CmdResult& r);

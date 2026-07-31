@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "f3530701778a7df7433f68af5f3b40594b7cd9699d93b119e45bf45775fbb475";
+const char kAgentCatalogSha256[] = "451bedddb1101fee6e172bddaaefc696a632872672327ecce88bd7c4a1ea7459";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -3161,6 +3161,9 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "$ref": "#/schemas/Grid"
         },
         "loop": {
+          "$ref": "#/schemas/LoopRegion"
+        },
+        "punch": {
           "$ref": "#/schemas/LoopRegion"
         },
         "markers": {
@@ -6578,6 +6581,41 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "input": {
             "instanceId": 31,
             "assetId": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/punch.set",
+      "category": "arrangement",
+      "description": "Set the punch region and enable or disable it. Recording captures ONLY inside this region; playback is unaffected. An empty region can never be enabled.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/LoopSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 8,
+            "endBeat": 16,
+            "enabled": true
           }
         }
       ]
@@ -10838,6 +10876,7 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/plugin.set",
     "cmd/plugin.setParam",
     "cmd/plugin.setSample",
+    "cmd/punch.set",
     "cmd/take.create",
     "cmd/take.flatten",
     "cmd/take.setComp",

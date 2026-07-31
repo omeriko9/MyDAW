@@ -62,6 +62,8 @@ const SUITES = [
   { id: "asset-recycle", tier: "fast", script: "asset-recycle-test.mjs", requires: needsEngine },
   { id: "record-capture", tier: "fast", script: "record-capture-test.mjs", requires: needsEngine,
     note: "headless recording via --null-input; the base every Phase 3 test builds on" },
+  { id: "punch", tier: "fast", script: "punch-test.mjs", requires: needsEngine,
+    note: "sample-exact record gate; leans on --null-input's position-recoverable ramp" },
   { id: "midi-learn", tier: "fast", script: "midi-learn-test.mjs", requires: needsEngine },
   { id: "midi-out-channel", tier: "fast", script: "midi-out-channel-test.mjs", requires: needsEngine },
   { id: "smf-logic", tier: "fast", script: "smf-logic-test.mjs", requires: needsEngine },

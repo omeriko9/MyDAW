@@ -118,6 +118,26 @@ void Transport::setLoopSamples(int64_t startSample, int64_t endSample, bool enab
     loopEnabled_.store(enabled && endSample > startSample, std::memory_order_release);
 }
 
+void Transport::setPunchBeats(double startBeat, double endBeat, bool enabled) {
+    setPunchSamples(tempoMap_.beatsToSamples(startBeat), tempoMap_.beatsToSamples(endBeat),
+                    enabled);
+}
+
+void Transport::setPunchSamples(int64_t startSample, int64_t endSample, bool enabled) {
+    if (endSample < startSample)
+        std::swap(startSample, endSample);
+    punchStart_.store(std::max<int64_t>(0, startSample), std::memory_order_release);
+    punchEnd_.store(std::max<int64_t>(0, endSample), std::memory_order_release);
+    // An empty region is never "enabled": a zero-width punch would gate every sample out
+    // and read as a dead record button.
+    punchEnabled_.store(enabled && endSample > startSample, std::memory_order_release);
+}
+
+void Transport::rederivePunch(double startBeat, double endBeat) {
+    setPunchSamples(tempoMap_.beatsToSamples(startBeat), tempoMap_.beatsToSamples(endBeat),
+                    punchEnabled_.load(std::memory_order_acquire));
+}
+
 void Transport::rederiveLoop(double startBeat, double endBeat) {
     setLoopSamples(tempoMap_.beatsToSamples(startBeat), tempoMap_.beatsToSamples(endBeat),
                    loopEnabled_.load(std::memory_order_acquire));

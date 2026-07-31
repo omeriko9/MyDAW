@@ -3155,6 +3155,9 @@
         "loop": {
           "$ref": "#/schemas/LoopRegion"
         },
+        "punch": {
+          "$ref": "#/schemas/LoopRegion"
+        },
         "markers": {
           "items": {
             "$ref": "#/schemas/Marker"
@@ -6570,6 +6573,41 @@
           "input": {
             "instanceId": 31,
             "assetId": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/punch.set",
+      "category": "arrangement",
+      "description": "Set the punch region and enable or disable it. Recording captures ONLY inside this region; playback is unaffected. An empty region can never be enabled.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/LoopSetRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "startBeat": 8,
+            "endBeat": 16,
+            "enabled": true
           }
         }
       ]

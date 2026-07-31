@@ -85,6 +85,11 @@ private:
     std::vector<TargetState> targets_;
     int sampleRate_ = 0;
     int64_t startSample_ = 0;
+    // Timeline position of the first frame the RT thread actually pushed. With no punch
+    // region this equals startSample_ (count-in pushes nothing), so reporting it is a
+    // strict refinement; with punch it is the punch-in point.
+    std::atomic<int64_t> firstSample_{0};
+    std::atomic<bool> firstSampleSet_{false};
     int ringChannels_ = 0;
     size_t capacityFrames_ = 0; // power of two
     size_t frameMask_ = 0;
