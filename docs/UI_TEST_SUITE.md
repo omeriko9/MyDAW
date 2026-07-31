@@ -1,8 +1,15 @@
 # UI test suite
 
-A browser-driven test suite for the web UI: 196 cases across 14 areas, executed
-against a real Chrome over CDP. This file is the map — the mechanics of driving the
-browser live in [DEBUGGING_UI.md](DEBUGGING_UI.md), which you should read first.
+A browser-driven test suite for the web UI: 196 agent-executed cases across 14 areas,
+plus a small unattended regression runner, both against a real Chrome over CDP. This
+file is the map — the mechanics of driving the browser live in
+[DEBUGGING_UI.md](DEBUGGING_UI.md), which you should read first.
+
+```bash
+node scripts/ui-smoke.mjs                     # unattended: every check, non-zero on failure
+node scripts/ui-smoke.mjs --filter transport  # by check id, title or area
+node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up to poke at
+```
 
 ## Status, honestly
 
@@ -14,6 +21,8 @@ browser live in [DEBUGGING_UI.md](DEBUGGING_UI.md), which you should read first.
 | Bug hypotheses raised by source review | 161 (45 high-confidence) |
 | High-confidence hypotheses adversarially verified | 45 → **42 confirmed, 3 refuted** |
 | Fixed and verified | 60+ — see the ledger below |
+| Second sweep (areas with no cases) | 126 checks — 113 PASS, 11 FAIL, 2 BLOCKED, **15 more bugs** |
+| Kept from regressing, unattended | **7 checks** — [ui-smoke.mjs](../scripts/ui-smoke.mjs), 4 of 14 areas, ~10 s |
 
 That "26 cases were themselves wrong" number is the important one: better than a
 quarter of the failures were the *case* being mistaken, not the app. A case authored
@@ -32,33 +41,66 @@ pass costs roughly the slowest area rather than the sum of all of them. Its inpu
 goes through CDP's Input domain, so keyboard events carry what a real layout sends;
 synthetic events silently pass shortcuts that are dead in real use.
 
-## Why there is no `npm run test:ui`
+## What is mechanised, and what still needs an agent
 
-The obvious shape — a script that drives Chrome and exits non-zero — is not what this
-suite is. The cases need a *coding agent* in the loop because the UI is canvas-heavy:
-proving a note landed on the right beat means reading pixels out of a `<canvas>` and
-interpreting clusters, and the expected geometry shifts with zoom, theme and viewport.
-Encoding that as brittle assertions produces a suite that fails for the wrong reasons.
+Four layers, cheapest first. Push every check down to the cheapest layer that can hold
+it — a browser is three orders of magnitude more expensive than a vitest case.
 
-What is mechanised instead:
-
-- **`ui/ npm test`** — 390 vitest tests over the pure logic (time math, fade curves,
-  MIDI functions, clipboard, catalog). Fast, deterministic, and the right home for
-  anything that does not need a DOM.
-- **`scripts/*-test.mjs`** — 28 harnesses that speak the engine's WS/HTTP protocol
+- **`ui/ npm test`** — 401 vitest cases over the pure logic (time math, fade curves,
+  MIDI functions, clipboard, catalog). Sub-second, deterministic, and the right home
+  for anything that does not need a DOM.
+- **`scripts/*-test.mjs`** — 23 harnesses that speak the engine's WS/HTTP protocol
   directly. The right home for anything that does not need a *browser*.
-- **This suite** — everything left: rendering, event wiring, focus, keyboard routing,
-  cross-pane consistency. Driven by an agent through the Chrome DevTools MCP.
+- **`node scripts/ui-smoke.mjs`** — the unattended browser suite: one slot, every check
+  in order, non-zero exit on failure. ~9 s for the current 4 checks. This is where a
+  bug goes once it has been fixed, so it cannot come back silently.
+- **This suite (`ui-cases.json`)** — everything left: rendering, event wiring, focus,
+  keyboard routing, cross-pane consistency. Driven by a *coding agent*.
+
+The fourth layer stays agent-driven on purpose. The UI is canvas-heavy, so proving a
+note landed on the right beat means reading pixels out of a `<canvas>` and interpreting
+clusters, and the expected geometry shifts with zoom, theme and viewport. Encoding all
+196 cases as assertions produces a suite that fails for the wrong reasons.
+
+What `ui-smoke.mjs` is for is the narrower job the agent pass is *bad* at: making sure a
+bug that was found and fixed stays fixed. A check there is written against a specific
+commit and names it in `guards`, so a failure reads as "this regressed" rather than
+"something about the piano roll looks off". Add one whenever a fix lands that a unit
+test cannot reach.
+
+### Writing a check
+
+```js
+{ id: "bars-1based", title: "...", area: "transport",
+  guards: "the commit or bug this protects",
+  run: async (s, t) => { ... } }
+```
+
+Throw to fail, return to pass, `throw new SkipError(why)` for a check that cannot run
+here. `s` is the Slot from [ui-drive.mjs](../scripts/ui-drive.mjs)'s `openSlot()`; `t`
+is `eq`/`ok`/`near`/`match`. The runner reloads between checks, so no check inherits
+another's DOM — but **the engine keeps its project, transport position and selection
+across a reload**, so each check must establish its own preconditions rather than
+assume a virgin session. The file's header comment carries the full rule list.
+
+The rule that bites hardest: **a page function is stringified, so it closes over
+nothing.** Hoisting a selector to a `const` and using it inside `s.eval` raises a
+`ReferenceError` in the page on every poll, which used to surface as a plain timeout
+blaming whatever you were waiting for — a dialog that had in fact opened correctly.
+`waitFor` now carries the last predicate error into its timeout message, so this
+announces itself instead of costing an hour.
 
 ## Running an area
 
-1. Start an **isolated** engine — never test against a live session. The recipe is in
-   [DEBUGGING_UI.md § Isolate the data](DEBUGGING_UI.md#isolate-the-data-not-just-the-port);
-   the short version is a redirected `APPDATA`, `--port 8617 --no-browser --driver null`.
-   This matters more than it sounds: the destructive project flows *auto-save* rather
-   than prompting, so a stray click during a test writes a real project to disk.
-2. Point the MCP browser at it and build a fixture (`/api/upload` for audio,
-   `cmd/clip.addMidi` + `cmd/notes.edit` for MIDI — see the same doc).
+1. Start an **isolated** engine — never test against a live session. `node
+   scripts/ui-drive.mjs up --slot N --fixture` does the whole thing (redirected
+   `APPDATA`, `--driver null`, own Chrome) and seeds 4 tracks, a MIDI clip, an audio
+   clip and a marker; the manual recipe is in [DEBUGGING_UI.md § Isolate the
+   data](DEBUGGING_UI.md#isolate-the-data-not-just-the-port). Isolation matters more
+   than it sounds: the destructive project flows *auto-save* rather than prompting, so
+   a stray click during a test writes a real project to disk.
+2. Drive it — `ui-drive.mjs`'s subcommands from a shell, or `openSlot()` from Node for
+   anything with control flow.
 3. Pull your area's cases out of `scripts/ui-cases.json` and work through them.
    Each case carries `steps`, `expected`, and an `assertion` you can hand straight to
    `evaluate_script`.
@@ -112,11 +154,28 @@ Recorded because each one cost real time and will cost it again:
   unknown `beat` key silently and defaults every note to `startBeat: 0`; the piano
   roll then correctly draws twelve notes stacked in a 12-pixel column. It reads as a
   broken renderer. The field is `startBeat`.
-- **`press_key` does not reproduce a real keyboard.** CDP delivered `key: "1"` for
+- **`press_key` does not reproduce a real keyboard.** The MCP delivered `key: "1"` for
   `Ctrl+Alt+Shift+1`, so a genuinely dead shortcut *passed* — a real US keyboard sends
-  `key: "!"`. When a shortcut involves Shift and a digit or punctuation, dispatch a
-  hand-built `KeyboardEvent` with the character a real layout produces, and assert on
-  `defaultPrevented`.
+  `key: "!"`. `ui-drive.mjs` goes through CDP's Input domain and gets this right
+  (`key:"!"`, `code:"Digit1"`); through the MCP, dispatch a hand-built `KeyboardEvent`
+  with the character a real layout produces and assert on `defaultPrevented`.
+- **A character's ASCII code is not its virtual key.** It happens to be, for letters and
+  digits only. `.` is ASCII 46, which is `VK_DELETE`; `'` is 39 (`End`), `-` is 45
+  (`Insert`), `[` is 91 (`LWin`). Chrome dispatches the virtual key, not the character,
+  so a harness that derives one from the other types text that silently vanishes and
+  presses editing keys instead: `"3.1.000"` arrived in the locate field as `"31000"`,
+  and the app dutifully jumped to bar 31000 — a *passing-looking* action with a wrong
+  target, and 15 seconds of timeout before anything said so. Punctuation needs the real
+  OEM codes (`.`→190/`Period`, `,`→188, `-`→189, `;`→186, `=`→187, `/`→191,
+  `` ` ``→192, `[`→219, `\`→220, `]`→221, `'`→222), and they do **not** change under
+  Shift — only `key`/`text` do, because the physical key is the same one.
+- **Fixture construction is not evidence.** The live page reacts while the fixture is
+  being built: the timeline requests waveform peaks the moment the upload lands, before
+  the engine's worker has written them, and that 404 is logged at error level. Any check
+  asserting "no console errors" then fails for something it did not cause. Fixed on both
+  ends — `openSlot` waits for peaks to exist and hands the slot over with an empty
+  console buffer — but the shape recurs: **clear the buffer at the boundary you are
+  measuring from, not at the start of the process.**
 - **Same-tick DOM reads lag React.** Reading `.mixer-strip` counts or overlay counts in
   the same `evaluate_script` that clicked something reports the *previous* render. An
   overlay that "leaked" was just an unflushed read. Split the click and the assertion
@@ -140,6 +199,7 @@ most likely to be re-reported.
 | 1 | **Bar numbers one too low everywhere.** The engine keys `timeSigMap` by a 0-based bar; `lib/time.ts` assumed 1-based. The project start displayed `0.1.000`, typing `3.1.000` located to the wrong bar, the ruler drew no line or label at beat 0, and Sheet Music (correctly `index + 1`) disagreed with the transport about the same bar. Its unit test hid it by feeding `{bar: 1}`, a shape the engine never sends. | `lib/time.ts`, `lib/time.test.ts`, `protocol/types.ts`, `Timeline/Ruler.tsx` |
 | 2 | **Numeric dialogs showed one value and applied another.** Out-of-range entries were clamped only on Apply, so the field kept displaying the typed number: the fade dialog showed `99 s` and applied `3 s`; Process → Gain showed `999 dB` and applied `48 dB`. Shared by gain, normalize, resample, time-stretch, pitch-shift, the velocity ops, delete-notes and DOP edit. Now clamps on blur, so typing decimals still works but the display cannot lie. | `Dialogs/fields.tsx`, `Timeline/FadeProcessDialog.tsx` |
 | 3 | **`Ctrl+Alt+Shift+1..4` (save layout) was dead on real keyboards.** The handler compared `e.key` against `"1".."4"`, but Shift makes that `"!@#$"`. Now keys off `e.code`, with `e.key` as fallback. | `lib/keyboard.ts` |
+| 4 | **A reloaded tab believed a dirty project was clean.** `dirty` lived only client-side and `HelloReply` carried no such field, so after any reload the `●` marker cleared while the engine still held unsaved edits — and because `autoSaveIfDirty` is dirty-gated, File ▸ New / Open / Recent / Close then skipped the auto-save-before-replace and discarded them with no prompt. A real data-loss path; needed the engine half (`sessionHello` now emits `projectIO.isDirty()`) as well as the UI half. Guarded by the `dirty-survives-reload` smoke check. | `engine/src/server/Api.cpp`, `store/store.ts` |
 
 And the batch applied from the verified list:
 
@@ -166,15 +226,6 @@ And the batch applied from the verified list:
 
 ### Confirmed, deliberately not fixed here
 
-- **`dirty` is never re-seeded after a reload or reconnect** (`store/store.ts`
-  `sendHello`). `HelloReply` carries no `dirty` field — verified over a probe socket:
-  the reply has no such key at top level or on `project`. So after any browser reload
-  the UI believes the project is clean while the engine still holds unsaved edits; the
-  `●` marker clears, and because `autoSaveIfDirty` is dirty-gated, File ▸ New / Open /
-  Recent / Close then skip the auto-save-before-replace entirely and the edits are
-  discarded with no prompt. **This is a data-loss path.** The fix needs an engine
-  change (`Api::sessionHello` emitting `projectIO.isDirty()`) plus the UI half, so it
-  is out of scope for a UI-only pass — but it is the most valuable thing left.
 - `shared/agent/capabilities.json` still documents `timeSigMap.bar` as 1-based. Fixing
   it means regenerating the catalog, which rewrites generated engine C++ and the
   checked sha — left alone rather than desynchronising a prebuilt binary.

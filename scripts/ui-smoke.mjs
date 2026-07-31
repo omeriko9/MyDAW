@@ -1,0 +1,453 @@
+#!/usr/bin/env node
+/**
+ * ui-smoke — a browser smoke suite for MyDAW.
+ *
+ *   node scripts/ui-smoke.mjs [--slot N] [--filter substr] [--headful] [--keep]
+ *
+ * Opens ONE slot (engine + Chrome + fixture, see scripts/ui-drive.mjs), runs every
+ * check in order against it, prints one line per check, and exits non-zero if any
+ * check failed or errored. `--keep` leaves the slot running for post-mortem
+ * poking; `--filter` matches the check id, title or area.
+ *
+ * The slot is the expensive part (~10 s), a check is cheap, so the suite pays for
+ * the browser once and reuses it — the reason ui-drive grew an API alongside its
+ * CLI. Between checks the runner calls s.reload(), so no check can inherit
+ * another's DOM, selection or open dialog.
+ *
+ * ------------------------------------------------------------ WRITING A CHECK
+ *
+ *   { id: "bars-1based", title: "...", area: "transport",
+ *     guards: "the commit or bug this protects",
+ *     run: async (s, t) => { ... } }
+ *
+ * A check FAILS by throwing (any assertion or unexpected error) and PASSES by
+ * returning. `s` is the Slot; `t` is the assert helper (t.eq/t.ok/t.near/t.match).
+ * A check that cannot run — feature absent, needs a real audio device — must
+ * `throw new SkipError("why")`; that reports SKIP and does not fail the run.
+ *
+ * Rules that came out of the last browser test pass, all of them paid for:
+ *
+ * - REACT DOES NOT FLUSH SYNCHRONOUSLY. Never assert in the same eval that
+ *   performed the action; act, then `await s.untilEval(...)` for the consequence.
+ * - The reload only resets the UI. The ENGINE keeps its project, transport
+ *   position, loop and selection across a reload, so a check must establish its
+ *   own preconditions (locate to 0, add the track it needs) instead of assuming
+ *   a virgin session.
+ * - Prefer trusted input (s.key/s.click/s.drag) over events dispatched from eval;
+ *   only trusted events carry what a real keyboard layout sends.
+ * - Canvas surfaces (clips, ruler, notes, waveforms) have NO accessibility nodes:
+ *   locate by geometry from getBoundingClientRect, assert via getImageData.
+ * - Menu-strip items are icon-only — match by aria-label ("File", "View", ...);
+ *   menu entries are `div.ctx-item` matched by exact text.
+ * - Bars are 1-based in the UI ("1.1.000" at project start); the wire is 0-based.
+ * - Engine truth comes from s.probe(); replies correlate on replyTo.
+ * - Toasts auto-dismiss (~5 s info / 10 s error): install a MutationObserver
+ *   BEFORE the action, never poll for one afterwards.
+ * - No sleeps as synchronisation, and no assertions on absolute pixel positions —
+ *   the viewport is whatever Chrome gave us. Assert on relative geometry, engine
+ *   state or DOM facts.
+ * - A page function passed to s.eval is stringified: it has no closure over the
+ *   check's variables. Interpolate what it needs into the source.
+ */
+
+import { pathToFileURL } from "node:url";
+import { openSlot } from "./ui-drive.mjs";
+
+/* ------------------------------------------------------------------ helpers */
+
+/** Thrown by a check that cannot run here. Reports SKIP, never fails the run. */
+export class SkipError extends Error {
+  constructor(why) { super(why); this.name = "SkipError"; }
+}
+
+export class AssertionError extends Error {
+  constructor(msg) { super(msg); this.name = "AssertionError"; }
+}
+
+const show = (v) => (typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v) ?? String(v));
+
+/** The whole assertion vocabulary. Every failure names the label and both values. */
+export const t = {
+  ok(cond, label) {
+    if (!cond) throw new AssertionError(`${label}: expected truthy, got ${show(cond)}`);
+  },
+  eq(actual, expected, label) {
+    const same = actual === expected || (actual !== null && typeof actual === "object" && show(actual) === show(expected));
+    if (!same) throw new AssertionError(`${label}: expected ${show(expected)}, got ${show(actual)}`);
+  },
+  near(actual, expected, tol, label) {
+    if (typeof actual !== "number" || !Number.isFinite(actual))
+      throw new AssertionError(`${label}: expected a number near ${expected}, got ${show(actual)}`);
+    if (Math.abs(actual - expected) > tol)
+      throw new AssertionError(`${label}: expected ${expected} ±${tol}, got ${actual} (off by ${(actual - expected).toFixed(4)})`);
+  },
+  match(str, regex, label) {
+    if (typeof str !== "string" || !regex.test(str))
+      throw new AssertionError(`${label}: expected ${regex} to match ${show(str)}`);
+  },
+};
+
+/* ------------------------------------------------------------------- checks */
+
+export const checks = [
+  {
+    id: "mount-clean",
+    title: "the app mounts with no console errors",
+    area: "app",
+    guards: "a mount-time throw or a React error boundary would otherwise let every DOM check pass against a half-dead page",
+    run: async (s, tt) => {
+      // reload() clears the console buffer at the document boundary, so what is left
+      // afterwards belongs to THIS mount — no matter where this check runs in the suite.
+      await s.reload();
+
+      // The page really is the app, not an error boundary that swallowed it. Asserted
+      // BEFORE the console is read: reload() returns as soon as the app mounts, and the
+      // interesting logs come from the render that follows it (waveforms, meters, the
+      // project arriving). Reading the buffer first only ever saw an empty page.
+      const dom = await s.eval(() => ({
+        root: document.querySelector("#root")?.childElementCount ?? 0,
+        headers: document.querySelectorAll(".tlh-row").length,
+        transport: !!document.querySelector(".tb-pos-main"),
+        status: document.querySelector(".sb-dot")?.dataset.ok ?? null,
+      }));
+      tt.ok(dom.root > 0, "#root has children");
+      tt.ok(dom.transport, "transport position readout is present");
+      tt.eq(dom.status, "true", "status bar reports the engine connected");
+      tt.ok(dom.headers >= 4, `fixture track headers rendered (got ${dom.headers})`);
+
+      // Waveform peaks are the last thing to load and the only fetch that used to race
+      // this check; openSlot's fixture now blocks until they exist, so a peaks 404 here
+      // is a real regression rather than the timing artefact it once was.
+      const errs = s.consoleErrors();
+      tt.eq(errs.length, 0, `console errors during mount [${errs.map((e) => `${e.source}: ${e.text}`).join(" | ")}]`);
+    },
+  },
+
+  {
+    id: "bars-1based",
+    title: 'the transport reads "1.1.000" at beat 0 and typing "3.1.000" locates to 0:04.000',
+    area: "transport",
+    guards: "f9a5309/1314840 — the engine keys timeSigMap by a 0-BASED bar and lib/time.ts assumed 1-based, so beat 0 read '0.1.000' and typing a bar located one bar early",
+    run: async (s, tt) => {
+      // The engine survives the reload, so the playhead is wherever the last check
+      // left it — put it back at the project start rather than assuming.
+      await s.probe("transport/locate", { beat: 0 });
+      await s.untilEval("readout returns to the project start", () =>
+        document.querySelector(".tb-pos-main")?.textContent === "1.1.000");
+
+      const start = await s.eval(() => ({
+        bars: document.querySelector(".tb-pos-main")?.textContent,
+        time: document.querySelector(".tb-pos-sub")?.textContent,
+      }));
+      tt.eq(start.bars, "1.1.000", "bars.beats.ticks at beat 0");
+      tt.eq(start.time, "0:00.000", "seconds readout at beat 0");
+
+      // Double-click the readout to type a location. Geometry, not coordinates: the
+      // window size is whatever Chrome handed us.
+      const box = await s.eval(() => {
+        const el = document.querySelector(".tb-pos-main");
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await s.click(box.x, box.y, { clicks: 2 });
+      await s.untilEval("locate field opens", () => !!document.querySelector("input.tb-pos-input"));
+
+      // The field opens with its text selected, so typing replaces it.
+      await s.type("3.1.000");
+      await s.key("Enter");
+
+      await s.untilEval("readout follows the locate", () =>
+        document.querySelector(".tb-pos-main")?.textContent === "3.1.000");
+      const after = await s.eval(() => document.querySelector(".tb-pos-sub")?.textContent);
+      tt.eq(after, "0:04.000", "bar 3 is 8 beats = 4 s at 120 bpm");
+
+      // And the engine agrees — the readout could be lying on its own.
+      const reply = await s.probe("transport/pause");
+      tt.near(reply.payload.beat, 8, 1e-6, "engine playhead after locating to bar 3");
+    },
+  },
+
+  {
+    id: "cycle-wraps",
+    title: "a 0..8 beat cycle wraps at the right locator instead of running past it",
+    area: "transport",
+    guards: "f9a5309 — nextSpans() only split a block when pos < le && pos+frames > le, so a BLOCK-ALIGNED loop end (8 beats at 120bpm/48k is exactly 3000 x 64 frames — the default cycle) never wrapped",
+    run: async (s, tt) => {
+      await s.probe("cmd/loop.set", { startBeat: 0, endBeat: 8, enabled: true });
+      await s.probe("transport/locate", { beat: 0 });
+      try {
+        await s.probe("transport/play");
+        // Sample the readout in the page: 6 s at 120 bpm is 1.5 cycles, so a healthy
+        // loop must turn over at least once and never show more than the 4 s locator.
+        const samples = await s.eval(`(async () => {
+          const out = [];
+          await new Promise((done) => {
+            const t0 = Date.now();
+            const iv = setInterval(() => {
+              out.push(document.querySelector('.tb-pos-sub')?.textContent ?? '');
+              if (Date.now() - t0 >= 6000) { clearInterval(iv); done(); }
+            }, 50);
+          });
+          return out;
+        })()`, { timeoutMs: 30000 });
+
+        const secs = samples
+          .map((s0) => /^(\d+):(\d\d)\.(\d\d\d)$/.exec(s0))
+          .filter(Boolean)
+          .map((m) => Number(m[1]) * 60 + Number(m[2]) + Number(m[3]) / 1000);
+        tt.ok(secs.length > 40, `sampled the position readout (${secs.length} of ${samples.length} parsed)`);
+        tt.ok(Math.max(...secs) > 1, `the transport actually moved (max ${Math.max(...secs)}s)`);
+
+        const back = secs.filter((v, i) => i > 0 && v < secs[i - 1] - 0.05).length;
+        tt.ok(back >= 1, `cycle wrapped back to the left locator at least once (${back} backward steps, max ${Math.max(...secs)}s)`);
+        // 4.0 s is the locator; allow one block of overshoot in the readout.
+        tt.ok(Math.max(...secs) <= 4.1, `never played past the right locator (max ${Math.max(...secs)}s, locator 4.000s)`);
+      } finally {
+        await s.probe("transport/stop");
+        await s.probe("cmd/loop.set", { startBeat: 0, endBeat: 8, enabled: false });
+      }
+    },
+  },
+
+  {
+    id: "dirty-survives-reload",
+    title: "the unsaved-changes marker survives a reload",
+    area: "project",
+    guards: "f9a5309 — dirty lived client-side and HelloReply never carried it, so a reloaded tab believed a dirty project was clean and autoSaveIfDirty() then skipped the save-before-replace (real data loss)",
+    run: async (s, tt) => {
+      await s.probe("cmd/track.add", { kind: "midi", name: "Dirty Marker" });
+      await s.untilEval("title marks unsaved changes before the reload", () =>
+        document.title.startsWith("●") && !!document.querySelector(".sb-dirty"));
+
+      await s.reload();
+
+      // The engine still holds the unsaved edit; the fresh client must be told.
+      await s.untilEval("title still marks unsaved changes after the reload", () =>
+        document.title.startsWith("●"));
+      const after = await s.eval(() => ({
+        title: document.title,
+        dirty: !!document.querySelector(".sb-dirty"),
+      }));
+      tt.match(after.title, /^● /, "window title keeps its dirty bullet after a reload");
+      tt.ok(after.dirty, "status bar keeps its .sb-dirty marker after a reload");
+    },
+  },
+
+  {
+    id: "layout-slot-save",
+    title: "Ctrl+Alt+Shift+1 saves a layout slot",
+    area: "menus-layout",
+    guards: "1314840 — the handler compared e.key against \"1\"..\"4\", but Shift turns those into \"!@#$\" on a US layout, so the SAVE half of the layout shortcut was dead on real hardware; it keys off e.code now. Only reachable through trusted input: the MCP's synthetic press_key reported key:\"1\" and passed the dead shortcut",
+    run: async (s, tt) => {
+      // Own precondition: the slots pref survives a reload, so clear it and remount
+      // rather than assuming this is the first check to touch it.
+      await s.eval(() => { localStorage.removeItem("mydaw.layouts.slots"); return true; });
+      await s.reload();
+      tt.eq(await s.eval(() => localStorage.getItem("mydaw.layouts.slots")), null,
+        "layout slots start empty");
+
+      await s.key("Control+Alt+Shift+1");
+      await s.untilEval("slot 1 is written", () => {
+        const raw = localStorage.getItem("mydaw.layouts.slots");
+        if (!raw) return false;
+        const s0 = JSON.parse(raw)[0];
+        return !!(s0 && s0.panels && s0.sizes);
+      });
+
+      const slots = await s.eval(() => JSON.parse(localStorage.getItem("mydaw.layouts.slots")));
+      tt.eq(slots.length, 4, "four slots are kept");
+      tt.ok(slots[1] === null && slots[2] === null && slots[3] === null,
+        `only slot 1 was written (got ${JSON.stringify(slots.map((x) => x && x.name))})`);
+      // A real snapshot, not a stub — it has to carry back the panel state and the
+      // pane sizes, or applying it later restores nothing.
+      tt.ok(typeof slots[0].name === "string" && slots[0].name.length > 0, "slot 1 carries a name");
+      tt.ok(typeof slots[0].panels.bottomTab !== "undefined", "the snapshot records the dock tab");
+      tt.ok(typeof slots[0].sizes.browserW === "number", "the snapshot records pane sizes");
+    },
+  },
+
+  {
+    id: "palette-tab-keeps-keyboard",
+    title: "Tab inside the command palette does not strand focus and freeze the keyboard",
+    area: "palette-keyboard",
+    guards: "1314840 — the input is the palette's only key handler AND its only focusable element, so Tab moved focus out and killed Esc/arrows/Enter; because the palette carries .modal-overlay the global handler was inert too, leaving the whole app keyboard-dead with no way out but the mouse",
+    run: async (s, tt) => {
+      await s.key("Control+k");
+      await s.untilEval("palette opens", () => !!document.querySelector(".cp-overlay"));
+      tt.eq(await s.eval(() => document.activeElement?.className ?? null), "cp-input",
+        "the palette input takes focus on open");
+
+      await s.key("Tab");
+      // Same-tick reads lag React, but focus moves synchronously — still, give the
+      // app a render to be wrong in before believing it.
+      await s.untilEval("focus stays on the palette input", () =>
+        document.activeElement?.className === "cp-input");
+
+      // The real consequence of losing focus was that Escape stopped working, so
+      // assert the escape hatch itself rather than only where focus sits.
+      await s.key("Escape");
+      await s.untilEval("Escape still closes the palette after Tab", () =>
+        !document.querySelector(".cp-overlay"));
+    },
+  },
+
+  {
+    id: "dialog-clamps-on-blur",
+    title: "Process ▸ Gain shows the clamped value instead of applying a different one",
+    area: "dialogs-modals",
+    guards: "1314840 — out-of-range entries were clamped only on Apply, so the field kept displaying the typed number: Gain showed 999 dB and applied 48. Shared by gain, normalize, resample, time-stretch, pitch-shift, the velocity ops, delete-notes and DOP edit, so one regression here lies in nine dialogs",
+    run: async (s, tt) => {
+      // Locate the fixture's audio clip by geometry — the clip surface is a canvas
+      // with no accessibility nodes. Lanes line up with the track header rows.
+      const target = await s.eval(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const row = rows.find((r) => r.textContent.trim().startsWith("Audio 1"));
+        const canvas = document.querySelector("canvas.tl-clipcanvas");
+        if (!row || !canvas) return null;
+        const rb = row.getBoundingClientRect();
+        const cb = canvas.getBoundingClientRect();
+        return { x: cb.left + 55, y: rb.top + rb.height / 2 };
+      });
+      tt.ok(target, "found the Audio 1 lane and the clip surface");
+
+      const clickItem = async (text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(".ctx-item")]
+            .find((i) => i.textContent.trim() === ${JSON.stringify(text)});
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`context-menu item not found: ${text}`);
+        await s.click(box.x, box.y);
+      };
+
+      await s.click(target.x, target.y, { button: "right" });
+      await s.untilEval("clip context menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Process"));
+      await clickItem("Process");
+      await s.untilEval("the Process submenu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Gain…"));
+      await clickItem("Gain…");
+
+      // NB: the selector is written out in full at every use. A function handed to
+      // s.eval is stringified and has no closure over this scope, so hoisting it to a
+      // const here would evaluate as `undefined` in the page — silently, on every poll,
+      // until the wait times out and blames the dialog for not opening.
+      await s.untilEval("the gain dialog opens", () =>
+        !!document.querySelector(".modal-overlay input[type=number]"));
+      const range = await s.eval(() => {
+        const el = document.querySelector(".modal-overlay input[type=number]");
+        return { min: el.min, max: el.max, focused: document.activeElement === el };
+      });
+      tt.eq(range.max, "48", "the dB field declares its ceiling");
+      tt.ok(range.focused, "the first field takes focus, so typing lands in it");
+
+      // Type well past the ceiling. The field must keep showing what Apply would use.
+      await s.key("Control+a");
+      await s.type("999");
+      await s.untilEval("the field accepts the typed value while typing", () =>
+        document.querySelector(".modal-overlay input[type=number]")?.value === "999");
+
+      await s.key("Tab"); // blur
+      await s.untilEval("the field clamps on blur", () =>
+        document.querySelector(".modal-overlay input[type=number]")?.value === "48");
+
+      // Leave nothing applied — this check must not mutate the project.
+      await s.key("Escape");
+      await s.untilEval("the dialog closes without applying", () =>
+        !document.querySelector(".modal-overlay"));
+    },
+  },
+];
+
+/* ------------------------------------------------------------------- runner */
+
+const argv = process.argv.slice(2);
+const arg = (name, dflt) => {
+  const i = argv.indexOf(`--${name}`);
+  return i >= 0 && i + 1 < argv.length && !argv[i + 1].startsWith("--") ? argv[i + 1] : dflt;
+};
+const flag = (name) => argv.includes(`--${name}`);
+
+const PAD = 26;
+const line = (verdict, c, ms, msg) =>
+  console.log(
+    `${verdict.padEnd(4)} ${c.id.padEnd(PAD)} ${String(ms).padStart(5)}ms  ${c.title}` +
+    (msg ? `\n       ${msg.replace(/\n/g, "\n       ")}` : ""),
+  );
+
+async function main() {
+  // Slot 8 by default: hand-driven ui-drive slots live at 1..4, and the suite must
+  // never kill a slot someone is debugging in.
+  const slot = Number(arg("slot", "8"));
+  const filter = arg("filter", "");
+  const picked = filter
+    ? checks.filter((c) => [c.id, c.title, c.area].some((f) => f.toLowerCase().includes(filter.toLowerCase())))
+    : checks;
+  if (picked.length === 0) {
+    console.log(`no checks match --filter ${filter}`);
+    process.exit(1);
+  }
+
+  console.log(`ui-smoke: ${picked.length} check(s) on slot ${slot}${filter ? ` (filter "${filter}")` : ""}`);
+  const t0 = Date.now();
+  const s = await openSlot({ slot, fixture: true, headful: flag("headful") });
+  console.log(`slot up in ${((Date.now() - t0) / 1000).toFixed(1)}s — engine ${s.enginePort}, debug ${s.debugPort}\n`);
+
+  let pass = 0, fail = 0, skip = 0;
+  try {
+    for (let i = 0; i < picked.length; i++) {
+      const c = picked[i];
+      // No check may inherit another's DOM. The engine state is NOT reset — checks
+      // establish their own preconditions.
+      if (i > 0) {
+        try {
+          await s.reload();
+        } catch (e) {
+          fail++;
+          line("FAIL", c, 0, `could not reload between checks: ${e.message}`);
+          continue;
+        }
+      }
+      const t1 = Date.now();
+      try {
+        await c.run(s, t);
+        pass++;
+        line("PASS", c, Date.now() - t1);
+      } catch (e) {
+        if (e instanceof SkipError || e?.name === "SkipError") {
+          skip++;
+          line("SKIP", c, Date.now() - t1, e.message);
+        } else {
+          fail++;
+          const detail = e?.name === "AssertionError" ? e.message : `${e?.name ?? "Error"}: ${e?.message ?? String(e)}`;
+          line("FAIL", c, Date.now() - t1, detail);
+        }
+      }
+    }
+  } finally {
+    if (flag("keep")) {
+      s.detach();
+      console.log(`\nslot ${slot} left up: ${s.url} (node scripts/ui-drive.mjs down --slot ${slot})`);
+    } else {
+      await s.close();
+    }
+  }
+
+  console.log(
+    `\n${pass}/${picked.length} passed` +
+    (fail ? `, ${fail} failed` : "") +
+    (skip ? `, ${skip} skipped` : "") +
+    ` in ${((Date.now() - t0) / 1000).toFixed(1)}s`,
+  );
+  process.exit(fail > 0 ? 1 : 0);
+}
+
+// Importing this file (for SkipError, `t` or `checks`) must not run the suite.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  main().catch((e) => {
+    console.error(`ui-smoke: ${e?.stack ?? e}`);
+    process.exit(1);
+  });
+}

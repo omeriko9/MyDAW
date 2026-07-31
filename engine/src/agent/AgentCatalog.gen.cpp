@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "82472863fded739a8847bb3e2f25171bdcdf7d6fe9773c3f12b7cd37e4b98045";
+const char kAgentCatalogSha256[] = "f3530701778a7df7433f68af5f3b40594b7cd9699d93b119e45bf45775fbb475";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -3626,7 +3626,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     },
     "TimeSigEntry": {
       "additionalProperties": false,
-      "description": "timeSigMap entry — bar is 1-based; v1: single entry (SPEC §6).",
+      "description": "timeSigMap entry — bar is 0-based: bar 0 is the project start, which the ruler and transport display as bar 1. Note this differs from automation.ramp/clear, whose startBar/endBar are 1-based. v1: single entry at bar 0 (SPEC §6).",
       "properties": {
         "bar": {
           "type": "number"
