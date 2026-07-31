@@ -47,6 +47,7 @@ import { IconButton } from "../common/IconButton";
 import { Icon } from "../common/icons";
 import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
+import { cycleReason, wouldCycle } from "../../lib/routing";
 
 function trackNameById(project: Project, id: number): string {
   if (project.masterTrack.id === id) return "Master";
@@ -203,18 +204,26 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
     : [];
 
   const addSendMenu = (e: React.MouseEvent) => {
-    // Same rule as the mixer strip's '+' (SendsBlock): a bus this track already sends to is
-    // not offered — the engine has no duplicate check, so it would just stack a second send.
+    // Same rules as the mixer strip's '+' (SendsBlock), via lib/routing so the two menus
+    // cannot drift: a bus this track already sends to is not offered (the engine has no
+    // duplicate check, so it would just stack a second send), and one that would close a
+    // routing loop is shown greyed out with the reason rather than as a live item whose
+    // only feedback is an error line at the bottom of the pane.
     const used = new Set(track.sends.map((s) => s.destTrackId));
     const candidates = buses.filter((b) => !used.has(b.id));
     const items: MenuEntry[] =
       candidates.length > 0
-        ? candidates.map((b) => ({
-            label: b.name,
-            onClick: () => {
-              void addSend(id, b.id).catch((er) => setErr(errText(er)));
-            },
-          }))
+        ? candidates.map((b) => {
+            const cycles = wouldCycle(buses, id, b.id);
+            return {
+              label: b.name,
+              disabled: cycles,
+              title: cycles ? cycleReason(b.name) : undefined,
+              onClick: () => {
+                void addSend(id, b.id).catch((er) => setErr(errText(er)));
+              },
+            };
+          })
         : [
             {
               label: buses.length === 0 ? "No bus tracks — add a bus first" : "All buses already used",
