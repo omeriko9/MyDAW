@@ -70,6 +70,9 @@ cd ui; npm test                   # 401 vitest cases over the pure UI logic
 `ui-smoke.mjs` needs `ui/dist` and the engine already built — it serves the former and
 spawns the latter. See [UI_TEST_SUITE.md](UI_TEST_SUITE.md) for what belongs in it.
 
+These are gates, not suggestions: a change is not done until all four are green, and a
+UI bug that no unit test can reach should leave a new `ui-smoke` check behind it.
+
 ## Notes
 
 - Static CRT (`/MT`) everywhere — the exes have no VC runtime dependency.
