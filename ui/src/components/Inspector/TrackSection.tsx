@@ -320,6 +320,21 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
               tooltip="Input monitoring"
             />
           </div>
+          <div className="insp-row">
+            <span className="insp-label">Input Gain</span>
+            <NumberDrag
+              value={track.inputGainDb ?? 0}
+              min={-24}
+              max={24}
+              step={0.1}
+              precision={1}
+              units="dB"
+              width={72}
+              title="Input gain (pre-insert). The recorded file stays raw — this scales monitoring, metering and playback, not the take."
+              onChange={(db) => dragTrack(id, { inputGainDb: db })}
+              onCommit={(db) => void commitTrack(id, { inputGainDb: db })}
+            />
+          </div>
         </>
       )}
 

@@ -48,6 +48,8 @@ export const MIN_TRACK_H = 28;
 export const MAX_TRACK_H = 400;
 /** Automation lane row height (not affected by vertical zoom). */
 export const LANE_H = 44;
+/** Take lane row height (fixed, like automation lanes). */
+export const TAKE_LANE_H = 40;
 
 /** store.viewport.zoomY === BASE_ZOOM_Y → track-height scale 1. */
 export const BASE_ZOOM_Y = 16;
@@ -107,7 +109,22 @@ export interface LaneRowL {
   depth: number;
 }
 
-export type Row = TrackRowL | LaneRowL;
+/**
+ * One row per take-LANE INDEX (SPEC §8.7): a track's folders can differ in lane count,
+ * so the row count is the max over its folders and row `laneIndex` draws every folder's
+ * lane `laneIndex` within that folder's beat span (a folder with fewer lanes simply
+ * contributes nothing to the extra rows).
+ */
+export interface TakeLaneRowL {
+  kind: "takelane";
+  track: Track;
+  laneIndex: number;
+  top: number;
+  height: number;
+  depth: number;
+}
+
+export type Row = TrackRowL | LaneRowL | TakeLaneRowL;
 
 export interface RowsOptions {
   collapsedFolders: ReadonlySet<number>;
@@ -115,6 +132,8 @@ export interface RowsOptions {
   autoExpanded: ReadonlySet<number>;
   /** locally added (still point-less) lanes per trackId */
   extraLanes: ReadonlyMap<number, readonly string[]>;
+  /** tracks with their take-folder lanes expanded (SPEC §8.7) */
+  takesExpanded?: ReadonlySet<number>;
   /** live height preview during a header height drag (display px) */
   heightOverride?: { trackId: number; height: number } | null;
   vScale: number;
@@ -168,6 +187,15 @@ export function computeRows(project: Project | null, o: RowsOptions): Row[] {
     const depth = depthOf(t);
     rows.push({ kind: "track", track: t, depth, top, height: h, flatIndex });
     top += h;
+    // Take lanes come FIRST (directly under the material they stack), automation after.
+    const folders = t.takeFolders ?? [];
+    if (folders.length > 0 && o.takesExpanded?.has(t.id)) {
+      const nLanes = folders.reduce((m, f) => Math.max(m, f.lanes.length), 0);
+      for (let li = 0; li < nLanes; li++) {
+        rows.push({ kind: "takelane", track: t, laneIndex: li, top, height: TAKE_LANE_H, depth });
+        top += TAKE_LANE_H;
+      }
+    }
     if (o.autoExpanded.has(t.id)) {
       const seen = new Set<string>();
       const extras = o.extraLanes.get(t.id) ?? [];

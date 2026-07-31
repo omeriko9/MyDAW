@@ -621,6 +621,15 @@ bool App::renderRange(int64_t startSample, int64_t endSample, int blockSize,
     return graph->renderOffline(model, startSample, endSample, blockSize, sink, progress, err);
 }
 
+bool App::renderRangeStems(int64_t startSample, int64_t endSample, int blockSize,
+                           const std::function<void(const float* const*, int, int)>& sink,
+                           const std::function<void(uint64_t, const float* const*, int, int)>& stemSink,
+                           const std::vector<uint64_t>& stemTrackIds,
+                           std::atomic<float>* progress, std::string& err) {
+    return graph->renderOffline(model, startSample, endSample, blockSize, sink, progress,
+                                err, stemSink, stemTrackIds);
+}
+
 void App::requestGraphRebuild() {
     pendingRebuild_.store(true, std::memory_order_release);
     jobCv_.notify_all();
@@ -969,15 +978,20 @@ void App::broadcastMeters() {
         return;
     const uint64_t masterId = model.project.masterTrack.id;
     json tracks = json::object();
+    json inputs = json::object(); // input meters (SPEC §5.5), keyed by PLAIN track id
     json master = json::array({0.0f, 0.0f, 0.0f, 0.0f});
     for (const Meters::Reading& r : readings) {
         json v = json::array({r.peakL, r.peakR, r.rmsL, r.rmsR});
-        if (r.trackId == masterId)
+        if (r.trackId & Meters::kInputMeterKeyBit)
+            inputs[std::to_string(r.trackId & ~Meters::kInputMeterKeyBit)] = std::move(v);
+        else if (r.trackId == masterId)
             master = std::move(v);
         else
             tracks[std::to_string(r.trackId)] = std::move(v);
     }
-    broadcastEvent("event/meters", json{{"tracks", std::move(tracks)}, {"master", std::move(master)}});
+    broadcastEvent("event/meters", json{{"tracks", std::move(tracks)},
+                                        {"inputs", std::move(inputs)},
+                                        {"master", std::move(master)}});
 }
 
 // ---------------------------------------------------------------------------

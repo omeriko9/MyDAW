@@ -147,6 +147,14 @@ public:
     bool renderRange(int64_t startSample, int64_t endSample, int blockSize,
                      const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
                      std::atomic<float>* progress, std::string& err);
+    // Stem-export variant (SPEC §5.5): same single pass, plus a per-track tap invoked
+    // for every id in stemTrackIds after each block (AudioGraph::renderOffline stems).
+    bool renderRangeStems(int64_t startSample, int64_t endSample, int blockSize,
+                          const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
+                          const std::function<void(uint64_t trackId, const float* const* ch,
+                                                   int numCh, int frames)>& stemSink,
+                          const std::vector<uint64_t>& stemTrackIds,
+                          std::atomic<float>* progress, std::string& err);
     // midi/preview: inject a live note on/off (channel 0) into `trackId`'s MIDI path via
     // AudioGraph::injectLiveMidi — audible while stopped and regardless of arm. Main thread.
     void previewNote(uint64_t trackId, int pitch, int velocity, bool on);

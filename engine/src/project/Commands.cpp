@@ -771,6 +771,47 @@ json CommandProcessor::execute(const std::string& type, const json& payload,
     return reply;
 }
 
+json CommandProcessor::executeInternalFn(
+    const std::function<json(Model&, CmdResult&)>& fn, std::string& errCode,
+    std::string& errMsg) {
+    errCode.clear();
+    errMsg.clear();
+    if (!ctx_.model) {
+        errCode = "no_model";
+        errMsg = "engine model not ready";
+        return json();
+    }
+    // Mirrors execute()'s non-transient tail; a pending gesture baseline is honored the
+    // same way so an abandoned drag folds into this entry (the desired revert anyway).
+    json before = gestureBefore_ ? *gestureBefore_ : toJson(model().project);
+
+    CmdResult r;
+    json reply = fn(model(), r);
+    if (!r.errCode.empty()) {
+        errCode = r.errCode;
+        errMsg = r.errMsg.empty() ? r.errCode : r.errMsg;
+        return json();
+    }
+
+    if (r.structural)
+        rebuildGraph();
+    if (!r.mutated)
+        return reply;
+
+    if (ctx_.undoStack && !r.skipUndo) {
+        UndoEntry e;
+        e.label = r.label.empty() ? "Edit" : r.label;
+        e.before = std::move(before);
+        e.after = toJson(model().project);
+        e.pluginChunks = std::move(r.pluginChunks);
+        ctx_.undoStack->push(std::move(e));
+    }
+    gestureBefore_.reset();
+    markDirty();
+    broadcastChanges(r);
+    return reply;
+}
+
 json CommandProcessor::executeBatch(const json& payload, std::string& errCode,
                                     std::string& errMsg) {
     errCode.clear();
@@ -1300,6 +1341,11 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         }
         hasMidiTarget = true;
     }
+    // Pre-validate (like midiTarget above): failing checks must run BEFORE any patch
+    // key mutates the model or pushes RT params, or an error reply leaves half the
+    // patch silently applied with no event, no undo entry and no dirty mark.
+    if (hasKey(patch, "inputGainDb") && t->kind != TrackKind::Audio)
+        return r.fail("bad_request", "inputGainDb applies to audio tracks only");
 
     bool any = false;
     bool mixerOnly = true;
@@ -1339,6 +1385,20 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         captureAutomation(id, "pan", t->pan, transient, r);
         any = true;
     }
+    if (hasKey(patch, "inputGainDb")) {
+        // Pre-insert input gain (SPEC §5.5): audio tracks only (pre-validated above so
+        // a rejection never partially applies the patch); the recorded FILE stays raw
+        // (the record tap reads the driver buffers upstream of the graph).
+        // Deliberately NOT automatable (no ParamRef kind) — no captureAutomation.
+        t->inputGainDb =
+            clampd(getOr<double>(patch, "inputGainDb", t->inputGainDb), -24.0, 24.0);
+        ParamMsg msg;
+        msg.target = ParamMsg::Target::InputGain;
+        msg.trackId = id;
+        msg.value = static_cast<float>(std::pow(10.0, t->inputGainDb / 20.0));
+        pushParam(msg);
+        any = true;
+    }
     if (hasKey(patch, "vcaId")) {
         const uint64_t vid = getOr<uint64_t>(patch, "vcaId", 0);
         if (vid != 0 && !m.vcaById(vid))
@@ -1363,7 +1423,13 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         t->recordArm = getOr<bool>(patch, "recordArm", t->recordArm);
         any = true;
         mixerOnly = false;
-        inputChanged = t->kind == TrackKind::Audio; // audio arming (re)opens capture
+        if (t->kind == TrackKind::Audio) {
+            inputChanged = true; // audio arming (re)opens capture
+            // The input-meter slot (SPEC §5.5) is acquired at plan build gated on
+            // arm||monitor, so arming must rebuild or the meter won't appear until
+            // some unrelated structural edit does it.
+            r.structural = true;
+        }
     }
     if (hasKey(patch, "monitor")) {
         t->monitor = getOr<bool>(patch, "monitor", t->monitor);

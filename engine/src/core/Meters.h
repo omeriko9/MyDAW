@@ -53,6 +53,13 @@ class Meters {
 public:
     static constexpr int kMaxSlots = 512;
 
+    // Composite-key bit for INPUT meter slots (SPEC §5.5): an armed/monitoring audio
+    // track's post-input-gain capture level lives in slot `trackId | kInputMeterKeyBit`,
+    // reusing this pool with a disjoint key space. Engine-internal — App::broadcastMeters
+    // strips the bit and emits plain track ids under a separate "inputs" object, so the
+    // UI never sees a composite id.
+    static constexpr uint64_t kInputMeterKeyBit = 1ull << 63;
+
     struct Reading {
         uint64_t trackId = 0;
         float peakL = 0.0f, peakR = 0.0f, rmsL = 0.0f, rmsR = 0.0f;

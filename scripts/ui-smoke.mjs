@@ -1302,6 +1302,94 @@ export const checks = [
       tt.near((await findClip()).clip.startBeat, 0, 1e-9, "the clip is back where the fixture put it");
     },
   },
+
+  {
+    id: "take-lanes-inline-comp",
+    title: "take folders draw inline: T expands lanes, click picks a take, swipe comps a range",
+    area: "timeline-takes",
+    guards:
+      "SPEC §8.7 — cmd/take.create moves clips OFF Track.clips, so a take folder used to render " +
+      "as EMPTY space in the arrangement and the comp was editable only in the Inspector. The " +
+      "swipe assertion is engine-verified: the comp boundaries must land where the drag went.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32; // px per beat, pinned below
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+
+      const hello = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+
+      // Seed engine-side (survives the reload): stack the fixture MIDI clip + a copy
+      // as two takes of one folder.
+      let proj = await hello();
+      const mt = proj.tracks.find((t) => t.name === "MIDI 1");
+      tt.ok(mt && mt.clips.length >= 1, "fixture MIDI clip is present");
+      await s.probe("cmd/clip.duplicate", { clipIds: [mt.clips[0].id], atSource: true });
+      proj = await hello();
+      const clipIds = proj.tracks.find((t) => t.id === mt.id).clips.map((c) => c.id);
+      tt.eq(clipIds.length, 2, "two stacked clips to fold into takes");
+      const folder = (await s.probe("cmd/take.create", { trackId: mt.id, clipIds })).payload.folder;
+      tt.eq(folder.lanes.length, 2, "the folder stacked them as two lanes");
+      await s.reload();
+
+      // The header grows a T toggle only for tracks WITH folders; expanding it adds
+      // one .tlh-takelane header row per lane (the DOM half of the canvas rows).
+      await s.untilEval("the takes toggle appears on the folder's track", () =>
+        [...document.querySelectorAll(".tlh-row")].some(
+          (r) => r.textContent.includes("MIDI 1") && r.querySelector(".tlh-takes-toggle"),
+        ));
+      const tRect = await s.eval(`(() => {
+        const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.includes("MIDI 1"));
+        const b = row.querySelector(".tlh-takes-toggle").getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      })()`);
+      await s.click(tRect.x, tRect.y);
+      await s.untilEval("expanding shows one lane row per take", () =>
+        document.querySelectorAll(".tlh-takelane").length === 2);
+
+      const geom = await s.eval(`(() => {
+        const lanes = [...document.querySelectorAll(".tlh-takelane")].map((el) => {
+          const b = el.getBoundingClientRect();
+          return b.top + b.height / 2;
+        });
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return { lanes, left: cb.left };
+      })()`);
+      tt.eq(geom.lanes.length, 2, "located both take-lane bands");
+
+      // Click take 2's lane at beat 1 → that take plays for the whole folder.
+      await s.click(geom.left + 1 * ZOOM_X, geom.lanes[1]);
+      await s.until("clicking a lane picks that take whole-span", async () => {
+        const f = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
+        return !!f && f.comp.length === 1 && f.comp[0].lane === 1;
+      });
+
+      // Swipe take 1's lane across beats 2→4 → only that range comps to lane 0,
+      // with take 2 restored after the range (paintComp semantics, engine-verified).
+      await s.drag(
+        [geom.left + 2 * ZOOM_X, geom.lanes[0]],
+        [geom.left + 4 * ZOOM_X, geom.lanes[0]],
+        12,
+      );
+      await s.until("the swipe comps [2,4) to take 1 and restores take 2 after", async () => {
+        const f = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
+        return (
+          !!f && f.comp.length === 3 &&
+          f.comp[0].lane === 1 && f.comp[1].lane === 0 && f.comp[2].lane === 1
+        );
+      });
+      const f = (await hello()).tracks.find((t) => t.id === mt.id).takeFolders[0];
+      tt.near(f.comp[1].startBeat, 2, 0.1, "the swipe's press beat became the comp boundary");
+      tt.near(f.comp[2].startBeat, 4, 0.1, "the swipe's release beat closed the range");
+
+      // Tidy: flatten so a later check (or re-run against a live slot) sees the
+      // fixture track without a folder.
+      await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: f.id });
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */

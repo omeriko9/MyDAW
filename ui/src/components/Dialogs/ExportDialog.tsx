@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from "react";
-import type { ExportFormat, Project } from "../../protocol/types";
+import type { ExportFormat, ExportStemFile, Project } from "../../protocol/types";
 import { numberIn, oneOf, usePrefState } from "../../lib/prefs";
 import { useStore } from "../../store/store";
 import { renderExport } from "../../store/actions";
@@ -49,7 +49,8 @@ function formatFor(codec: Codec, kbps: number): ExportFormat {
 type Phase =
   | { kind: "config" }
   | { kind: "exporting" }
-  | { kind: "done"; path: string; seconds: number; lufs?: number; peakDb?: number };
+  | { kind: "done"; path: string; seconds: number; lufs?: number; peakDb?: number;
+      stems?: ExportStemFile[] };
 
 // "Off" | "peak" | LUFS target
 type LoudnessMode = "off" | "peak" | "-14" | "-16" | "-23";
@@ -110,7 +111,9 @@ export default function ExportDialog() {
     "off",
     oneOf(...LOUDNESS.map((l) => l.value)),
   );
+  const [stems, setStems] = usePrefState<boolean>("export.stems", false, oneOf(true, false));
   const lossy = codec === "mp3" || codec === "m4a";
+  const isWav = codec.startsWith("wav");
   const [phase, setPhase] = useState<Phase>({ kind: "config" });
   const [err, setErr] = useState<string | null>(null);
 
@@ -158,8 +161,10 @@ export default function ExportDialog() {
       format: formatFor(codec, kbps),
       ...(loudness === "peak" ? { normalize: true } : {}),
       ...(loudness !== "off" && loudness !== "peak" ? { loudnessTarget: Number(loudness) } : {}),
+      ...(stems && isWav ? { stems: true } : {}),
     })
-      .then((r) => setPhase({ kind: "done", path: r.path, seconds: r.seconds, lufs: r.lufs, peakDb: r.peakDb }))
+      .then((r) => setPhase({ kind: "done", path: r.path, seconds: r.seconds, lufs: r.lufs,
+                              peakDb: r.peakDb, stems: r.stems }))
       .catch((e) => {
         if (e instanceof WsRequestError && e.code === "timeout") {
           // The engine may still be exporting (e.g. its native save dialog is open).
@@ -297,6 +302,24 @@ export default function ExportDialog() {
                 onChange={(v) => setLoudness(v as LoudnessMode)}
               />
             </div>
+            <label
+              className="row gap1"
+              style={{ marginTop: 6, alignItems: "center", cursor: isWav ? "pointer" : "default",
+                       opacity: isWav ? 1 : 0.5 }}
+              title={
+                isWav
+                  ? "Also write one WAV per audio/instrument/bus track beside the master file (same render pass and gain)."
+                  : "Stems are WAV-only — switch the format to WAV to enable."
+              }
+            >
+              <input
+                type="checkbox"
+                checked={stems && isWav}
+                disabled={!isWav}
+                onChange={(ev) => setStems(ev.target.checked)}
+              />
+              <span className={isWav ? "" : "dim"}>Export stems (one WAV per track)</span>
+            </label>
           </div>
 
           <div className="dlg-summary">
@@ -369,6 +392,29 @@ export default function ExportDialog() {
             {typeof phase.peakDb === "number" ? `, ${phase.peakDb.toFixed(1)} dBFS peak` : ""}
             .
           </div>
+          {phase.stems && phase.stems.length > 0 && (
+            <div style={{ alignSelf: "stretch" }}>
+              <div className="dim" style={{ marginBottom: 4 }}>
+                {phase.stems.length} stem file{phase.stems.length === 1 ? "" : "s"} written
+                alongside:
+              </div>
+              <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                {phase.stems.map((s) => (
+                  <div key={s.trackId} className="row gap1" style={{ fontSize: 11 }}>
+                    <span className="grow" style={{ minWidth: 0, overflow: "hidden",
+                                                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {s.name ?? s.path}
+                    </span>
+                    <span className="dim mono" style={{ flex: "0 0 auto" }}>
+                      {typeof s.peakDb === "number" && s.peakDb > -119
+                        ? `${s.peakDb.toFixed(1)} dB`
+                        : "silent"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Modal>

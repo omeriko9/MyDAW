@@ -98,6 +98,9 @@ struct GraphPlan {
     std::vector<std::pair<uint64_t, TrackNode*>> trackLookup;          // sorted by id
     std::vector<std::pair<uint64_t, IInsertNode*>> pluginLookup;       // sorted by id
     std::vector<IInsertNode*> plugins;                                 // unique
+    // Composite meter keys acquired by this plan (input meters, SPEC §5.5) — merged
+    // into rebuild()'s live-id set so slots release when a track dis-arms/disappears.
+    std::vector<uint64_t> inputMeterIds;
 };
 
 // ---------------------------------------------------------------------------
@@ -336,6 +339,12 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
         cfg.vcaGain = static_cast<float>(model.vcaGainFor(t.vcaId)); // VCA-group multiplier
         cfg.pan = static_cast<float>(t.pan);
         cfg.muted = t.mute || !soloAudible(solo, t.id);
+        // Pre-insert input gain (SPEC §5.5) — audio tracks only; everything else keeps
+        // unity so a stale value on a converted track can't scale a bus. Frozen tracks
+        // are exempt like their insert chain: the freeze render already baked the gain
+        // into the frozen asset, so re-applying it would double it (-20 dB → -40 dB).
+        if (t.kind == TrackKind::Audio && !(t.frozen && t.frozenAssetId != 0))
+            cfg.inputGain = static_cast<float>(std::pow(10.0, t.inputGainDb / 20.0));
         // Forced MIDI output channel (Track::midiOutChannel) — MIDI/Instrument only, so a
         // stale value on a converted track can't silently re-stamp anything.
         if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
@@ -797,6 +806,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                 // doubled/latent signal they explicitly disabled).
                 cfg.liveAudioWhenRecording = false;
                 cfg.inputChannelOffset = std::max(0, t.inputChannel);
+                // Input meter (SPEC §5.5): armed or monitoring audio tracks get a second
+                // slot under a composite key. Recorded in the plan so rebuild() can
+                // release it when the track disappears or dis-arms.
+                if (meters && (t.recordArm || t.monitor)) {
+                    cfg.inputMeter = meters->acquire(t.id | Meters::kInputMeterKeyBit);
+                    if (cfg.inputMeter)
+                        plan->inputMeterIds.push_back(t.id | Meters::kInputMeterKeyBit);
+                }
             }
             // Live-MIDI thru follows the UI's track SELECTION (midiThru, spec
             // 2026-07-22) plus the explicit monitor toggle. Arming does NOT imply
@@ -946,6 +963,7 @@ void AudioGraph::Impl::dispatchParam(const GraphPlan& P, const ParamMsg& m) noex
         case ParamMsg::Target::Pan:
         case ParamMsg::Target::SendLevel:
         case ParamMsg::Target::VcaGain:
+        case ParamMsg::Target::InputGain:
         case ParamMsg::Target::Mute: {
             TrackNode* tn = lookupById(P.trackLookup, m.trackId);
             if (!tn)
@@ -958,6 +976,8 @@ void AudioGraph::Impl::dispatchParam(const GraphPlan& P, const ParamMsg& m) noex
                 tn->applySendLevelRt(m.index, m.value);
             else if (m.target == ParamMsg::Target::VcaGain)
                 tn->applyVcaGainRt(m.value);
+            else if (m.target == ParamMsg::Target::InputGain)
+                tn->applyInputGainRt(m.value);
             else
                 tn->applyMuteRt(m.value >= 0.5f);
             return;
@@ -1097,9 +1117,11 @@ void AudioGraph::rebuild(const Model& model) {
 
     // Release meter slots of tracks that disappeared (acquire happened in buildPlan).
     std::vector<uint64_t> newIds;
-    newIds.reserve(plan->base.entries.size());
+    newIds.reserve(plan->base.entries.size() + plan->inputMeterIds.size());
     for (const RenderEntry& e : plan->base.entries)
         newIds.push_back(e.trackId);
+    for (const uint64_t id : plan->inputMeterIds)
+        newIds.push_back(id);
     std::sort(newIds.begin(), newIds.end());
     if (im.meters)
         for (const uint64_t id : im.meterIds)
@@ -1274,6 +1296,13 @@ void AudioGraph::applyEqCoeffs(uint64_t trackId, const EqBandSet& set) {
     impl_->eqRing.push(Impl::EqMsg{trackId, set}); // full ring -> drop (Model has the bands)
 }
 
+namespace {
+// Shared body of the three public renderOffline overloads. Either soloTrackId or the
+// stem taps may be active, never both (bounce solos; stem export renders the full mix).
+using StemSinkFn =
+    std::function<void(uint64_t trackId, const float* const* ch, int numCh, int frames)>;
+} // namespace
+
 bool AudioGraph::renderOffline(
     const Model& model, int64_t startSample, int64_t endSample, int blockSize,
     const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
@@ -1285,7 +1314,27 @@ bool AudioGraph::renderOffline(
 bool AudioGraph::renderOffline(
     const Model& model, int64_t startSample, int64_t endSample, int blockSize,
     const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
+    std::atomic<float>* progress, std::string& err, const StemSinkFn& stemSink,
+    const std::vector<uint64_t>& stemTrackIds) {
+    return renderOfflineEx(model, startSample, endSample, blockSize, sink, progress, err,
+                           0, &stemSink, &stemTrackIds);
+}
+
+bool AudioGraph::renderOffline(
+    const Model& model, int64_t startSample, int64_t endSample, int blockSize,
+    const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
     std::atomic<float>* progress, std::string& err, uint64_t soloTrackId) {
+    return renderOfflineEx(model, startSample, endSample, blockSize, sink, progress, err,
+                           soloTrackId, nullptr, nullptr);
+}
+
+bool AudioGraph::renderOfflineEx(
+    const Model& model, int64_t startSample, int64_t endSample, int blockSize,
+    const std::function<void(const float* const* ch, int numCh, int frames)>& sink,
+    std::atomic<float>* progress, std::string& err, uint64_t soloTrackId,
+    const std::function<void(uint64_t trackId, const float* const* ch, int numCh,
+                             int frames)>* stemSink,
+    const std::vector<uint64_t>* stemTrackIds) {
     Impl& im = *impl_;
     if (im.sampleRate <= 0) {
         err = "audio engine not configured";
@@ -1324,6 +1373,16 @@ bool AudioGraph::renderOffline(
     for (IInsertNode* p : plan->plugins)
         p->setOfflineMode(true);
 
+    // Stem taps (SPEC §5.5): resolve requested ids against the plan; unknown ids are
+    // skipped (a track may have vanished between request parse and render).
+    std::vector<std::pair<uint64_t, TrackNode*>> stemTaps;
+    if (stemSink && *stemSink && stemTrackIds) {
+        stemTaps.reserve(stemTrackIds->size());
+        for (const uint64_t id : *stemTrackIds)
+            if (TrackNode* tn = lookupById(plan->trackLookup, id))
+                stemTaps.emplace_back(id, tn);
+    }
+
     enableFtzDaz();
     const TempoMap& map = plan->tempoMap;
     const float* masterCh[2] = {
@@ -1346,6 +1405,12 @@ bool AudioGraph::renderOffline(
 
         im.runPass(*plan, ctx, nullptr, 0, 0, nullptr, nullptr, 0);
         sink(masterCh, 2, n);
+        // Each tapped node's work buffers still hold this pass's final signal (the
+        // sequential pass ran every node exactly once; the next pass clears them).
+        for (const auto& [tid, tn] : stemTaps) {
+            const float* ch[2] = {tn->workL(), tn->workR()};
+            (*stemSink)(tid, ch, 2, n);
+        }
 
         pos += n;
         if (progress)

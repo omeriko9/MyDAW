@@ -489,6 +489,10 @@ struct Track {
     bool monitor = false;          // optional
     std::string inputDevice;       // optional capture device id, "" = none/default
     int inputChannel = -1;         // optional, -1 = unset
+    // Pre-insert gain stage, audio tracks only (SPEC §5.5). Applied to everything
+    // entering the insert chain — live input and clip playback alike. The recorded
+    // FILE stays raw: the record tap reads the driver buffers upstream of the graph.
+    double inputGainDb = 0.0;      // -24..24, 0 = unity (omitted from JSON at 0)
     OutputTarget outputTarget = OutputTarget::master();
 
     bool frozen = false;           // optional

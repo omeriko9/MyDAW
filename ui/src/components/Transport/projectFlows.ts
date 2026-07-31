@@ -24,11 +24,13 @@ import {
   loadProject,
   loadRecentProject,
   newProject,
+  probeMedia,
   recoverProject,
   recreatePlugins,
   saveProject,
   saveProjectAs,
 } from "../../store/actions";
+import { askAdoptFileTempo } from "../../lib/importTempo";
 import { loadPref, oneOf } from "../../lib/prefs";
 import { useStore } from "../../store/store";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -347,7 +349,25 @@ export async function importPickedPaths(paths: string[]): Promise<ImportPathsRes
     return { kind: "project", path };
   }
 
-  const rep = await importMedia(mediaPaths);
+  // Tempo prompt (SPEC §5.5): probe .mid files for EXPLICIT tempo metas and ask before
+  // importing — the decision must precede the import so it folds into its one undo entry.
+  let adoptTempo = false;
+  const midPaths = mediaPaths.filter((p) => ["mid", "midi"].includes(extensionOf(p)));
+  if (midPaths.length > 0) {
+    try {
+      const probe = await probeMedia(midPaths);
+      const withTempo = probe.files.find((f) => f.tempo);
+      if (withTempo)
+        adoptTempo = await askAdoptFileTempo(
+          withTempo.path.split(/[\\/]/).pop() ?? withTempo.path,
+          withTempo.tempo?.bpm,
+        );
+    } catch {
+      // Probe is best-effort — an unreadable file fails again (visibly) in the import.
+    }
+  }
+
+  const rep = await importMedia(mediaPaths, undefined, undefined, adoptTempo);
   return { kind: "media", count: rep.assets.length };
 }
 

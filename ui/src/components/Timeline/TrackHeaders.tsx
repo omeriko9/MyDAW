@@ -52,6 +52,8 @@ import { loadPref, numberIn, usePrefState } from "../../lib/prefs";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
+import { useTakesUi } from "./takesUi";
+import { LANE_COLORS } from "../../lib/comping";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { openBestEditor } from "../PluginEditor/openEditor";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -71,6 +73,7 @@ import {
   trackKindIcon,
   type LaneRowL,
   type Row,
+  type TakeLaneRowL,
   type TrackRowL,
 } from "./layout";
 import type { AddableTrackKind, PluginInfo, Track } from "../../protocol/types";
@@ -193,6 +196,7 @@ export default function TrackHeaders({
   const setSelection = useStore((s) => s.setSelection);
   const registry = useStore((s) => s.registry);
   const lanesExpanded = useAutomationUi((s) => s.expanded);
+  const takesExpanded = useTakesUi((s) => s.expanded);
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [reorderVis, setReorderVis] = useState<ReorderVisual | null>(null);
@@ -1018,6 +1022,16 @@ export default function TrackHeaders({
             >
               A
             </Toggle>
+            {(t.takeFolders?.length ?? 0) > 0 && (
+              <Toggle
+                on={takesExpanded.has(t.id)}
+                onChange={(v) => useTakesUi.getState().setExpanded(t.id, v)}
+                className="tlh-btn tlh-takes-toggle"
+                tooltip="Take lanes (comp inline)"
+              >
+                T
+              </Toggle>
+            )}
           </div>
         )}
         {showInstRow && (
@@ -1158,6 +1172,39 @@ export default function TrackHeaders({
     );
   };
 
+  const renderTakeLane = (row: TakeLaneRowL) => {
+    const t = row.track;
+    // Label from the first folder that has this lane index ("Take N" fallback).
+    const named = (t.takeFolders ?? []).find((f) => f.lanes[row.laneIndex]);
+    const label = named?.lanes[row.laneIndex]?.name ?? `Take ${row.laneIndex + 1}`;
+    return (
+      <div
+        key={`${t.id}:take:${row.laneIndex}`}
+        className="tlh-lane tlh-takelane"
+        style={{ top: row.top, height: row.height, paddingLeft: 10 + row.depth * 14 }}
+      >
+        <span
+          className="tlh-takelane-chip"
+          style={{ background: LANE_COLORS[row.laneIndex % LANE_COLORS.length] }}
+        />
+        <span className="tlh-lane-label" title={label}>
+          {label}
+        </span>
+        <span className="grow" />
+        {/* Fixed-height lane rows keep their own collapse — a short track row hides
+            the "T" toggle with the controls (same rationale as automation lanes). */}
+        {row.laneIndex === 0 && (
+          <IconButton
+            icon="chevronUp"
+            size={18}
+            tooltip="Collapse take lanes"
+            onClick={() => useTakesUi.getState().setExpanded(t.id, false)}
+          />
+        )}
+      </div>
+    );
+  };
+
   const popTrack = popover && project ? project.tracks.find((t) => t.id === popover.trackId) : null;
 
   return (
@@ -1194,7 +1241,9 @@ export default function TrackHeaders({
         }}
       >
         <div className="tl-headers-inner" style={{ transform: `translateY(${-scrollY}px)` }}>
-          {rows.map((r) => (r.kind === "track" ? renderRow(r) : renderLane(r)))}
+          {rows.map((r) =>
+            r.kind === "track" ? renderRow(r) : r.kind === "takelane" ? renderTakeLane(r) : renderLane(r),
+          )}
         </div>
         {reorderVis && reorderVis.dropLineY !== null && (
           <div className="tlh-drop-line" style={{ top: reorderVis.dropLineY - 1 }} />

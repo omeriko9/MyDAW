@@ -103,6 +103,22 @@ public:
                        std::atomic<float>* progress, std::string& err,
                        uint64_t soloTrackId);
 
+    // Stem-export variant (SPEC §5.5): SINGLE pass — after each rendered block,
+    // `stemSink` is invoked once per requested track (in stemTrackIds order) with that
+    // track's post-insert/EQ/PDC/fader/pan work buffer: the exact signal it accumulates
+    // into its output bus. Sends bypass the tap (they write straight into the
+    // destination bus), so per-track stems don't sum to master when sends or bus
+    // processing exist — a BUS's stem does include its send returns. The trailing
+    // release pass is never delivered to any sink. Unknown ids are skipped.
+    bool renderOffline(const Model& model, int64_t startSample, int64_t endSample,
+                       int blockSize,
+                       const std::function<void(const float* const* ch, int numCh,
+                                                int frames)>& sink,
+                       std::atomic<float>* progress, std::string& err,
+                       const std::function<void(uint64_t trackId, const float* const* ch,
+                                                int numCh, int frames)>& stemSink,
+                       const std::vector<uint64_t>& stemTrackIds);
+
     // PDC samples at master for the current plan (engine/getStatus pdcSamples).
     int latencyTotal() const;
 
@@ -120,6 +136,19 @@ public:
     void injectLiveMidi(uint64_t trackId, const MidiEvent& e);
 
 private:
+    // Shared body of the renderOffline overloads (either soloTrackId or the stem taps
+    // may be active, never both). Pointer params: nullptr = feature unused.
+    bool renderOfflineEx(const Model& model, int64_t startSample, int64_t endSample,
+                         int blockSize,
+                         const std::function<void(const float* const* ch, int numCh,
+                                                  int frames)>& sink,
+                         std::atomic<float>* progress, std::string& err,
+                         uint64_t soloTrackId,
+                         const std::function<void(uint64_t trackId,
+                                                  const float* const* ch, int numCh,
+                                                  int frames)>* stemSink,
+                         const std::vector<uint64_t>* stemTrackIds);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

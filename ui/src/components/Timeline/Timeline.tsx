@@ -19,6 +19,7 @@ import TrackHeaders from "./TrackHeaders";
 import ClipCanvas from "./ClipCanvas";
 import Minimap, { MINIMAP_H } from "./Minimap";
 import { useAutomationUi } from "./automationUi";
+import { useTakesUi } from "./takesUi";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
@@ -198,6 +199,7 @@ export default function Timeline() {
 
   const autoExpanded = useAutomationUi((s) => s.expanded);
   const extraLanes = useAutomationUi((s) => s.extraLanes);
+  const takesExpanded = useTakesUi((s) => s.expanded);
 
   const vScale = vScaleOf(viewport.zoomY);
   const rows = useMemo(
@@ -206,10 +208,11 @@ export default function Timeline() {
         collapsedFolders: collapsed,
         autoExpanded,
         extraLanes,
+        takesExpanded,
         heightOverride,
         vScale,
       }),
-    [project, collapsed, autoExpanded, extraLanes, heightOverride, vScale],
+    [project, collapsed, autoExpanded, extraLanes, takesExpanded, heightOverride, vScale],
   );
 
   const cBeats = contentBeats(project);

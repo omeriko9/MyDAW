@@ -191,6 +191,20 @@
   padding: 0 14px 0 4px;
   background-position: right 2px center;
 }
+/* input gain + input meter (audio strips, SPEC §5.5) */
+.mxstrip-ingain {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mxstrip-ingain-label {
+  font-size: 9px;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+.mxstrip-inmeter {
+  height: 8px;
+}
 .mxstrip-static {
   height: 18px;
   display: flex;

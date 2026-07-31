@@ -41,6 +41,8 @@ void TrackNode::prepare(int sampleRate, int maxBlock) {
     mute_.snap(cfg_.muted ? 0.0f : 1.0f);
     pan_.prepare(sampleRate_);
     pan_.snap(std::clamp(cfg_.pan, -1.0f, 1.0f));
+    inGain_.prepare(sampleRate_);
+    inGain_.snap(std::max(0.0f, cfg_.inputGain));
     for (size_t k = 0; k < sendLevel_.size(); ++k) {
         sendLevel_[k].prepare(sampleRate_);
         sendLevel_[k].snap(std::max(0.0f, cfg_.sends[k].level));
@@ -575,6 +577,52 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
                 wl[i] += a[i];
                 wr[i] += b[i];
             }
+        }
+    }
+
+    // ---- input meter (post-gain capture level, SPEC §5.5) --------------------
+    // Independent of the monitor mix above: reads the live input directly, scaled by
+    // the input gain, and deliberately does NOT set liveAudioActive — that flag drops
+    // the track out of PDC (an audible, hard-to-attribute timing bug), and metering
+    // must never change the audio path.
+    if (cfg_.inputMeter && liveIn && numLiveIn > 0) {
+        const int c0 = std::max(0, cfg_.inputChannelOffset);
+        if (c0 < numLiveIn && liveIn[c0]) {
+            const float* a = liveIn[c0];
+            const float* b = (cfg_.trackChannels >= 2 && c0 + 1 < numLiveIn && liveIn[c0 + 1])
+                                 ? liveIn[c0 + 1]
+                                 : a;
+            const float g = inGain_.current();
+            float pL = 0.0f, pR = 0.0f;
+            double sL = 0.0, sR = 0.0;
+            for (int i = 0; i < n; ++i) {
+                const float xl = a[i] * g;
+                const float xr = b[i] * g;
+                const float al = xl < 0.0f ? -xl : xl;
+                const float ar = xr < 0.0f ? -xr : xr;
+                if (al > pL)
+                    pL = al;
+                if (ar > pR)
+                    pR = ar;
+                sL += static_cast<double>(xl) * xl;
+                sR += static_cast<double>(xr) * xr;
+            }
+            cfg_.inputMeter->writeFromRt(pL, pR, static_cast<float>(std::sqrt(sL / n)),
+                                         static_cast<float>(std::sqrt(sR / n)));
+        }
+    }
+
+    // ---- input gain (pre-insert, SPEC §5.5) ----------------------------------
+    // Everything entering the insert chain — clip playback and live input alike —
+    // is scaled here. The record tap reads the raw driver buffers upstream in
+    // AudioGraph::processBlock, so the recorded FILE never bakes this gain; keep
+    // the multiply inside TrackNode or that guarantee silently dies. busLike
+    // tracks consume an accumulation buffer, not an input, and are exempt.
+    if (!cfg_.busLike) {
+        for (int i = 0; i < n; ++i) {
+            const float g = inGain_.next();
+            wl[i] *= g;
+            wr[i] *= g;
         }
     }
 

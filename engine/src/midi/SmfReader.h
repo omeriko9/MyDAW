@@ -48,6 +48,13 @@ struct SmfData {
     std::vector<TempoEntry> tempoMap;     // full map; >= 1 entry, first at beat 0
     std::vector<TimeSigEntry> timeSigMap; // full map; >= 1 entry, first at bar 0
 
+    // True when the FILE carried explicit 0x51 / 0x58 metas. The maps above synthesize
+    // 120 bpm / 4-4 defaults when absent, so map size cannot distinguish "explicit
+    // 120 bpm" from "no meta at all" — these flags are set at parse time (SPEC §5.5
+    // media-import tempo prompt / media/probe).
+    bool hasTempoMeta = false;
+    bool hasTimeSigMeta = false;
+
     struct ImportedTrack {
         std::string name;    // meta 0x03, SANITIZED (header); "Track <n>" fallback
         std::string rawName; // meta 0x03 verbatim (may hold NULs); diagnostics only

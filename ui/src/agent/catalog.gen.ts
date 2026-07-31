@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "21ce08fbf4d461006fbc04f78c55856a3623ffe065a3f7151ec0ed47c16acc1c";
+export const AGENT_CATALOG_SHA256 = "106920fa19bcd048abc9c7595d3fcd4a0788b1abc6ccdcea9421c385e24ce112";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -1566,6 +1566,34 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "seconds": {
           "type": "number"
+        },
+        "stems": {
+          "description": "present when stems were requested: one entry per written stem file.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "original track name.",
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "peakDb": {
+                "description": "peak of the written stem, dBFS (-120 = silence).",
+                "type": "number"
+              },
+              "trackId": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "trackId",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -1597,6 +1625,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "startBeat": {
           "type": "number"
+        },
+        "stems": {
+          "description": "also write one WAV per audio/instrument/bus/self-playing-MIDI track beside the master file (WAV-only; same single render pass and gain).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2021,6 +2053,10 @@ export const AGENT_CATALOG: AgentCatalog = {
           },
           "type": "array"
         },
+        "adoptedTempo": {
+          "description": "true when a .mid's explicit tempo/timesig maps were adopted into the project (adoptTempo).",
+          "type": "boolean"
+        },
         "tracks": {
           "items": {
             "$ref": "#/schemas/Track"
@@ -2038,6 +2074,10 @@ export const AGENT_CATALOG: AgentCatalog = {
     "MediaImportRequest": {
       "additionalProperties": false,
       "properties": {
+        "adoptTempo": {
+          "description": "adopt the first tempo-meta-carrying .mid's full tempo/timesig maps into the project, in the SAME undo entry (probe first via media/probe).",
+          "type": "boolean"
+        },
         "atBeat": {
           "type": "number"
         },
@@ -2049,6 +2089,76 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "trackId": {
           "type": "number"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "MediaProbeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "description": "parse error for an unreadable .mid.",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "midi",
+                  "audio",
+                  "project"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "tempo": {
+                "additionalProperties": false,
+                "description": "present only when the .mid carries EXPLICIT tempo/timesig metas.",
+                "properties": {
+                  "bpm": {
+                    "type": "number"
+                  },
+                  "tempoEntries": {
+                    "type": "number"
+                  },
+                  "timeSigDen": {
+                    "type": "number"
+                  },
+                  "timeSigNum": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "MediaProbeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3772,6 +3882,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "inputDevice": {
           "type": "string"
         },
+        "inputGainDb": {
+          "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
+          "type": "number"
+        },
         "inserts": {
           "items": {
             "$ref": "#/schemas/PluginInstance"
@@ -4039,6 +4153,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "inputDevice": {
           "type": "string"
+        },
+        "inputGainDb": {
+          "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
+          "type": "number"
         },
         "midiMod": {
           "additionalProperties": false,
@@ -8351,13 +8469,14 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "media/import",
       "category": "media",
-      "description": "Import audio or MIDI files into the project and optionally place clips.",
+      "description": "Import audio or MIDI files into the project and optionally place clips. One undo entry; adoptTempo folds a .mid's tempo maps in.",
       "target": "engine",
       "mode": "write",
       "traits": [
         "mutating",
         "filesystem",
-        "asynchronous"
+        "asynchronous",
+        "undoable"
       ],
       "supports": [],
       "requires": [
@@ -8382,6 +8501,34 @@ export const AGENT_CATALOG: AgentCatalog = {
             ],
             "trackId": 7,
             "atBeat": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "media/probe",
+      "category": "media",
+      "description": "Inspect files without importing: kind, and a .mid's explicit tempo/timesig metas (ask-before-import flow).",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MediaProbeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/MediaProbeReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "paths": [
+              "C:/Music/song.mid"
+            ]
           }
         }
       ]
@@ -10857,6 +11004,7 @@ export const ENGINE_OPERATION_NAMES = [
   "export/midi",
   "export/render",
   "media/import",
+  "media/probe",
   "media/relink",
   "midi/feedEvent",
   "midi/getInputs",
@@ -11362,6 +11510,10 @@ export const REQUEST_COVERAGE = {
   "media/import": {
     "kind": "operation",
     "operation": "media/import"
+  },
+  "media/probe": {
+    "kind": "operation",
+    "operation": "media/probe"
   },
   "media/relink": {
     "kind": "operation",
@@ -12214,6 +12366,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
       ],
       "trackId": 7,
       "atBeat": 0
+    }
+  ],
+  "media/probe": [
+    {
+      "paths": [
+        "C:/Music/song.mid"
+      ]
     }
   ],
   "media/relink": [

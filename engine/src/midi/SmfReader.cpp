@@ -170,15 +170,19 @@ void parseTrack(const uint8_t* data, size_t len, int trackOrdinal, int division,
                         const uint32_t usPerQn = (static_cast<uint32_t>(md[0]) << 16) |
                                                  (static_cast<uint32_t>(md[1]) << 8) |
                                                  static_cast<uint32_t>(md[2]);
-                        if (usPerQn > 0)
+                        if (usPerQn > 0) {
+                            out.hasTempoMeta = true;
                             out.tempoMap.push_back(TempoEntry{
                                 beatAt(tick), 60000000.0 / static_cast<double>(usPerQn)});
+                        }
                     }
                     break;
                 case 0x58: // time signature {num, log2(den), clocks, 32nds}
-                    if (mlen >= 2 && md[0] > 0 && md[1] <= 7)
+                    if (mlen >= 2 && md[0] > 0 && md[1] <= 7) {
+                        out.hasTimeSigMeta = true;
                         rawSigs.push_back(
                             RawSig{beatAt(tick), static_cast<int>(md[0]), 1 << md[1]});
+                    }
                     break;
                 case 0x03: // sequence/track name
                     if (name.empty() && mlen > 0)

@@ -18,6 +18,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <set>
 #include <vector>
 
 #include "App.h"
@@ -443,6 +445,8 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         startMediaImport(p, id, respond, deferred, ec, em);
         return json();
     }
+    if (type == "media/probe")
+        return mediaProbe(p, ec, em);
     if (type == "media/relink") {
         const uint64_t assetId = getOr<uint64_t>(p, "assetId", 0);
         const std::string newPath = getOr(p, "newPath", "");
@@ -1364,6 +1368,42 @@ json Api::handleDialog(const std::string& type, std::string& ec, std::string& em
 // media/import (§5.5) — WS path (worker) and POST /api/upload (server thread)
 // ---------------------------------------------------------------------------
 
+json Api::mediaProbe(const json& p, std::string& ec, std::string& em) {
+    // Read-only (SPEC §5.5): no model access, no mutation. Runs on the MAIN thread
+    // like every synchronous dispatch — acceptable because SMFs are small (a parse is
+    // milliseconds) and audio files are never opened at all.
+    if (!p.contains("paths") || !p["paths"].is_array() || p["paths"].empty()) {
+        ec = "bad_request";
+        em = "paths required";
+        return json();
+    }
+    json files = json::array();
+    for (const json& pj : p["paths"]) {
+        if (!pj.is_string())
+            continue;
+        const std::string path = pj.get<std::string>();
+        json f{{"path", path}};
+        if (isMidiFileExt(path)) {
+            f["kind"] = "midi";
+            SmfData smf;
+            std::string err;
+            if (SmfReader::read(path, smf, err)) {
+                if (smf.hasTempoMeta || smf.hasTimeSigMeta)
+                    f["tempo"] = json{{"bpm", smf.bpm},
+                                      {"tempoEntries", smf.tempoMap.size()},
+                                      {"timeSigNum", smf.tsNum},
+                                      {"timeSigDen", smf.tsDen}};
+            } else {
+                f["error"] = err;
+            }
+        } else {
+            f["kind"] = projectOnlyProviderName(path).empty() ? "audio" : "project";
+        }
+        files.push_back(std::move(f));
+    }
+    return json{{"files", std::move(files)}};
+}
+
 void Api::startMediaImport(const json& p, int64_t id, HttpWsServer::RespondFn respond,
                            bool& deferred, std::string& ec, std::string& em) {
     ImportSpec spec;
@@ -1380,6 +1420,7 @@ void Api::startMediaImport(const json& p, int64_t id, HttpWsServer::RespondFn re
     }
     spec.trackId = getOr<uint64_t>(p, "trackId", 0);
     spec.atBeat = std::max(0.0, getOr<double>(p, "atBeat", 0.0));
+    spec.adoptTempo = getOr<bool>(p, "adoptTempo", false);
     deferred = true;
     app_.spawnWorker([this, spec, id, respond]() mutable {
         std::string wec, wem;
@@ -1433,6 +1474,13 @@ json Api::handleUpload(const std::vector<std::string>& tempFiles,
         const auto it = query.find("atBeat");
         if (it != query.end())
             spec.atBeat = std::max(0.0, std::strtod(it->second.c_str(), nullptr));
+    }
+    {
+        // Drops can't be probed engine-side (the bytes only exist client-side before
+        // upload), so the UI sniffs the SMF itself and passes the decision along.
+        const auto it = query.find("adoptTempo");
+        if (it != query.end())
+            spec.adoptTempo = it->second == "1" || it->second == "true";
     }
 
     std::string ec, em;
@@ -1528,8 +1576,15 @@ json Api::runImportBlocking(const ImportSpec& spec, std::string& ec, std::string
 }
 
 json Api::commitImport(std::vector<ImportItem>& items, const ImportSpec& spec) {
-    Model& m = app_.model;
+    // ONE undoable command (SPEC §5.5): the whole multi-object mutation — assets,
+    // clips, created tracks, and (when adoptTempo) the adopted tempo/timesig maps —
+    // runs through executeInternalFn, so a single edit/undo removes all of it.
+    // Import used to bypass the command layer; undo after an import then restored
+    // an unrelated snapshot and silently deleted the imported material.
+    std::string ec, em;
     App* app = &app_;
+    return app_.cmd->executeInternalFn(
+        [&](Model& m, CommandProcessor::CmdResult& r) -> json {
     json assetsOut = json::array();
     json clipsOut = json::array();
     std::vector<uint64_t> newTrackIds;
@@ -1563,6 +1618,11 @@ json Api::commitImport(std::vector<ImportItem>& items, const ImportSpec& spec) {
             double bpb = app_.tempoMap.beatsPerBarAt(0.0);
             if (bpb <= 0.0)
                 bpb = 4.0;
+            // When the file's maps are being adopted, bar-round clip lengths on the
+            // FILE's meter — the session meter is about to become it anyway.
+            if (spec.adoptTempo && it.smf.hasTimeSigMeta && it.smf.tsDen > 0)
+                bpb = 4.0 * static_cast<double>(it.smf.tsNum) /
+                      static_cast<double>(it.smf.tsDen);
             // Logic-region consolidation (SmfTrackPlan.h): format-1 MTrks sharing a
             // (sanitized name, channel) become ONE track with one clip per source MTrk at
             // its content position (file bar grid, shifted by atBeat); single-member
@@ -1632,19 +1692,43 @@ json Api::commitImport(std::vector<ImportItem>& items, const ImportSpec& spec) {
         }
     }
 
+    // Tempo adoption (SPEC §5.5): the first .mid that carried EXPLICIT tempo/timesig
+    // metas donates its full maps. Folded into this same undo entry — undoing the
+    // import also restores the project's previous tempo.
+    bool adoptedTempo = false;
+    if (spec.adoptTempo) {
+        for (ImportItem& it : items) {
+            if (!it.ok || !it.isMid || !(it.smf.hasTempoMeta || it.smf.hasTimeSigMeta))
+                continue;
+            m.project.tempoMap = it.smf.tempoMap;
+            m.project.timeSigMap = it.smf.timeSigMap;
+            adoptedTempo = true;
+            any = true;
+            break;
+        }
+    }
+
     json tracksOut = json::array();
     for (uint64_t tid : newTrackIds)
         if (const Track* t = m.trackById(tid))
             tracksOut.push_back(toJson(*t));
 
     if (any) {
-        app_.projectIO.markDirty();
-        app_.cmd->syncEngineFromModel(); // structural: rebuild plan
-        app_.cmd->emitFullProjectChanged();
+        // Re-applies TempoMap maps, transport loop/punch windows, effective mutes and
+        // rebuilds the graph — required for tempo adoption, harmless otherwise. The
+        // rebuild lives in here, so r.structural stays false (no double rebuild);
+        // dirty/undo/broadcast are executeInternalFn's job.
+        app_.cmd->syncEngineFromModel();
     }
+    r.mutated = any;
+    r.fullEvent = true;
+    r.label = "Import Media";
     return json{{"assets", std::move(assetsOut)},
                 {"clips", std::move(clipsOut)},
-                {"tracks", std::move(tracksOut)}};
+                {"tracks", std::move(tracksOut)},
+                {"adoptedTempo", adoptedTempo}};
+        },
+        ec, em);
 }
 
 // ---------------------------------------------------------------------------
@@ -1682,6 +1766,14 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
     const bool normalize = getOr<bool>(p, "normalize", false);
     const bool hasLoud = hasKey(p, "loudnessTarget"); // e.g. -14 LUFS (streaming target)
     const double loudTarget = std::clamp(getOr<double>(p, "loudnessTarget", -14.0), -40.0, 0.0);
+    const bool stems = getOr<bool>(p, "stems", false);
+    if (stems && fmtType != "wav") {
+        // v1 restriction, not laziness: N simultaneous MFT encoder instances are
+        // untested territory (SPEC §5.5); WAV writers are just file handles.
+        ec = "bad_request";
+        em = "stems export is WAV-only (set format.type to \"wav\")";
+        return;
+    }
     const std::string ext = fmtType == "mp3"    ? "mp3"
                             : fmtType == "flac"  ? "flac"
                             : (fmtType == "aac" || fmtType == "m4a") ? "m4a"
@@ -1698,6 +1790,62 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
         }
     }
 
+    // Stem plan (SPEC §5.5), resolved on the main thread while the model is still ours.
+    // Eligible: anything that can carry audio of its own — audio, instrument, bus, and
+    // MIDI tracks playing through their own inserts. Feeder MIDI tracks (midiTarget!=0)
+    // render silence by design, folders/view rows carry no audio, and the master IS the
+    // main file. A bus stem includes its send returns (see AudioGraph.h).
+    struct StemSpec {
+        uint64_t trackId;
+        std::string name; // original track name (reply)
+        std::string path;
+    };
+    std::vector<StemSpec> stemSpecs;
+    if (stems) {
+        const std::string base =
+            path.size() > ext.size() + 1 &&
+                    path.compare(path.size() - ext.size() - 1, ext.size() + 1, "." + ext) == 0
+                ? path.substr(0, path.size() - ext.size() - 1)
+                : path;
+        auto sanitize = [](const std::string& s) {
+            std::string o;
+            for (const char c : s)
+                o += (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' ||
+                      c == '_')
+                         ? c
+                         : '_';
+            const size_t b = o.find_first_not_of(' ');
+            const size_t e2 = o.find_last_not_of(' ');
+            o = (b == std::string::npos) ? "" : o.substr(b, e2 - b + 1);
+            return o.empty() ? std::string("track") : o;
+        };
+        std::set<std::string> used;
+        for (const Track& t : app_.model.project.tracks) {
+            const bool eligible =
+                t.kind == TrackKind::Audio || t.kind == TrackKind::Instrument ||
+                t.kind == TrackKind::Bus ||
+                (t.kind == TrackKind::Midi && t.midiTarget == 0);
+            if (!eligible)
+                continue;
+            std::string name = sanitize(t.name);
+            if (!used.insert(name).second) {
+                // Duplicate display name -> id-disambiguate; keep going until unique
+                // (a track could literally be NAMED "Lead-7" — never point two writers
+                // at one path).
+                std::string cand = name + "-" + std::to_string(t.id);
+                for (int n = 2; !used.insert(cand).second; ++n)
+                    cand = name + "-" + std::to_string(t.id) + "-" + std::to_string(n);
+                name = cand;
+            }
+            stemSpecs.push_back({t.id, t.name, base + " - " + name + ".wav"});
+        }
+        if (stemSpecs.empty()) {
+            ec = "bad_request";
+            em = "no stem-eligible tracks in the project";
+            return;
+        }
+    }
+
     const int64_t startSample = app_.tempoMap.beatsToSamples(startBeat);
     const int64_t endSample = app_.tempoMap.beatsToSamples(endBeat);
     const int sr = app_.currentSampleRate();
@@ -1705,7 +1853,8 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
     deferred = true;
 
     app_.spawnWorker([this, id, respond, path, startSample, endSample, bitDepth, kbps, normalize,
-                      hasLoud, loudTarget, sr, fmtType, encoded]() mutable {
+                      hasLoud, loudTarget, sr, fmtType, encoded, stems,
+                      stemSpecs = std::move(stemSpecs)]() mutable {
         std::string err;
         bool ok = true;
         double gain = 1.0;
@@ -1769,9 +1918,65 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
             else
                 wav.appendPlanar(out, frames);
         };
+        // Stem fan-out (SPEC §5.5): one 32-bit-float-capable WAV writer per eligible
+        // track, fed in the SAME pass as the master sink with the same master-derived
+        // gain (per-stem loudness targets would multiply renders — deliberately not).
+        struct StemOut {
+            WavWriter w;
+            bool opened = false;
+            float peak = 0.0f;
+        };
+        std::vector<StemOut> stemOuts(stemSpecs.size());
+        std::map<uint64_t, size_t> stemIndex;
+        std::vector<uint64_t> stemIds;
+        if (ok && stems) {
+            for (size_t i = 0; i < stemSpecs.size(); ++i) {
+                std::string werr;
+                stemOuts[i].opened = stemOuts[i].w.open(stemSpecs[i].path, 2, sr, bitDepth, &werr);
+                if (!stemOuts[i].opened) {
+                    ok = false;
+                    if (err.empty())
+                        err = "stem write failed: " + stemSpecs[i].path +
+                              (werr.empty() ? "" : " (" + werr + ")");
+                    break;
+                }
+                stemIndex[stemSpecs[i].trackId] = i;
+                stemIds.push_back(stemSpecs[i].trackId);
+            }
+        }
+        std::vector<std::vector<float>> stemScratch;
+        std::vector<const float*> stemPtrs;
+        auto stemSink = [&](uint64_t tid, const float* const* ch, int numCh, int frames) {
+            const auto it = stemIndex.find(tid);
+            if (it == stemIndex.end())
+                return;
+            StemOut& so = stemOuts[it->second];
+            if (!so.opened)
+                return;
+            const float* const* out = ch;
+            if (gain != 1.0) {
+                stemScratch.resize(static_cast<size_t>(numCh));
+                stemPtrs.resize(static_cast<size_t>(numCh));
+                for (int c = 0; c < numCh; ++c) {
+                    stemScratch[c].assign(ch[c], ch[c] + frames);
+                    for (float& v : stemScratch[c])
+                        v = static_cast<float>(v * gain);
+                    stemPtrs[c] = stemScratch[c].data();
+                }
+                out = stemPtrs.data();
+            }
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < frames; ++i)
+                    so.peak = std::max(so.peak, std::fabs(out[c][i]));
+            so.w.appendPlanar(out, frames);
+        };
+
         if (ok)
-            ok = app_.renderRange(startSample, endSample, 2048, sink,
-                                  &app_.exportProgressRef(), err);
+            ok = stems ? app_.renderRangeStems(startSample, endSample, 2048, sink,
+                                               stemSink, stemIds,
+                                               &app_.exportProgressRef(), err)
+                       : app_.renderRange(startSample, endSample, 2048, sink,
+                                          &app_.exportProgressRef(), err);
         if (ok && !opened) {
             ok = false;
             if (err.empty())
@@ -1783,6 +1988,13 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
             if (err.empty())
                 err = (encoded ? "encode failed: " : "wav write failed: ") + path;
         }
+        for (size_t i = 0; i < stemOuts.size(); ++i) {
+            if (stemOuts[i].opened && !stemOuts[i].w.finalize() && ok) {
+                ok = false;
+                if (err.empty())
+                    err = "stem write failed: " + stemSpecs[i].path;
+            }
+        }
 
         const double seconds =
             sr > 0 ? static_cast<double>(endSample - startSample) / sr : 0.0;
@@ -1793,11 +2005,26 @@ void Api::startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond
             const double peakDb = finalMeter.peakDb();
             Log::info("export: wrote %s (%.2f s, %s, %.1f LUFS, %.1f dBFS peak)", path.c_str(),
                       seconds, fmtType.c_str(), lufs, peakDb);
-            respond(okEnv(id, json{{"path", path},
-                                   {"seconds", seconds},
-                                   {"format", fmtType},
-                                   {"lufs", lufs},
-                                   {"peakDb", peakDb}}));
+            json reply{{"path", path},
+                       {"seconds", seconds},
+                       {"format", fmtType},
+                       {"lufs", lufs},
+                       {"peakDb", peakDb}};
+            if (stems) {
+                json arr = json::array();
+                for (size_t i = 0; i < stemSpecs.size(); ++i) {
+                    const float pk = stemOuts[i].peak;
+                    arr.push_back(json{{"trackId", stemSpecs[i].trackId},
+                                       {"name", stemSpecs[i].name},
+                                       {"path", stemSpecs[i].path},
+                                       {"peakDb", pk > 1e-9f
+                                                      ? 20.0 * std::log10(static_cast<double>(pk))
+                                                      : -120.0}});
+                }
+                reply["stems"] = std::move(arr);
+                Log::info("export: wrote %d stem file(s)", static_cast<int>(stemSpecs.size()));
+            }
+            respond(okEnv(id, std::move(reply)));
         } else {
             respond(errEnv(id, "export_failed", err));
         }

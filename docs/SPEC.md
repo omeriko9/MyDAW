@@ -154,7 +154,7 @@ the entire drag.
   audio graph like folders, fixed row height, cannot be duplicated.
 - `cmd/track.remove {trackId}` ; `cmd/track.reorder {trackId, newIndex, parentId?}`
 - `cmd/track.set {trackId, patch:{name?,color?,height?,volume?,pan?,mute?,solo?,recordArm?,
-  monitor?, inputDevice?, inputChannel?, outputTarget?, midiTarget?, midiOutChannel?, vcaId?}}` (outputTarget: trackId
+  monitor?, inputDevice?, inputChannel?, inputGainDb?, outputTarget?, midiTarget?, midiOutChannel?, vcaId?}}` (outputTarget: trackId
   of bus, or "master", or "none"). `vcaId` assigns the track to a VCA group (0 clears; changing it
   is structural). `midiTarget` (number): valid ONLY on `kind:"midi"` tracks — routes the
   track's MIDI into the `kind:"instrument"` track with that id (one shared instrument instance can
@@ -421,8 +421,10 @@ the entire drag.
   `project/importForeign` applies the source project's click state when the file carries one
   (cpr `clickEnable`) and broadcasts ONE `event/transport` right after the model swap; files
   without click state leave the session's metronome untouched.
-- `event/meters {tracks:{"<trackId>":[peakL,peakR,rmsL,rmsR]}, master:[...]} ` ~15 Hz, values in
-  linear 0..~1.4.
+- `event/meters {tracks:{"<trackId>":[peakL,peakR,rmsL,rmsR]}, inputs?:{...}, master:[...]}` ~15 Hz,
+  values in linear 0..~1.4. `inputs` (§5.5) carries the post-input-gain capture level of
+  armed/monitoring audio tracks, keyed by plain trackId; a row exists only while the track is
+  armed or monitoring.
 - `engine/getDevices {}` → `{drivers:[{type:"wasapi"|"asio", available, reason?, devices:[{id,name,
   isDefault, maxInputs, maxOutputs, sampleRates:[]}]}]}`
 - `engine/setAudioConfig {driver, deviceId, sampleRate, bufferSize, exclusive?:bool}` → restarts
@@ -433,6 +435,15 @@ the entire drag.
 ### 5.5 Recording & media
 - `cmd/track.set recordArm` + `transport/record` records armed audio tracks (WASAPI capture of
   selected input) to `audio/rec-<n>.wav` and armed MIDI tracks from enabled MIDI inputs.
+- **Input gain** (`Track.inputGainDb`, audio tracks only, −24..+24 dB, default 0, set via
+  `cmd/track.set {inputGainDb}`): a pre-insert gain stage applied to everything entering the
+  track's insert chain — live input and clip playback alike. **The recorded FILE is RAW**: the
+  record tap reads the raw driver buffers upstream of the graph, so the input meter and the
+  monitored signal show a post-gain level the written WAV deliberately does not have, and a
+  mis-set trim never destroys a take — re-trim and playback follows. Not automatable in v1
+  (no `ParamRef` kind; `automation.set` rejects `track:<id>:inputGain`). The **input meter**
+  (`event/meters.inputs`, §5.4) is live while the track is armed or monitoring and reads
+  post-gain.
 - `midi/getInputs {}` → `{inputs:[{id,name,enabled}]}`; `midi/setInputEnabled {id, enabled}`;
   `event/midiActivity {deviceId, trackId?}` (throttled).
 - `media/import {paths:[...], trackId?, atBeat?}` → decodes (wav/mp3/flac via MF; .mid via
@@ -448,6 +459,17 @@ the entire drag.
   exports) keep the legacy one-clip-at-`atBeat` layout. Shared logic in `midi/SmfTrackPlan.h`,
   also used by `project/importForeign` for .mid (there single-member clips sit at beat 0).
   Progress: `event/importProgress {path, pct}`.
+  **An import is ONE undo entry** (`CommandProcessor::executeInternalFn` — assets, clips,
+  created tracks and any adopted tempo revert together; undo never deletes files on disk).
+  **`adoptTempo:true`** adopts the first tempo-meta-carrying .mid's FULL tempo/timesig maps
+  into the project inside that same entry; reply gains `adoptedTempo:bool`. The decision is
+  made BEFORE importing: **`media/probe {paths}`** → `{files:[{path, kind:"midi"|"audio"|
+  "project", tempo?:{bpm,tempoEntries,timeSigNum,timeSigDen}, error?}]}` is the read-only
+  inspection (tempo present only for EXPLICIT metas — `SmfData.hasTempoMeta`; the reader
+  synthesizes 120/4-4 defaults, so map size is not a valid signal). Browser drops can't be
+  probed engine-side (bytes only exist client-side), so the UI byte-sniffs the SMF
+  (`lib/importTempo.ts`) and passes `adoptTempo=1` on `POST /api/upload`. Test:
+  `scripts/media-import-test.mjs`.
 - HTTP upload alternative: `POST /api/upload` multipart → same as import; used for browser drag-drop.
 - `media/relink {assetId, newPath}`; missing files appear in `event/projectChanged` asset records
   (`missing:true`) and `session/hello`.
@@ -462,6 +484,17 @@ the entire drag.
   codec — `"mp3"`, `"flac"` (lossless, negotiated 16/24-bit), `"m4a"`/`"aac"` (`kbps` 64..320 for
   lossy, default 320). An encoder MFT that is unavailable, or an unknown type, returns
   `bad_request` (no silent format switch). `media/AudioEncoder.{h,cpp}` (IMFSinkWriter).
+  **Stems** (`stems:true`): also writes one WAV per eligible track — audio, instrument, bus,
+  and MIDI tracks playing through their own inserts (feeder MIDI tracks render silence by
+  design; folders/view rows carry no audio; the master IS the main file) — beside the master
+  file as `<base> - <sanitized track name>.wav`, in the SAME single render pass, tapping each
+  track's post-insert/EQ/PDC/fader/pan buffer with the same master-derived normalize/loudness
+  gain. Reply gains `stems:[{trackId,name,path,peakDb}]` (−120 = silence). WAV-only in v1
+  (N simultaneous MFT encoders untested — `bad_request` otherwise, no silent fallback).
+  Caveats: sends bypass the tap (they write straight into the destination bus), so per-track
+  stems don't sum to master when sends/bus processing exist — a BUS's stem does include its
+  send returns; a clip track feeding a latency-bearing bus is tapped before that bus's PDC
+  alignment (small skew vs. master, accepted in v1). Test: `scripts/stem-export-test.mjs`.
 - `cmd/track.bounce {trackId, freeze?:bool}` → renders track to audio asset; if freeze, replaces
   playback with frozen audio and bypasses inserts (track keeps clips; `track.frozen=true`;
   `cmd/track.unfreeze {trackId}` restores).
@@ -624,7 +657,8 @@ Track = {
         "transpose" /*view rows: lanes over project-level data, max one each*/, name, color, height?,
   parentId?: number /*folder*/, channels: 1|2,
   volume: number /*linear, 1=0dB*/, pan: number /*-1..1*/, mute, solo, recordArm, monitor?: bool,
-  inputDevice?: string, inputChannel?: number, outputTarget: number|"master"|"none",
+  inputDevice?: string, inputChannel?: number, inputGainDb?: number /*audio only, -24..24,
+  omitted at 0; recorded file stays RAW, §5.5*/, outputTarget: number|"master"|"none",
   frozen?: bool, frozenAssetId?: number,
   midiTarget?: number,  // kind:"midi" only: id of the instrument track this track's MIDI is
                         // routed into (shared instance, §5.2); omitted when 0/none. A load
@@ -925,7 +959,15 @@ increasing source offsets, stacked at the loop start; comp defaults to the last 
 (§5.3): `cmd/take.create` (fold clips → folder), `cmd/take.setComp` (`activeLane` whole-span, or
 `comp[]` swipe boundaries), `cmd/take.flatten` (bounce the comp to plain clips). UI: the Inspector
 "Takes / Comp" section shows a comp bar + one strip per take — click a strip to use that take,
-drag across it to swipe just that range in.
+drag across it to swipe just that range in. Since 2026-08-01 the ARRANGEMENT draws folders
+inline too: the track row renders the comp RESULT (each segment shows its selected lane's clips
+clipped to the segment window, with a per-take color strip), and a "T" header toggle expands one
+fixed-height lane row per take (click = whole-span pick, drag = comp swipe committed as ONE
+`cmd/take.setComp` on release — no transient path exists, each call is a structural rebuild + an
+undo entry). Expansion is per-window view state (`Timeline/takesUi.ts`, never persisted); the
+comp math shared by Inspector and canvas lives in `ui/src/lib/comping.ts` and mirrors
+`AudioGraph::buildPlan` exactly (segment 0 anchors to the folder start regardless of its stored
+startBeat).
 
 ## 9. UI architecture
 

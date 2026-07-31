@@ -15,73 +15,7 @@ import { createTakeFolder, flattenTake, setTakeActiveLane, setTakeComp } from ".
 import { errText } from "./fields";
 import { Icon } from "../common/icons";
 import { contextMenuHandler } from "../common/ContextMenu";
-
-interface Seg {
-  s: number;
-  e: number;
-  lane: number;
-}
-
-/** Comp boundaries → concrete [s,e) segments (mirrors AudioGraph::buildPlan). */
-function compSegments(f: TakeFolder): Seg[] {
-  const segs: Seg[] = [];
-  const fs = f.startBeat;
-  const fe = f.endBeat;
-  if (!f.comp || f.comp.length === 0) {
-    if (f.lanes.length) segs.push({ s: fs, e: fe, lane: 0 });
-    return segs;
-  }
-  for (let i = 0; i < f.comp.length; i++) {
-    const s = i === 0 ? fs : Math.max(f.comp[i].startBeat, fs);
-    let e = i + 1 < f.comp.length ? Math.max(f.comp[i + 1].startBeat, s) : fe;
-    e = Math.min(e, fe);
-    if (e > s) segs.push({ s, e, lane: f.comp[i].lane });
-  }
-  return segs;
-}
-
-function laneAt(f: TakeFolder, beat: number): number {
-  if (!f.comp || f.comp.length === 0) return 0;
-  let lane = f.comp[0].lane;
-  for (const s of f.comp) {
-    if (beat >= s.startBeat) lane = s.lane;
-    else break;
-  }
-  return lane;
-}
-
-/** Paint [b0,b1) with `lane`, preserving what played before b0 and restoring at b1. */
-function paintComp(
-  f: TakeFolder,
-  b0: number,
-  b1: number,
-  lane: number,
-): { startBeat: number; lane: number }[] {
-  const fs = f.startBeat;
-  const fe = f.endBeat;
-  let lo = Math.max(fs, Math.min(b0, fe));
-  let hi = Math.max(fs, Math.min(b1, fe));
-  if (hi < lo) [lo, hi] = [hi, lo];
-  const src = f.comp && f.comp.length ? f.comp : [{ startBeat: fs, lane: 0 }];
-  const laneAfter = laneAt(f, hi);
-  const pts: { startBeat: number; lane: number }[] = [];
-  for (const s of src) if (s.startBeat < lo - 1e-6) pts.push({ startBeat: s.startBeat, lane: s.lane });
-  if (pts.length === 0) pts.push({ startBeat: fs, lane: laneAt(f, fs) });
-  pts.push({ startBeat: lo, lane });
-  if (fe - hi > 1e-6) pts.push({ startBeat: hi, lane: laneAfter });
-  for (const s of src) if (s.startBeat > hi + 1e-6) pts.push({ startBeat: s.startBeat, lane: s.lane });
-  pts.sort((a, b) => a.startBeat - b.startBeat);
-  // Drop redundant consecutive same-lane boundaries; anchor the first to the folder start.
-  const out: { startBeat: number; lane: number }[] = [];
-  for (const p of pts) {
-    if (out.length && out[out.length - 1].lane === p.lane) continue;
-    out.push(p);
-  }
-  if (out.length) out[0] = { startBeat: fs, lane: out[0].lane };
-  return out;
-}
-
-const LANE_COLORS = ["#4f8cff", "#28c07a", "#e0a533", "#c96be0", "#e0605f", "#33bcd6"];
+import { compSegments, LANE_COLORS, paintComp } from "../../lib/comping";
 
 function FolderView({ track, folder }: { track: Track; folder: TakeFolder }) {
   const [err, setErr] = React.useState<string | null>(null);

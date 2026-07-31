@@ -112,7 +112,8 @@ struct ParamMsg {
         PluginParam,  // value = normalized 0..1; index = paramId; instanceId
         PluginBypass, // value = 0|1;                     instanceId
         WetDry,       // value = 0..1;                    instanceId
-        VcaGain       // value = linear VCA-group gain;   trackId (pushed per member track)
+        VcaGain,      // value = linear VCA-group gain;   trackId (pushed per member track)
+        InputGain     // value = linear pre-insert gain (dB->linear on the control thread); trackId
     };
 
     Target target = Target::Volume;

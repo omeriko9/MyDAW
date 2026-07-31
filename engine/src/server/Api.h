@@ -45,6 +45,10 @@ private:
         uint64_t trackId = 0;                  // 0 = no clip creation target
         double atBeat = 0.0;
         bool deleteSources = false;            // uploads: temp files removed afterwards
+        // Adopt the first tempo-meta-carrying .mid's full tempo/timesig maps into the
+        // project, inside the SAME undo entry as the import (SPEC §5.5). The UI decides
+        // via media/probe (picker paths) or a byte sniff (drops) BEFORE importing.
+        bool adoptTempo = false;
     };
 
     // Returns the reply payload or null with ec/em set. `deferred`=true means a worker
@@ -72,9 +76,13 @@ private:
     // ----- import / export ------------------------------------------------------
     // Blocking; callable from any non-main thread (worker / server thread) or main.
     json runImportBlocking(const ImportSpec& spec, std::string& ec, std::string& em);
-    // Main thread: inserts decoded results into the model, emits projectChanged.
+    // Main thread: inserts decoded results into the model as ONE undoable command
+    // (CommandProcessor::executeInternalFn) and emits projectChanged.
     struct ImportItem; // defined in Api.cpp
     json commitImport(std::vector<ImportItem>& items, const ImportSpec& spec);
+    // media/probe (§5.5): read-only file inspection — kind + explicit SMF tempo metas —
+    // so the UI can ask "apply the file's tempo?" BEFORE importing (one undo entry).
+    json mediaProbe(const json& p, std::string& ec, std::string& em);
     void startMediaImport(const json& p, int64_t id, HttpWsServer::RespondFn respond,
                           bool& deferred, std::string& ec, std::string& em);
     void startExport(const json& p, int64_t id, HttpWsServer::RespondFn respond,

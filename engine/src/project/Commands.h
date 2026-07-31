@@ -46,6 +46,46 @@ public:
     json execute(const std::string& type, const json& payload, bool transient,
                  std::string& errCode, std::string& errMsg);
 
+    // Per-command result accumulator (event shape, undo label, side-effect flags).
+    // Public because executeInternalFn's callback receives one; command handlers
+    // (private) use it identically.
+    struct CmdResult {
+        std::string errCode;
+        std::string errMsg;
+        std::string label;       // undo label; "" -> command type used
+        bool mutated = true;     // false: nothing changed (no undo entry / events)
+        bool structural = false; // AudioGraph::rebuild required
+        // True: mutation happened but NO undo entry is pushed (irreversible side
+        // effects — e.g. media.removeUnused with deleteFiles cleared the stack;
+        // an entry would "restore" records whose files are gone).
+        bool skipUndo = false;
+        // event/projectChanged shape (§5.8):
+        bool fullEvent = false;          // scope:"project" + full snapshot
+        std::string scope = "track";     // "track" | "clip" | "mixer"
+        bool allTracksEvent = false;     // tracks = complete ordered list
+        std::vector<uint64_t> eventTrackIds;            // subset, model order kept
+        std::vector<std::pair<uint64_t, uint64_t>> eventClips; // (trackId, clipId)
+        std::vector<uint64_t> removedTrackIds;
+        std::vector<uint64_t> removedClipIds;
+        // plugin chunks captured for instances created/destroyed by this command
+        std::map<uint64_t, std::vector<uint8_t>> pluginChunks;
+
+        json fail(const char* code, const std::string& msg) {
+            errCode = code;
+            errMsg = msg;
+            return json();
+        }
+    };
+
+    // Runs `fn` as ONE undoable, broadcast command OUTSIDE the JSON dispatch — for
+    // engine-internal multi-object mutations whose inputs aren't JSON (media import's
+    // decoded assets and parsed SMF data). Mirrors execute() exactly: before-snapshot →
+    // fn → rebuild if structural → one UndoEntry (label from r.label) → markDirty →
+    // broadcastChanges. fn reports failure via r.fail(...); r.mutated=false means no
+    // undo entry and no events, same as any handler. Main thread only.
+    json executeInternalFn(const std::function<json(Model&, CmdResult&)>& fn,
+                           std::string& errCode, std::string& errMsg);
+
     // Executes 1..64 catalog-approved cmd/* operations as one atomic model change.
     // Individual dispatches do not rebuild, broadcast, or push undo; success performs
     // those side effects once and returns {label, revision, results}. A failed step
@@ -114,35 +154,6 @@ public:
     json recreatePlugins(const json& p, std::string& ec, std::string& em);
 
 private:
-    // Per-command result accumulator (event shape, undo label, side-effect flags).
-    struct CmdResult {
-        std::string errCode;
-        std::string errMsg;
-        std::string label;       // undo label; "" -> command type used
-        bool mutated = true;     // false: nothing changed (no undo entry / events)
-        bool structural = false; // AudioGraph::rebuild required
-        // True: mutation happened but NO undo entry is pushed (irreversible side
-        // effects — e.g. media.removeUnused with deleteFiles cleared the stack;
-        // an entry would "restore" records whose files are gone).
-        bool skipUndo = false;
-        // event/projectChanged shape (§5.8):
-        bool fullEvent = false;          // scope:"project" + full snapshot
-        std::string scope = "track";     // "track" | "clip" | "mixer"
-        bool allTracksEvent = false;     // tracks = complete ordered list
-        std::vector<uint64_t> eventTrackIds;            // subset, model order kept
-        std::vector<std::pair<uint64_t, uint64_t>> eventClips; // (trackId, clipId)
-        std::vector<uint64_t> removedTrackIds;
-        std::vector<uint64_t> removedClipIds;
-        // plugin chunks captured for instances created/destroyed by this command
-        std::map<uint64_t, std::vector<uint8_t>> pluginChunks;
-
-        json fail(const char* code, const std::string& msg) {
-            errCode = code;
-            errMsg = msg;
-            return json();
-        }
-    };
-
     json dispatch(const std::string& type, const json& p, bool transient, CmdResult& r);
 
     // §5.2 tracks

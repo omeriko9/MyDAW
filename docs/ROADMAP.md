@@ -35,7 +35,7 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
 - Grid/snap persistence: `cmd/grid.set` writes `project.grid` (undoable, saved); the
   transport snap selector keeps an optimistic local mirror.
 
-## Phase 3 — Recording & media 🔨
+## Phase 3 — Recording & media ✅ (2026-08-01)
 
 - **Punch in/out** — DONE (2026-07-31): `project.punch` + `cmd/punch.set`, region carried in
   `event/transport`, persisted, re-derived on a tempo edit. The record gate lives in
@@ -58,15 +58,30 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
   stayed contiguous and everything after the gap was attributed a block early. MIDI laps are
   bucketed by ARRIVAL, not position: a cycle re-enters the same span every lap, so all laps
   share a start beat. Tests: `punch-test.mjs` (multi-lap), `midi-lap-test.mjs` (7/7).
-  Remaining: take lanes are still not drawn inline in the arrangement (see STUBS).
-- Input gain per audio track (pre-insert), input meter while armed. NOTE: decide and record in
-  SPEC §5.5 whether the recorded FILE is raw or gain-baked before building — recording raw
-  means the input meter shows a level the file does not have; baking means a mis-set trim
-  destroys a take. One sentence either way, but not a detail to leave implicit.
-- `media/import` tempo prompt (`SmfReader` already parses tempo) + make import undoable
-  (route through an `internal/recording.commit`-style command).
-- Stem export: `export/render` per-track/bus variant (offline render with per-track tap
-  or N solo passes — prefer single-pass multi-sink).
+  Take lanes drawn INLINE in the arrangement since 2026-08-01 ("T" header toggle →
+  per-lane rows, click = pick take, drag = comp swipe; shared comp math in
+  `ui/src/lib/comping.ts`). Browser check in `ui-smoke.mjs` (take-lanes-inline-comp).
+- **Input gain + input metering** — DONE (2026-08-01): `Track.inputGainDb` (−24..+24, audio
+  only) is a PRE-INSERT stage covering clip playback and live input; **the recorded FILE is
+  RAW** (SPEC §5.5 — the record tap reads the raw driver buffers upstream of the graph, so
+  a mis-set trim never destroys a take). Input meter (`event/meters.inputs`, post-gain)
+  lives while armed/monitoring in a second Meters slot under a composite key; the metering
+  branch never sets `liveAudioActive` (the PDC trap). recordArm became structural so the
+  meter slot materializes on arm. Not automatable v1 (no ParamRef kind). Test:
+  `scripts/input-gain-test.mjs` (14/14 — file raw at −20 dB, render ratio exactly 0.1).
+- **`media/import` tempo prompt + undoable import** — DONE (2026-08-01): imports run
+  through `CommandProcessor::executeInternalFn` = ONE undo entry (assets, clips, tracks,
+  adopted tempo together; undo never deletes files). `media/probe` inspects .mid metas
+  (explicit-only via `SmfData.hasTempoMeta`); the UI asks BEFORE importing (probe for
+  picker paths, byte sniff for browser drops) and passes `adoptTempo`. Test:
+  `scripts/media-import-test.mjs` (17/17).
+- **Stem export** — DONE (2026-08-01): `export/render {stems:true}` writes one WAV per
+  audio/instrument/bus/self-playing-MIDI track beside the master in a SINGLE pass —
+  `renderOffline`'s stem taps read each `TrackNode`'s post-insert/EQ/PDC/fader/pan work
+  buffer after every block (GraphPlan is TU-private, so the tap lives inside AudioGraph).
+  Same master-derived normalize/loudness gain; WAV-only v1 (N parallel MFT encoders are
+  untested). Reply: `stems:[{trackId,name,path,peakDb}]`. Test:
+  `scripts/stem-export-test.mjs` (11/11 — master == Σ stems to 3e-8).
 - **MP3/FLAC export** — DONE (2026-07-03): `export/render` accepts `format.type` wav/mp3/flac/
   m4a via `media/AudioEncoder` (IMFSinkWriter). FLAC lossless (negotiated 16/24-bit), mp3/m4a
   `kbps` 64..320. Unavailable/unknown codec → honest `bad_request` (no silent switch). Export

@@ -19,6 +19,7 @@
 
 import { HttpApi } from "../protocol/types";
 import type { Asset } from "../protocol/types";
+import { askAdoptFileTempo, isMidiFileName, sniffSmfTempo } from "./importTempo";
 
 export const PLUGIN_MIME = "application/x-mydaw-plugin";
 export const ASSET_MIME = "application/x-mydaw-asset";
@@ -301,9 +302,27 @@ export async function uploadFiles(
 ): Promise<UploadResult> {
   if (files.length === 0) return { assets: [] };
 
+  // Tempo prompt (SPEC §5.5): dropped bytes never touch the engine before upload, so a
+  // client-side SMF sniff drives the ask here; the decision rides along as a query param
+  // and folds into the import's single undo entry. First tempo-carrying .mid decides.
+  let adoptTempo = false;
+  for (const f of files) {
+    if (!isMidiFileName(f.name)) continue;
+    try {
+      const sniff = sniffSmfTempo(new Uint8Array(await f.arrayBuffer()));
+      if (sniff.has) {
+        adoptTempo = await askAdoptFileTempo(f.name, sniff.bpm);
+        break;
+      }
+    } catch {
+      // Sniff is best-effort; an unreadable file fails visibly in the import itself.
+    }
+  }
+
   const params = new URLSearchParams();
   if (opts?.trackId !== undefined) params.set("trackId", String(opts.trackId));
   if (opts?.atBeat !== undefined) params.set("atBeat", String(opts.atBeat));
+  if (adoptTempo) params.set("adoptTempo", "1");
   const qs = params.toString();
   const url = qs ? `${HttpApi.upload}?${qs}` : HttpApi.upload;
 

@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "21ce08fbf4d461006fbc04f78c55856a3623ffe065a3f7151ec0ed47c16acc1c";
+const char kAgentCatalogSha256[] = "106920fa19bcd048abc9c7595d3fcd4a0788b1abc6ccdcea9421c385e24ce112";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -1546,6 +1546,34 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "seconds": {
           "type": "number"
+        },
+        "stems": {
+          "description": "present when stems were requested: one entry per written stem file.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "description": "original track name.",
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "peakDb": {
+                "description": "peak of the written stem, dBFS (-120 = silence).",
+                "type": "number"
+              },
+              "trackId": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "trackId",
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -1577,6 +1605,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "startBeat": {
           "type": "number"
+        },
+        "stems": {
+          "description": "also write one WAV per audio/instrument/bus/self-playing-MIDI track beside the master file (WAV-only; same single render pass and gain).",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2001,6 +2033,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           },
           "type": "array"
         },
+        "adoptedTempo": {
+          "description": "true when a .mid's explicit tempo/timesig maps were adopted into the project (adoptTempo).",
+          "type": "boolean"
+        },
         "tracks": {
           "items": {
             "$ref": "#/schemas/Track"
@@ -2018,6 +2054,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "MediaImportRequest": {
       "additionalProperties": false,
       "properties": {
+        "adoptTempo": {
+          "description": "adopt the first tempo-meta-carrying .mid's full tempo/timesig maps into the project, in the SAME undo entry (probe first via media/probe).",
+          "type": "boolean"
+        },
         "atBeat": {
           "type": "number"
         },
@@ -2029,6 +2069,76 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "trackId": {
           "type": "number"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "MediaProbeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "description": "parse error for an unreadable .mid.",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "midi",
+                  "audio",
+                  "project"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "tempo": {
+                "additionalProperties": false,
+                "description": "present only when the .mid carries EXPLICIT tempo/timesig metas.",
+                "properties": {
+                  "bpm": {
+                    "type": "number"
+                  },
+                  "tempoEntries": {
+                    "type": "number"
+                  },
+                  "timeSigDen": {
+                    "type": "number"
+                  },
+                  "timeSigNum": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
+    "MediaProbeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3752,6 +3862,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "inputDevice": {
           "type": "string"
         },
+        "inputGainDb": {
+          "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
+          "type": "number"
+        },
         "inserts": {
           "items": {
             "$ref": "#/schemas/PluginInstance"
@@ -4019,6 +4133,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "inputDevice": {
           "type": "string"
+        },
+        "inputGainDb": {
+          "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
+          "type": "number"
         },
         "midiMod": {
           "additionalProperties": false,
@@ -8331,13 +8449,14 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "media/import",
       "category": "media",
-      "description": "Import audio or MIDI files into the project and optionally place clips.",
+      "description": "Import audio or MIDI files into the project and optionally place clips. One undo entry; adoptTempo folds a .mid's tempo maps in.",
       "target": "engine",
       "mode": "write",
       "traits": [
         "mutating",
         "filesystem",
-        "asynchronous"
+        "asynchronous",
+        "undoable"
       ],
       "supports": [],
       "requires": [
@@ -8362,6 +8481,34 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             ],
             "trackId": 7,
             "atBeat": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "media/probe",
+      "category": "media",
+      "description": "Inspect files without importing: kind, and a .mid's explicit tempo/timesig metas (ask-before-import flow).",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/MediaProbeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/MediaProbeReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "paths": [
+              "C:/Music/song.mid"
+            ]
           }
         }
       ]

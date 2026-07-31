@@ -409,12 +409,17 @@ export const setMidiThruTracks = (trackIds: number[]) =>
 export const previewNote = (trackId: number, pitch: number, velocity: number, on: boolean) =>
   ws.request("midi/preview", { trackId, pitch, velocity, on });
 
-export const importMedia = (paths: string[], trackId?: number, atBeat?: number) =>
+export const importMedia = (paths: string[], trackId?: number, atBeat?: number,
+                            adoptTempo?: boolean) =>
   ws.request("media/import", {
     paths,
     ...(trackId !== undefined ? { trackId } : {}),
     ...(atBeat !== undefined ? { atBeat } : {}),
+    ...(adoptTempo ? { adoptTempo: true } : {}),
   });
+
+/** Read-only pre-import inspection (SPEC §5.5) — drives the "apply file tempo?" ask. */
+export const probeMedia = (paths: string[]) => ws.request("media/probe", { paths });
 
 export const relinkAsset = (assetId: number, newPath: string) =>
   ws.request("media/relink", { assetId, newPath });

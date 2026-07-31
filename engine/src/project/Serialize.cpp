@@ -418,6 +418,8 @@ json toJson(const Track& t) {
         j["inputDevice"] = t.inputDevice;
     if (t.inputChannel >= 0)
         j["inputChannel"] = t.inputChannel;
+    if (t.inputGainDb != 0.0)
+        j["inputGainDb"] = t.inputGainDb;
     if (t.frozen)
         j["frozen"] = true;
     if (t.frozenAssetId != 0)
@@ -886,6 +888,7 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.monitor = getOr<bool>(j, "monitor", false);
     out.inputDevice = getOr(j, "inputDevice", "");
     out.inputChannel = getOr<int>(j, "inputChannel", -1);
+    out.inputGainDb = std::clamp(getOr<double>(j, "inputGainDb", 0.0), -24.0, 24.0);
     if (hasKey(j, "outputTarget"))
         fromJson(*j.find("outputTarget"), out.outputTarget, nullptr);
     out.frozen = getOr<bool>(j, "frozen", false);

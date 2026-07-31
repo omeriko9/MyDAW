@@ -25,6 +25,7 @@ import { Icon } from "../common/icons";
 import { Fader, gainToDbText } from "../common/Fader";
 import { Knob } from "../common/Knob";
 import { Meter } from "../common/Meter";
+import { NumberDrag } from "../common/NumberDrag";
 import { Select, SelectOption } from "../common/Select";
 import { TextInput } from "../common/TextInput";
 import { showToast } from "../common/ToastHost";
@@ -445,7 +446,33 @@ export const ChannelStrip = React.memo(function ChannelStrip({
           {!isMaster && (
             <div className="mxstrip-io">
               {track.kind === "audio" ? (
-                <InputSelect track={track} />
+                <>
+                  <InputSelect track={track} />
+                  <div className="mxstrip-ingain">
+                    <span className="mxstrip-ingain-label">Gain</span>
+                    <NumberDrag
+                      value={track.inputGainDb ?? 0}
+                      min={-24}
+                      max={24}
+                      step={0.1}
+                      precision={1}
+                      units="dB"
+                      width="100%"
+                      title="Input gain (pre-insert). The recorded file stays raw — this scales monitoring, metering and playback, not the take."
+                      onChange={(db) => actions.dragTrack(track.id, { inputGainDb: db })}
+                      onCommit={(db) => void actions.commitTrack(track.id, { inputGainDb: db })}
+                    />
+                  </div>
+                  {(track.recordArm || track.monitor) && (
+                    <div className="mxstrip-inmeter" title="Input level (post-gain)">
+                      <Meter
+                        getLevels={() => metersBus.last?.inputs?.[String(track.id)] ?? null}
+                        channels={track.channels === 1 ? 1 : 2}
+                        horizontal
+                      />
+                    </div>
+                  )}
+                </>
               ) : track.kind === "midi" || track.kind === "instrument" ? (
                 <div className="mxstrip-static" title="MIDI input: all enabled devices, all channels">
                   In: Omni

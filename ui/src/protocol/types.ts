@@ -373,6 +373,11 @@ export interface Track {
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
+  /**
+   * Pre-insert input gain in dB (audio tracks only, -24..24, SPEC §5.5). The recorded
+   * FILE stays raw — this scales monitoring, metering and playback, not the take.
+   */
+  inputGainDb?: number;
   outputTarget: OutputTarget;
   /**
    * MIDI routing (kind "midi" only): id of an Instrument-kind track that receives this
@@ -759,6 +764,8 @@ export interface TrackPatch {
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
+  /** Pre-insert input gain in dB (audio tracks only, -24..24, SPEC §5.5). */
+  inputGainDb?: number;
   outputTarget?: OutputTarget;
   /** kind "midi" only — Instrument-track id to route this track's MIDI into; 0 clears. */
   midiTarget?: number;
@@ -1384,13 +1391,39 @@ export interface MediaImportRequest {
   paths: string[];
   trackId?: number;
   atBeat?: number;
+  /**
+   * Adopt the first tempo-meta-carrying .mid's full tempo/timesig maps into the
+   * project, inside the SAME undo entry as the import (SPEC §5.5). Decide via
+   * media/probe (picker paths) or a client-side SMF sniff (drops) BEFORE importing.
+   */
+  adoptTempo?: boolean;
 }
 
-/** midi files may create tracks (SPEC §5.5). */
+/** midi files may create tracks (SPEC §5.5). Imports are ONE undo entry. */
 export interface MediaImportReply {
   assets: Asset[];
   clips: Clip[];
   tracks: Track[];
+  /** true when a .mid's explicit tempo/timesig maps were adopted (adoptTempo). */
+  adoptedTempo?: boolean;
+}
+
+/** media/probe (SPEC §5.5): read-only file inspection before an import. */
+export interface MediaProbeRequest {
+  paths: string[];
+}
+
+export interface MediaProbeFile {
+  path: string;
+  kind?: "midi" | "audio" | "project";
+  /** present only when a .mid carries EXPLICIT tempo/timesig metas. */
+  tempo?: { bpm: number; tempoEntries: number; timeSigNum: number; timeSigDen: number };
+  /** parse error for an unreadable .mid. */
+  error?: string;
+}
+
+export interface MediaProbeReply {
+  files: MediaProbeFile[];
 }
 
 export interface MediaRelinkRequest {
@@ -1417,6 +1450,20 @@ export interface ExportRenderRequest {
   normalize?: boolean;
   /** integrated-loudness target in LUFS (e.g. -14); scales the export to hit it. */
   loudnessTarget?: number;
+  /**
+   * Also write one WAV per audio/instrument/bus/self-playing-MIDI track beside the
+   * master file (SPEC §5.5). WAV-only; same single render pass and gain as the master.
+   */
+  stems?: boolean;
+}
+
+export interface ExportStemFile {
+  trackId: number;
+  /** original track name. */
+  name?: string;
+  path: string;
+  /** peak of the written stem, dBFS (-120 = silence). */
+  peakDb?: number;
 }
 
 export interface ExportRenderReply {
@@ -1428,6 +1475,8 @@ export interface ExportRenderReply {
   lufs?: number;
   /** measured peak of the written signal, dBFS. */
   peakDb?: number;
+  /** present when stems were requested: one entry per written stem file. */
+  stems?: ExportStemFile[];
 }
 
 /** SMF export — if no path, the engine shows a native save dialog (*.mid). */
@@ -1757,6 +1806,11 @@ export type MeterValues = [number, number, number, number];
 /** ~15 Hz (SPEC §5.4). Keys of `tracks` are trackIds as strings (JSON). */
 export interface MetersEvent {
   tracks: Record<string, MeterValues>;
+  /**
+   * Input meters (SPEC §5.5): post-input-gain capture level of armed/monitoring audio
+   * tracks, keyed by plain trackId. Absent rows mean the track isn't armed/monitoring.
+   */
+  inputs?: Record<string, MeterValues>;
   master: MeterValues;
 }
 
@@ -1962,6 +2016,7 @@ export interface RequestMap {
   "midi/preview": { req: MidiPreviewRequest; reply: EmptyObject };
   "midi/setThruTracks": { req: MidiSetThruTracksRequest; reply: EmptyObject };
   "media/import": { req: MediaImportRequest; reply: MediaImportReply };
+  "media/probe": { req: MediaProbeRequest; reply: MediaProbeReply };
   "media/relink": { req: MediaRelinkRequest; reply: EmptyObject };
   "cmd/media.removeUnused": { req: { preview?: boolean; deleteFiles?: boolean }; reply: { unused: Array<{ id: number; file: string }>; count: number; deletedFiles?: number } };
   "export/render": { req: ExportRenderRequest; reply: ExportRenderReply };

@@ -111,6 +111,11 @@ public:
         float vcaGain = 1.0f; // VCA-group multiplier (1 = no group), applied after the fader
         float pan = 0.0f;
         bool muted = false; // effective mute (Track::mute OR solo-in-place implicit)
+        // Pre-insert input gain (SPEC §5.5), audio tracks only (baked 1.0 elsewhere).
+        // Linear — dB→linear happens on the control thread. Applied to wl/wr right
+        // before the insert chain, so it covers clip playback AND live input but can
+        // never reach the record tap (which reads the raw driver buffers upstream).
+        float inputGain = 1.0f;
 
         std::vector<ResolvedAudioClip> audioClips; // frozen tracks: single clip at 0
         std::vector<NoteEvent> noteEvents;
@@ -129,6 +134,10 @@ public:
         std::vector<PluginAutoLane> pluginAuto;
 
         MeterSlot* meter = nullptr;  // nullptr offline / pool exhausted
+        // Input meter slot (armed/monitoring audio tracks; SPEC §5.5): post-input-gain
+        // capture level, written by a branch that must NEVER set liveAudioActive (that
+        // flag drops the track out of PDC — see processTrackRt).
+        MeterSlot* inputMeter = nullptr;
         int pdcDelaySamples = 0;     // alignment delay (computePdc)
         int chainLatency = 0;        // sum of insert latencies (latencySamples())
 
@@ -179,6 +188,7 @@ public:
     // ---- param-ring dispatch (RT, graph drain) ---------------------------------
     void applyVolumeRt(float v) noexcept { vol_.setTarget(v < 0.0f ? 0.0f : v); }
     void applyVcaGainRt(float g) noexcept { vcaGain_.store(g < 0.0f ? 0.0f : g, std::memory_order_relaxed); }
+    void applyInputGainRt(float g) noexcept { inGain_.setTarget(g < 0.0f ? 0.0f : g); }
     void applyPanRt(float v) noexcept;
     void applyMuteRt(bool muted) noexcept { mute_.setTarget(muted ? 0.0f : 1.0f); }
     void applySendLevelRt(int modelIndex, float v) noexcept;
@@ -227,6 +237,15 @@ public:
     // thread, before the node's pass). Merged into the next pass regardless of
     // cfg_.liveMidi and of the transport state; drops when the scratch buffer is full.
     void injectMidiRt(const MidiEvent& e) noexcept { injectedMidi_.add(e); }
+
+    // ---- stem-export tap (offline render only, SPEC §5.5) ----------------------
+    // After a pass, workL_/workR_ hold this track's FINAL signal — post-insert,
+    // post-EQ, post-PDC, post-fader/pan; exactly what it accumulated into its output
+    // bus — and survive untouched until the next pass's clear. Only the last pass's
+    // ctx.frames samples are valid; the tail past that is stale. Read between passes
+    // on the render thread only (renderOffline's stem loop), never concurrently.
+    const float* workL() const noexcept { return workL_.data(); }
+    const float* workR() const noexcept { return workR_.data(); }
 
     // ---- sidechain source tap (RT, read by destination tracks' insert loop) ----
     // Valid when cfg_.keepSidechain: the most recent block's pre-fader (post-insert, post-EQ)
@@ -300,6 +319,7 @@ private:
     GainSmoother vol_;
     GainSmoother mute_;
     GainSmoother pan_; // smooths the pan VALUE (-1..1); gains derived per 64-sample step
+    GainSmoother inGain_; // pre-insert input gain (SPEC §5.5); unity for non-audio tracks
     std::vector<GainSmoother> sendLevel_;
     std::vector<double> pluginAutoLast_;
 
