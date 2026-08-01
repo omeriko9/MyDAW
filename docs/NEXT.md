@@ -4,14 +4,20 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-01 — **Phase 3 (Recording & media) is COMPLETE**: input gain/metering
+Last updated: 2026-08-02 — the flaky `track-types` frequency assertion (former QUEUED #1)
+is FIXED: `freqOf` counted zero-crossings and read harmonics as extra crossings (a 440 Hz
+saw counted ~578); replaced with autocorrelation — the ratio now measures exactly 2.000
+across 7 consecutive runs, and the windows tightened to 1.9–2.1. Also new since 08-01:
+switchable UI shells, the Production Techniques wizard (55 techniques, backlog-driven),
+the stock Saturator, and `scripts/release.ps1` (one-command GitHub release).
+
+2026-08-01 state: **Phase 3 (Recording & media) is COMPLETE** — input gain/metering
 (file stays raw, SPEC §5.5), stem export (single-pass multi-sink), undoable `media/import` +
-tempo prompt (`media/probe`), and inline take lanes all shipped today. See ROADMAP Phase 3
-for what was built and why; nothing there is to be redone. The profile cleanup below it is
-also DONE (2026-08-01): 1.83 GB reclaimed — `%APPDATA%\MyDAW` went 1.85 GB → 49 MB, plus 727
-`mydaw-*` dirs (184 MB) out of `%TEMP%`. Only provably harness-generated files were removed
-(every deleted prefix traced to a script in the repo); 11 media files of unproven origin were
-KEPT, including a real recording `la da da da.wav`. Manifest of everything deleted:
+tempo prompt (`media/probe`), inline take lanes. See ROADMAP Phase 3; nothing there is to be
+redone. Profile cleanup DONE: 1.83 GB reclaimed — `%APPDATA%\MyDAW` went 1.85 GB → 49 MB,
+plus 727 `mydaw-*` dirs (184 MB) out of `%TEMP%`. Only provably harness-generated files were
+removed (every deleted prefix traced to a script in the repo); 11 media files of unproven
+origin were KEPT, including a real recording `la da da da.wav`. Manifest:
 `~\mydaw-cleanup-deleted-2026-08-01.txt`.
 
 ---
@@ -39,18 +45,7 @@ ride the existing bake path or a new non-RT sender thread.
 
 ## QUEUED
 
-### 1. Fix the `track-types` flaky assertion
-
-`scripts/track-types-test.mjs:133` asserts a transposed note doubles in frequency with
-`ratio > 1.8 && ratio < 2.2`. Measured across four consecutive runs: **2.216, 2.148, 2.107,
-2.098** — the estimator reads ~5% high, so the window is centred on 2.0 while the data
-clusters at ~2.12. It reddens the gate at random.
-
-Fix the ESTIMATOR (`freqOf` resolves the upper note poorly) rather than widening the window
-to hide it. A gate that cries wolf is the failure mode the gate exists to prevent — this is
-currently the only thing in the suite that lies.
-
-### 2. Single capture endpoint: fix or surface honestly
+### 1. Single capture endpoint: fix or surface honestly
 
 `App::desiredCaptureDeviceId()` (App.cpp:535) opens ONE endpoint — the first
 armed/monitoring audio track's — and hands the same buffer to every armed node. A second

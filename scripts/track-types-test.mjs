@@ -65,15 +65,37 @@ const wavSamples = (file) => {
   return { sr, samples: out };
 };
 const peakOf = (file) => { const d = wavSamples(file); return d ? Math.max(...d.samples.map(Math.abs)) : null; };
-// dominant frequency via zero-crossing count over [t0,t1) seconds
+// Fundamental frequency via autocorrelation over [t0,t1) seconds. The previous
+// zero-crossing count read HARMONICS as extra crossings — a 440 Hz saw through the
+// polysynth's filter counted ~578 Hz, wandering run to run (NEXT.md's flaky-gate
+// entry: ratios 2.10–2.22 against a 1.8–2.2 window). Autocorrelation finds the
+// PERIOD, which harmonics share, so the estimate is stable to ~1%.
 const freqOf = (file, t0, t1) => {
   const d = wavSamples(file);
   if (!d) return null;
-  const a = Math.floor(t0 * d.sr), b = Math.min(Math.floor(t1 * d.sr), d.samples.length);
-  let crossings = 0;
-  for (let i = a + 1; i < b; i++)
-    if ((d.samples[i - 1] < 0) !== (d.samples[i] < 0)) crossings++;
-  return crossings / 2 / (t1 - t0);
+  const a = Math.floor(t0 * d.sr);
+  const n = Math.min(8192, Math.floor((t1 - t0) * d.sr), d.samples.length - a);
+  if (n < 2048) return null;
+  const x = d.samples.slice(a, a + n);
+  const mean = x.reduce((s, v) => s + v, 0) / n;
+  for (let i = 0; i < n; i++) x[i] -= mean;
+  const minLag = Math.max(2, Math.floor(d.sr / 2000)); // ≤2 kHz
+  const maxLag = Math.min(Math.floor(d.sr / 50), n >> 1); // ≥50 Hz
+  const r = new Float64Array(maxLag + 1);
+  let best = -Infinity, bestLag = minLag;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let s = 0;
+    for (let i = 0; i + lag < n; i++) s += x[i] * x[i + lag];
+    r[lag] = s / (n - lag);
+    if (r[lag] > best) { best = r[lag]; bestLag = lag; }
+  }
+  // Multiples of the true period correlate just as well, so the global max can land
+  // an octave (or two) LOW — take the smallest local peak that rivals it instead.
+  let lag = bestLag;
+  for (let l = minLag + 1; l < bestLag; l++) {
+    if (r[l] >= 0.9 * best && r[l] >= r[l - 1] && r[l] >= r[l + 1]) { lag = l; break; }
+  }
+  return d.sr / lag;
 };
 
 try {
@@ -137,7 +159,7 @@ try {
   const f1 = freqOf(wav1, 0.5, 1.5);
   const f2 = freqOf(wav1, 2.5, 3.5);
   report("transpose event shifts playback +12 st (frequency doubles)",
-    f1 !== null && f2 !== null && f2 / f1 > 1.8 && f2 / f1 < 2.2,
+    f1 !== null && f2 !== null && f2 / f1 > 1.9 && f2 / f1 < 2.1,
     `f1=${f1?.toFixed(1)}Hz f2=${f2?.toFixed(1)}Hz ratio=${(f2 / f1).toFixed(3)}`);
   // clips keep raw pitches
   const rawPitches = (await proj()).tracks.find((t) => t.id === inst.id).clips[0].notes.map((n) => n.pitch);
@@ -190,9 +212,9 @@ try {
   const wavFlat = path.join(TMP, "flat.wav");
   await req("export/render", { path: wavFlat, startBeat: 0, endBeat: 8, format: { type: "wav", bitDepth: 16 } }, 300000);
   const ff1 = freqOf(wavFlat, 0.5, 1.5), ff2 = freqOf(wavFlat, 2.5, 3.5);
-  report("flattened render: 880 Hz first, 440 Hz second",
-    ff1 !== null && ff2 !== null && ff1 / ff2 > 1.8 && ff1 / ff2 < 2.2,
-    `first=${ff1?.toFixed(1)}Hz second=${ff2?.toFixed(1)}Hz`);
+  report("flattened render: first note an octave ABOVE the second (B then A)",
+    ff1 !== null && ff2 !== null && ff1 / ff2 > 1.9 && ff1 / ff2 < 2.1,
+    `first=${ff1?.toFixed(1)}Hz second=${ff2?.toFixed(1)}Hz ratio=${(ff1 / ff2).toFixed(3)}`);
 
   /* ---- 7. persistence ---- */
   await req("cmd/arranger.addSection", { name: "P", startBeat: 0, endBeat: 4 });
