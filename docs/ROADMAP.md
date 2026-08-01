@@ -228,9 +228,15 @@ drawn inline in the arrangement (ClipCanvas) with on-timeline swipe; MIDI loop-r
   process's editor window → JPEG/WebP frames over a dedicated WS + mouse/wheel/keyboard
   forwarding (design in ARCHITECTURE.md §future; WebRTC/H.264 later). Generic editor
   stays the fallback.
-- WASAPI exclusive-mode verification on real hardware.
-- Packaging: portable zip builder + Inno Setup script; engine unit-test target (CTest)
-  beyond the two protocol-level test scripts.
+- WASAPI exclusive-mode verification on real hardware — DONE 2026-07-31 (exclusive mode
+  solved the observed MIDI-to-audio latency on the NI Audio Kontrol 1).
+- **Packaging — portable single exe DONE (2026-08-01)**: `scripts/package-portable.ps1`
+  wraps the FROZEN build outputs (engine + both hosts + ui/dist + LICENSE, all static-CRT)
+  in an IExpress self-extractor — `dist/MyDAW-Portable-<v>.exe` unpacks once per version to
+  `%LOCALAPPDATA%\MyDAW\app` and starts the engine; re-click while running reopens the UI
+  tab. Per-user, no admin/registry/firewall prompt; published in GitHub Releases (v1.0.0).
+  Still open: Inno Setup installer variant (Start Menu/uninstaller), code signing
+  (SmartScreen), engine unit-test target (CTest) beyond the protocol-level scripts.
 
 ## Phase 6 — Time-stretch ✅ (2026-07-03)
 

@@ -39,6 +39,22 @@ never takes down your session.
 Honest status: a working MVP used on real projects and hardware. What's deliberately
 deferred is listed in [docs/STUBS.md](docs/STUBS.md) — no dead buttons.
 
+## Download (no build needed)
+
+Grab **`MyDAW-Portable-<version>.exe`** from the
+[latest release](https://github.com/omeriko9/MyDAW/releases/latest) and double-click it.
+The exe *is* the app: it unpacks itself into your user folder on first run and opens
+MyDAW in your browser. No admin rights, no installer, no registry, no firewall prompt
+(the engine listens on localhost only).
+
+- **Windows 10/11, 64-bit.** Makes sound out of the box with the built-in instruments
+  and effects; point Settings ▸ Plugins at your VST folders to use your own.
+- **First run:** Windows SmartScreen warns about unsigned apps — click
+  **More info → Run anyway**. (A code-signing certificate is the only cure.)
+- **Where things live:** the app in `%LOCALAPPDATA%\MyDAW`, settings in
+  `%APPDATA%\MyDAW`, projects wherever you save them.
+- **Uninstall:** delete the exe and those two folders. That's everything.
+
 ## Build
 
 Prerequisites: **Windows 10/11 x64**, **Visual Studio 2026** with the C++ workload

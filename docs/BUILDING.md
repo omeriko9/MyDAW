@@ -98,8 +98,27 @@ Three things the gate does that are easy to get wrong by hand:
 - **It builds nothing.** If `ui/dist` or the engine is stale the gate tests the stale
   thing, so build first — and never while `ui-drive` slots are running.
 
+## Packaging a release (portable single exe)
+
+```powershell
+pwsh scripts/package-portable.ps1 -Version 1.0.0
+```
+
+Wraps the **current** build outputs (`build\bin\Release\mydaw-engine.exe`,
+`mydaw-host64.exe`, `build32\...\mydaw-host32.exe`, `ui\dist`, `LICENSE`) in an IExpress
+self-extractor → `dist\MyDAW-Portable-<v>.exe` (+ `.sha256`). The packager **builds
+nothing** — it freezes whatever is on disk, so build + run `node scripts/gate.mjs --full`
+first. On the user's machine the exe unpacks once per version to `%LOCALAPPDATA%\MyDAW\app`
+(hidden VBS→PowerShell launcher, `scripts/portable/`) and starts the engine; double-clicking
+while MyDAW is running just reopens the browser tab. Per-user, no admin, no registry, no
+firewall prompt (loopback-only server). The artifact is unsigned → SmartScreen "More info →
+Run anyway" on first download; a code-signing cert is the only cure. Publish with
+`gh release create v<v> dist\MyDAW-Portable-<v>.exe ...`.
+
 ## Notes
 
-- Static CRT (`/MT`) everywhere — the exes have no VC runtime dependency.
+- Static CRT (`/MT`) everywhere — the exes have no VC runtime dependency (this is also
+  what makes the portable package dependency-free).
 - `build/`, `build32/`, `ui/node_modules` are marked Dropbox-ignored via NTFS streams.
 - Plugin scan cache and blacklist live in `%APPDATA%/MyDAW/`.
+- `dist/` (packaged artifacts) is gitignored — releases live in GitHub Releases, not git.

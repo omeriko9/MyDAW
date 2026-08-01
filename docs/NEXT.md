@@ -18,11 +18,14 @@ KEPT, including a real recording `la da da da.wav`. Manifest of everything delet
 
 ## DECIDED (Omer, 2026-08-01) — MyDAW is an INSTRUMENT for its author, not a product yet
 
-So packaging/installer and first-run experience stay parked (ASSESSMENT §3.4/§4 keep the
-reasoning). The ordering that follows from this: fix what gets hit while *playing* — the
-flaky gate assertion, then MIDI hardware output, then the scale/robustness items. Revisit
-if the answer ever changes; the multi-input capture trap below becomes a blocker the moment
-someone else records with it.
+…with one amendment from the same day: Omer asked for a **1-click portable exe** so
+non-technical users can run it — shipped as `MyDAW-Portable-1.0.0.exe` in GitHub Releases
+(`scripts/package-portable.ps1`; ROADMAP Phase 5 has the details). That is distribution
+*plumbing*, not productization: no installer, no signing, no first-run onboarding — those
+stay parked until the identity answer changes. The ordering otherwise stands: fix what gets
+hit while *playing* — the flaky gate assertion, then MIDI hardware output, then the
+scale/robustness items. The multi-input capture trap below becomes a blocker the moment
+someone else records with it — and "someone else" now has an exe they can download.
 
 ## NOW — MIDI hardware output (ROADMAP Phase 5)
 

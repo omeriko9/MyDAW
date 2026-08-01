@@ -48,3 +48,4 @@ scripts/cpr-sx-fader-test.mjs
 scripts/cpr-taper-harvest.mjs
 scripts/midi-route-render-test.mjs
 scripts/recreate-test.mjs
+/dist/
