@@ -52,6 +52,9 @@ Set-Content (Join-Path $work 'version.txt') $Version
 New-Item -ItemType Directory -Force $out | Out-Null
 $target = Join-Path $out $name
 if (Test-Path $target) { Remove-Item $target -Force }
+# iexpress builds "~<TargetName>.CAB" next to the target and LEAVES IT BEHIND on success;
+# finding one on the next run makes it fail silently (exit 1, no output). Clear it.
+Get-ChildItem $out -Filter '~*.CAB' -ErrorAction SilentlyContinue | Remove-Item -Force
 $sed = Join-Path $work 'mydaw.sed'
 @"
 [Version]
@@ -101,6 +104,7 @@ SourceFiles0=$work\
 
 & "$env:WINDIR\System32\iexpress.exe" /N /Q $sed | Out-Null
 if (-not (Test-Path $target)) { throw "iexpress produced no output (SED: $sed)" }
+Get-ChildItem $out -Filter '~*.CAB' -ErrorAction SilentlyContinue | Remove-Item -Force
 
 $sha = (Get-FileHash $target -Algorithm SHA256).Hash.ToLower()
 $mb  = [math]::Round((Get-Item $target).Length / 1MB, 1)
