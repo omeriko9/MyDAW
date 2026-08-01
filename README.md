@@ -3,6 +3,11 @@
 **A free, open-source DAW for Windows.** Native C++ audio engine, browser-based UI,
 real VST plugin support — including 32-bit plugins and your old Cubase projects.
 
+![MyDAW — arrangement, mixer routing, live sheet-music engraving and the in-app AI agent, all on one project](docs/screenshot.jpg)
+
+*One project, three views: the arrangement with VST instrument routing, the same MIDI
+engraved as sheet music below it, and the AI assistant analyzing the harmony on the right.*
+
 The browser is only the control surface: all audio, MIDI, and plugin processing runs in
 native processes. Every plugin lives in its own sandboxed process, so a crashing plugin
 never takes down your session.
@@ -57,7 +62,7 @@ Your browser opens `http://127.0.0.1:8417` with the UI. Point Settings ▸ Plugi
 VST folders, hit scan, and make some noise.
 
 Quick sanity check (headless): `node scripts/smoke-test.mjs`
-Full test gate (26 suites, ~90 s): `node scripts/gate.mjs`
+Full test gate (30 suites, ~2 min): `node scripts/gate.mjs`
 
 ## Repository layout
 
