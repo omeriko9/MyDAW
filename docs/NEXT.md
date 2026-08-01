@@ -7,32 +7,32 @@ ever disagree, this one is wrong — fix it here rather than starting a third li
 Last updated: 2026-08-01 — **Phase 3 (Recording & media) is COMPLETE**: input gain/metering
 (file stays raw, SPEC §5.5), stem export (single-pass multi-sink), undoable `media/import` +
 tempo prompt (`media/probe`), and inline take lanes all shipped today. See ROADMAP Phase 3
-for what was built and why; nothing there is to be redone.
+for what was built and why; nothing there is to be redone. The profile cleanup below it is
+also DONE (2026-08-01): 1.83 GB reclaimed — `%APPDATA%\MyDAW` went 1.85 GB → 49 MB, plus 727
+`mydaw-*` dirs (184 MB) out of `%TEMP%`. Only provably harness-generated files were removed
+(every deleted prefix traced to a script in the repo); 11 media files of unproven origin were
+KEPT, including a real recording `la da da da.wav`. Manifest of everything deleted:
+`~\mydaw-cleanup-deleted-2026-08-01.txt`.
 
 ---
 
-## NOW — clean the test residue out of the developer profile
+## DECIDED (Omer, 2026-08-01) — MyDAW is an INSTRUMENT for its author, not a product yet
 
-`%APPDATA%\MyDAW\media` holds **~1.6 GB across ~910 files** — render, bounce and DOP output
-that harnesses wrote there before APPDATA isolation (940 MB of it on 2026-07-31 alone).
-Isolation stops it growing; the pile is still there.
+So packaging/installer and first-run experience stay parked (ASSESSMENT §3.4/§4 keep the
+reasoning). The ordering that follows from this: fix what gets hit while *playing* — the
+flaky gate assertion, then MIDI hardware output, then the scale/robustness items. Revisit
+if the answer ever changes; the multi-input capture trap below becomes a blocker the moment
+someone else records with it.
 
-**Do not bulk-delete the folder.** `fallbackMediaDir()` is also where a never-saved session's
-audio lives — a `.cpr` import that has not been saved yet has its assets there. Match test
-patterns (`sine440*`, `bounce-*`, `clip-*`, `rec-*`) and show the list before deleting.
+## NOW — MIDI hardware output (ROADMAP Phase 5)
 
-Also still present from the 2026-07-31 incident: autosave slots in `%APPDATA%\MyDAW\autosave`
-holding a recovered test fixture, and `mydaw-*` directories in `%TEMP%`.
+The most conspicuous absence for an instrument: MyDAW cannot drive an external synth or act
+as a sequencer for outboard gear. `midiOutOpen` sibling of `MidiInput` (winmm) + a per-track
+MIDI-output routing field. See STUBS "MIDI hardware output".
 
----
-
-## DECISION PENDING (Omer) — what MyDAW is optimizing for
-
-Recorded in [ASSESSMENT_2026-08-01.md](ASSESSMENT_2026-08-01.md) §4: the next big arc
-depends on whether MyDAW is primarily **an instrument for its author** (→ MIDI hardware
-output next, then scale/robustness) or **a product for others** (→ packaging/installer +
-first-run experience jumps the queue, and the multi-input capture trap below becomes a
-blocker). Ask before starting either arc.
+Start by deciding the model shape (a `Track.midiOutDevice` mirroring `inputDevice`, applied
+where `midiOutChannel` already re-stamps what a track ORIGINATES) and whether output events
+ride the existing bake path or a new non-RT sender thread.
 
 ## QUEUED
 

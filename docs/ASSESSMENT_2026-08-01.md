@@ -104,18 +104,26 @@ the top of NEXT.md:
 - **A product for others** → packaging + first-run experience jumps the queue, and the
   multi-input capture trap must be fixed before anyone else records with it.
 
-**Decision 2026-08-01:** finish Phase 3 first (work starting today: input gain/metering with
-the SPEC §5.5 decision, stem export, undoable import + tempo prompt, take lanes inline).
-The identity question gets asked again at the NEXT.md refresh that follows — with
-distribution as the standing candidate if the answer is "product".
+**Decision 2026-08-01 (a):** finish Phase 3 first — done the same day (input gain/metering
+with the SPEC §5.5 raw-file decision, stem export, undoable import + tempo prompt, take
+lanes inline).
+
+**Decision 2026-08-01 (b) — Omer: MyDAW is an instrument for its author, NOT a product yet.**
+So §3.4 (distribution) stays parked despite being the most conspicuous gap from the outside,
+and the ordering follows the "instrument" column: finish what gets hit while playing. NEXT.md
+carries the concrete queue. The multi-input capture trap (§3.1) is the one item that changes
+severity if this decision is ever revisited — it is harmless for a solo author who arms one
+track at a time, and a data-loss bug the moment anyone else multi-tracks a live source.
 
 ## 5. Housekeeping ledger (as of writing)
 
 - `main` is **11 commits ahead of origin, unpushed** (the Phase 3 recording merge).
 - `feat/phase3-recording` is merged and deletable.
-- ~1.6 GB of pre-isolation test residue in `%APPDATA%\MyDAW\media` — queued in NEXT.md;
-  pattern-match and list before deleting, never bulk-delete (fallback media dir also holds
-  never-saved session audio).
+- ~~1.6 GB of pre-isolation test residue in `%APPDATA%\MyDAW\media`~~ — **CLEARED
+  2026-08-01**: 1.83 GB reclaimed (profile 1.85 GB → 49 MB, plus 727 `mydaw-*` temp dirs).
+  Method worth repeating: every deleted filename prefix was traced back to a script in the
+  repo before deletion; 11 files of unproven origin were kept (one, `la da da da.wav`, is a
+  real recording), and autosave chunks were pruned only when no slot mentioned their id.
 - `track-types-test.mjs` frequency estimator reads ~5% high → flaky gate assertion (the only
   thing in the suite that lies). Queued.
 - `scripts/rebuild.ps1` kills running engines it did not start (killed a live session once,
