@@ -362,11 +362,14 @@ export const checks = [
         (await s.probe("session/hello", { clientName: "smoke" })).payload.project.masterTrack.inserts;
       const before = await insertsOnMaster();
 
+      // The 40-technique browser scrolls (72vh modal body): scroll the target into
+      // view BEFORE measuring, or the click lands on whatever covers that Y.
       const clickStarts = async (selector, text) => {
         const box = await s.eval(`(() => {
           const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
             .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
           if (!el) return null;
+          el.scrollIntoView({ block: "center" });
           const b = el.getBoundingClientRect();
           return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
         })()`);

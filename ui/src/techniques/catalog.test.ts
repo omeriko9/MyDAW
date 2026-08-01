@@ -43,10 +43,10 @@ function fakeCtx(): TechniqueCtx {
 }
 
 describe("technique catalog integrity", () => {
-  it("ships 10 techniques, 2 per category", () => {
-    expect(TECHNIQUES.length).toBe(10);
+  it("ships 40 techniques, 8 per category (v1 batch + the 30-technique expansion)", () => {
+    expect(TECHNIQUES.length).toBe(40);
     for (const cat of CATEGORY_ORDER)
-      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(2);
+      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(8);
   });
 
   it("ids are unique and kebab-case", () => {
@@ -107,6 +107,8 @@ describe("builtin param normalization mirror", () => {
       "builtin:reverb",
       "builtin:sampler",
       "builtin:polysynth",
+      "builtin:gate",
+      "builtin:utility",
     ])
       expect(Object.keys(BUILTIN_PARAM_SPECS[uid]).length, uid).toBeGreaterThan(1);
   });

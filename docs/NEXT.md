@@ -62,10 +62,10 @@ different devices (SPEC §10). Must land before anyone else multi-tracks a live 
 
 ## ONGOING — not blocked, just not next
 
-- **Production Techniques**: v1 shipped 2026-08-01 — 10 guided wizards (Project ▸
-  Production Techniques…), 2 per category. Growing the catalog is Omer-paced via
-  docs/PRODUCTION_TECHNIQUES_BACKLOG.md (per-category queues + the primitive-gaps
-  table that motivates engine work like a stock saturator).
+- **Production Techniques**: 40 guided wizards shipped 2026-08-01 (v1 + the 30-technique
+  batch; 8 per category — Project ▸ Production Techniques… / Alt+T). Growing further is
+  Omer-paced via docs/PRODUCTION_TECHNIQUES_BACKLOG.md (per-category queues + the
+  primitive-gaps table that motivates engine work like a stock saturator).
 
 - **Sample-accurate live MIDI** (ROADMAP Phase 4): live input lands at block offset 0
   (`MidiInput.cpp:277`, ≤1.3 ms jitter at 64 frames); the QPC timestamps needed to place it

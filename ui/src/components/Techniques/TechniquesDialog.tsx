@@ -21,7 +21,7 @@ import { Icon } from "../common/icons";
 import { showToast } from "../common/ToastHost";
 import { confirmDialog } from "../Dialogs/confirm";
 import { TECHNIQUES } from "../../techniques/catalog";
-import { allAudioClips, beatsPerBarOf, bpmOf, isMixerTrack } from "../../techniques/ops";
+import { allAudioClips, allMidiClips, beatsPerBarOf, bpmOf, isMixerTrack } from "../../techniques/ops";
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
@@ -136,7 +136,8 @@ function ParamInput({
     );
   }
   // clip
-  const clips = allAudioClips(ctx);
+  const midi = def.clipKind === "midi";
+  const clips = midi ? allMidiClips(ctx) : allAudioClips(ctx);
   return (
     <Select
       value={String(value)}
@@ -144,9 +145,9 @@ function ParamInput({
         clips.length > 0
           ? clips.map((f) => ({
               value: String(f.clip.id),
-              label: `${f.track.name} · ${f.clip.name || "audio clip"}`,
+              label: `${f.track.name} · ${f.clip.name || (midi ? "MIDI clip" : "audio clip")}`,
             }))
-          : [{ value: "0", label: "(no audio clips)" }]
+          : [{ value: "0", label: midi ? "(no MIDI clips)" : "(no audio clips)" }]
       }
       onChange={(v) => onChange(Number(v))}
       width={220}

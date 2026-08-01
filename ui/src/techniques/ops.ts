@@ -229,6 +229,32 @@ export function allAudioClips(ctx: TechniqueCtx): Array<{ track: Track; clip: Tr
   return out;
 }
 
+/** Every MIDI clip in the project, with its track. */
+export function allMidiClips(ctx: TechniqueCtx): Array<{ track: Track; clip: MidiClip }> {
+  const out: Array<{ track: Track; clip: MidiClip }> = [];
+  for (const t of ctx.project.tracks)
+    for (const c of t.clips) if (c.type === "midi") out.push({ track: t, clip: c });
+  return out;
+}
+
+/** Resolve a MIDI-clip param (explicit id → that clip; 0 → first selected MIDI clip). */
+export function resolveMidiClip(
+  ctx: TechniqueCtx,
+  clipId: number | undefined,
+): { track: Track; clip: MidiClip } | null {
+  const all = allMidiClips(ctx);
+  if (clipId !== undefined && clipId !== 0) return all.find((x) => x.clip.id === clipId) ?? null;
+  for (const id of ctx.selection.clipIds) {
+    const hit = all.find((x) => x.clip.id === id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** cmd/clip.stretch transpose semantics: pitch × ratio at constant length —
+ *  ratio = 2^(semitones/12) (engine clamps 0.25..4 = ±24 st). */
+export const pitchRatio = (semitones: number) => Math.pow(2, semitones / 12);
+
 /**
  * Resolve a clip-param value: explicit id → that audio clip; 0/absent → the first
  * SELECTED audio clip; null when neither resolves.

@@ -55,8 +55,8 @@ export interface ParamDef {
   options?: Array<{ value: string; label: string }>;
   /** kind "track": which tracks qualify (default: all non-view-row tracks). */
   trackFilter?: (t: Track) => boolean;
-  /** kind "clip": offer audio clips only (v1's only clip-param use). */
-  audioOnly?: boolean;
+  /** kind "clip": which clip type the picker offers (default "audio"). */
+  clipKind?: "audio" | "midi";
   /** Context-computed default (track/clip kinds return an id, or 0 = none). */
   default: (ctx: TechniqueCtx) => number | string;
   help?: string;
