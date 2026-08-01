@@ -93,6 +93,7 @@ bool App::init(std::string& err) {
 
     // 3. MIDI input + recorder mirror wiring (E5 requirement).
     midiInput.start();
+    midiOutput.start(); // sender thread; devices open lazily per Track::midiOutDevice
     midiRecorder.setInput(&midiInput);
     midiInput.setActivityCallback([this](const std::string& deviceId) {
         // winmm callback thread -> marshal to main (model read for trackId).
@@ -498,7 +499,7 @@ void App::prepareGraphFormat(const AudioConfig& actual) {
     currentMaxBlock_ = std::max(actual.bufferSize, 2048);
     tempoMap.setSampleRate(static_cast<double>(currentSampleRate_));
     graph->configure(currentSampleRate_, currentMaxBlock_, &meters, &assetStore, host.get(),
-                     builtin.get(), &midiInput, metronome.get());
+                     builtin.get(), &midiInput, metronome.get(), &midiOutput);
     graph->setRecordTap(&audioRecorder);
     if (cmd) {
         cmd->setAudioFormat(currentSampleRate_, currentMaxBlock_);
@@ -601,6 +602,7 @@ json App::engineHelloInfo() {
 
 void App::panic() {
     graph->allNotesOff();
+    midiOutput.allNotesOff(); // external synths must not hang notes either
 }
 
 void App::previewNote(uint64_t trackId, int pitch, int velocity, bool on) {
@@ -1303,6 +1305,7 @@ void App::shutdown() {
     builtin->destroyAll();
     midiInput.setActivityCallback({});
     midiInput.stop();
+    midiOutput.stop(); // allNotesOff + close handles + join the sender thread
     projectIO.clearSessionLock(); // clean shutdown — no recovery offer next run (§6)
 }
 

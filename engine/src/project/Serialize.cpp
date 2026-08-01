@@ -428,6 +428,8 @@ json toJson(const Track& t) {
         j["midiTarget"] = t.midiTarget; // kind==Midi only (SPEC §6); omitted when 0
     if (t.midiOutChannel > 0)
         j["midiOutChannel"] = t.midiOutChannel; // 1..16; omitted when 0 (= as played)
+    if (!t.midiOutDevice.empty())
+        j["midiOutDevice"] = t.midiOutDevice; // winmm device NAME; omitted when none
     if (!t.midiMod.isDefault())
         j["midiMod"] = json{{"transpose", t.midiMod.transpose},
                             {"velocityShift", t.midiMod.velocityShift},
@@ -895,6 +897,7 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.frozenAssetId = getOr<uint64_t>(j, "frozenAssetId", 0);
     out.midiTarget = getOr<uint64_t>(j, "midiTarget", 0); // validated at Project level
     out.midiOutChannel = std::clamp(getOr<int>(j, "midiOutChannel", 0), 0, 16);
+    out.midiOutDevice = getOr<std::string>(j, "midiOutDevice", "");
     if (hasKey(j, "midiMod") && j.find("midiMod")->is_object()) {
         const json& mm = *j.find("midiMod");
         out.midiMod.transpose = std::clamp(getOr<int>(mm, "transpose", 0), -24, 24);

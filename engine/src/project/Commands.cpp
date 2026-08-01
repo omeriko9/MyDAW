@@ -1460,6 +1460,18 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         any = true;
         mixerOnly = false;
     }
+    if (hasKey(patch, "midiOutDevice")) {
+        if (t->kind != TrackKind::Midi && t->kind != TrackKind::Instrument)
+            return r.fail("bad_request",
+                          "hardware MIDI output applies to MIDI/Instrument tracks only");
+        const std::string dev = getOr<std::string>(patch, "midiOutDevice", t->midiOutDevice);
+        if (t->midiOutDevice != dev) {
+            t->midiOutDevice = dev;
+            r.structural = true; // the device slot is resolved into the graph's node config
+        }
+        any = true;
+        mixerOnly = false;
+    }
     if (hasKey(patch, "midiMod") && patch["midiMod"].is_object()) {
         if (t->kind != TrackKind::Midi && t->kind != TrackKind::Instrument)
             return r.fail("bad_request",

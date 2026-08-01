@@ -45,6 +45,10 @@
 #include "project/Model.h" // AutomationPoint
 
 namespace mydaw {
+class MidiOutput; // midi/MidiOutput.h — hardware-out ring (Config::midiOut)
+}
+
+namespace mydaw {
 
 class IInsertNode; // core/IInsertNode.h — insert node (PluginProxyNode or BuiltinEffectNode)
 struct MeterSlot;
@@ -150,6 +154,13 @@ public:
         // this track ORIGINATES onto that channel. Feeder-delivered events are exempt —
         // each feeder already stamped its own channel, which is the point of the routing.
         int midiOutChannel = 0;
+        // Hardware MIDI output (Track::midiOutDevice, SPEC §5.5): resolved winmm slot
+        // (-1 = none) + the manager whose lock-free ring RT pushes into. Everything
+        // this track ORIGINATES — the fully assembled per-block buffer (baked + live +
+        // injected, after midiOutChannel/midiMod) — is queued; feeder-DELIVERED events
+        // are exempt (they go to the hardware of the track that originated them).
+        int midiOutSlot = -1;
+        MidiOutput* midiOut = nullptr;
         // MIDI Modifiers (Track::midiMod, playback-only): the baked note events already
         // carry them; these apply the SAME transform to live/injected events at RT time
         // so thru matches playback. Feeder-delivered events are exempt (origin applies).

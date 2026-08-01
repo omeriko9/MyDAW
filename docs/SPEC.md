@@ -454,6 +454,20 @@ the entire drag.
   post-gain.
 - `midi/getInputs {}` → `{inputs:[{id,name,enabled}]}`; `midi/setInputEnabled {id, enabled}`;
   `event/midiActivity {deviceId, trackId?}` (throttled).
+- **Hardware MIDI output** (2026-08-02): `midi/getOutputs {}` →
+  `{outputs:[{id,name,open,sent}]}` (winmm; `sent` = short messages delivered since open —
+  the headless observable, there being no loopback). `Track.midiOutDevice` (midi/instrument
+  only; device NAME, "" = none; structural patch via `cmd/track.set`) routes everything the
+  track ORIGINATES — the fully assembled per-block buffer after `midiOutChannel`
+  re-stamping and `midiMod` shaping; feeder-DELIVERED events are exempt — to the device.
+  RT pushes into a lock-free MPSC ring; a 1 ms-poll sender thread calls `midiOutShortMsg`
+  (winmm never touched from the audio thread). TIMING HONESTY: events are sent at block
+  RENDER time — they lead the speakers by the output latency and carry up to one block +
+  ~1 ms jitter; fine for sequencing outboard gear, not sample-accurate. Note hygiene:
+  transport/stop, engine/panic and engine shutdown send sustain-off + all-sound-off +
+  all-notes-off (ch 1–16) to every open device. A missing device logs once, resolves to
+  no slot, and the track simply stays silent on hardware (never an error at play time).
+  Test: `scripts/midi-out-test.mjs` (gate "midi-out"; SKIPs only with zero devices).
 - `media/import {paths:[...], trackId?, atBeat?}` → decodes (wav/mp3/flac via MF; .mid via
   SmfReader) into project, creates clips if trackId given. Reply `{assets:[Asset], clips:[Clip],
   tracks:[Track] }` (midi files may create tracks). SMF track names are sanitized (truncated at

@@ -510,6 +510,12 @@ struct Track {
     // instrument, each on its own channel (SPEC §6).
     int midiOutChannel = 0;
 
+    // Hardware MIDI output for kind==Midi/Instrument (SPEC §5.5): winmm output device
+    // NAME (stable across index shuffles), "" = none. Everything this track ORIGINATES
+    // (baked + live + injected, after midiOutChannel/midiMod) is also sent to the
+    // device — MyDAW as a sequencer for outboard gear.
+    std::string midiOutDevice;
+
     // MIDI Modifiers (MIDI/Instrument tracks; playback-only). Omitted from JSON when
     // default. See MidiModifiers above.
     MidiModifiers midiMod;

@@ -4,7 +4,7 @@
  * arm/monitor/mute/solo, sends, inserts, freeze/bounce.
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { DriverInfo, Project, Track } from "../../protocol/types";
 import { useStore } from "../../store/store";
@@ -18,6 +18,7 @@ import {
   dragSend,
   dragTrack,
   dragVcaGain,
+  getMidiOutputs,
   midiLearn,
   midiUnlearn,
   movePlugin,
@@ -157,6 +158,24 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
   const isInstrument = track.kind === "instrument";
   const canArm = track.kind === "audio" || track.kind === "midi" || track.kind === "instrument";
   const buses = project.tracks.filter((t) => t.kind === "bus" && t.id !== id);
+
+  // Hardware MIDI outputs (SPEC §5.5) — fetched once per section mount; the list only
+  // changes on device hot-plug, and reopening the Inspector re-reads it.
+  const [midiOutDevices, setMidiOutDevices] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    if (!(isMidi || isInstrument)) return;
+    let alive = true;
+    getMidiOutputs()
+      .then((r) => {
+        if (alive) setMidiOutDevices(r.outputs);
+      })
+      .catch(() => {
+        /* pre-midiOut engine — the row simply offers "None" */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isMidi, isInstrument]);
 
   const run = (what: "freeze" | "bounce", fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -375,6 +394,26 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
             options={midiChannelOptions}
             onChange={(v) => void setTrack(id, { midiOutChannel: Number(v) })}
             title="MIDI output channel — force this track's notes onto one channel of a multitimbral instrument"
+          />
+        </div>
+      )}
+
+      {(isMidi || isInstrument) && (
+        <div className="insp-row">
+          <span className="insp-label">MIDI Out</span>
+          <Select
+            className="grow"
+            value={track.midiOutDevice ?? ""}
+            options={[
+              { value: "", label: "None (internal only)" },
+              ...midiOutDevices.map((d) => ({ value: d.name, label: d.name })),
+              // keep a saved device visible even while it is unplugged
+              ...(track.midiOutDevice && !midiOutDevices.some((d) => d.name === track.midiOutDevice)
+                ? [{ value: track.midiOutDevice, label: `${track.midiOutDevice} (not present)` }]
+                : []),
+            ]}
+            onChange={(v) => void setTrack(id, { midiOutDevice: v })}
+            title="Hardware MIDI output — everything this track plays is also sent to the device (external synths, outboard gear)"
           />
         </div>
       )}

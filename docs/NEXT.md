@@ -4,12 +4,15 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-02 — the flaky `track-types` frequency assertion (former QUEUED #1)
-is FIXED: `freqOf` counted zero-crossings and read harmonics as extra crossings (a 440 Hz
-saw counted ~578); replaced with autocorrelation — the ratio now measures exactly 2.000
-across 7 consecutive runs, and the windows tightened to 1.9–2.1. Also new since 08-01:
-switchable UI shells, the Production Techniques wizard (55 techniques, backlog-driven),
-the stock Saturator, and `scripts/release.ps1` (one-command GitHub release).
+Last updated: 2026-08-02 — three in one day: (1) the flaky `track-types` frequency
+assertion (former QUEUED #1) FIXED — `freqOf` counted zero-crossings and read harmonics
+as extra crossings; replaced with autocorrelation, ratio now exactly 2.000 across 7 runs,
+windows tightened to 1.9–2.1; (2) **v1.1.0 RELEASED** to GitHub (shells + 55 techniques +
+saturator) via the new `scripts/release.ps1`; (3) **MIDI hardware output SHIPPED** (the
+long-standing NOW item) — `Track.midiOutDevice` → winmm via a lock-free ring + sender
+thread, note-hygiene flush on stop/panic, gate suite "midi-out" (SPEC §5.5). Also new
+since 08-01: switchable UI shells, the Production Techniques wizard (55 techniques,
+backlog-driven), the stock Saturator.
 
 2026-08-01 state: **Phase 3 (Recording & media) is COMPLETE** — input gain/metering
 (file stays raw, SPEC §5.5), stem export (single-pass multi-sink), undoable `media/import` +
@@ -33,34 +36,32 @@ hit while *playing* — the flaky gate assertion, then MIDI hardware output, the
 scale/robustness items. The multi-input capture trap below becomes a blocker the moment
 someone else records with it — and "someone else" now has an exe they can download.
 
-## NOW — MIDI hardware output (ROADMAP Phase 5)
-
-The most conspicuous absence for an instrument: MyDAW cannot drive an external synth or act
-as a sequencer for outboard gear. `midiOutOpen` sibling of `MidiInput` (winmm) + a per-track
-MIDI-output routing field. See STUBS "MIDI hardware output".
-
-Start by deciding the model shape (a `Track.midiOutDevice` mirroring `inputDevice`, applied
-where `midiOutChannel` already re-stamps what a track ORIGINATES) and whether output events
-ride the existing bake path or a new non-RT sender thread.
-
-## QUEUED
-
-### 1. Single capture endpoint: fix or surface honestly
+## NOW — Single capture endpoint: fix or surface honestly
 
 `App::desiredCaptureDeviceId()` (App.cpp:535) opens ONE endpoint — the first
 armed/monitoring audio track's — and hands the same buffer to every armed node. A second
 armed track with a different input silently records the first one's audio. Real fix =
 multi-endpoint capture (sizeable); honest v1 = warn in the UI when two armed tracks name
-different devices (SPEC §10). Must land before anyone else multi-tracks a live source.
+different devices (SPEC §10). Must land before anyone else multi-tracks a live source —
+and v1.1.0 is on GitHub Releases, so "someone else" is one download away.
+
+(Promoted 2026-08-02: MIDI hardware output — the previous NOW — shipped; SPEC §5.5,
+STUBS. The model shape landed exactly as sketched here: `Track.midiOutDevice` mirroring
+`inputDevice`, tapped where `midiOutChannel` re-stamps what a track ORIGINATES, with a
+new non-RT sender thread fed by a lock-free ring.)
+
+## QUEUED
+
+(empty — promote from ONGOING or the technique backlog's gaps table as needed)
 
 ---
 
 ## ONGOING — not blocked, just not next
 
-- **Production Techniques**: 40 guided wizards shipped 2026-08-01 (v1 + the 30-technique
-  batch; 8 per category — Project ▸ Production Techniques… / Alt+T). Growing further is
-  Omer-paced via docs/PRODUCTION_TECHNIQUES_BACKLOG.md (per-category queues + the
-  primitive-gaps table that motivates engine work like a stock saturator).
+- **Production Techniques**: 55 guided wizards shipped 2026-08-01/02 (11 per category —
+  Project ▸ Production Techniques… / Alt+T). Growing further is Omer-paced via
+  docs/PRODUCTION_TECHNIQUES_BACKLOG.md (per-category queues + the primitive-gaps table;
+  the stock-saturator gap is CLOSED, M/S・de-esser・multiband lead the remainder).
 
 - **Sample-accurate live MIDI** (ROADMAP Phase 4): live input lands at block offset 0
   (`MidiInput.cpp:277`, ≤1.3 ms jitter at 64 frames); the QPC timestamps needed to place it

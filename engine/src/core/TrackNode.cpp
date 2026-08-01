@@ -10,6 +10,7 @@
 #include "core/Meters.h"
 #include "media/AssetStore.h" // PcmData
 #include "core/IInsertNode.h"
+#include "midi/MidiOutput.h" // hardware-out queueFromRt (Config::midiOut)
 
 namespace mydaw {
 
@@ -526,6 +527,13 @@ void TrackNode::processTrackRt(ProcessContext& ctx, const float* const* inputs,
         }
         injectedMidi_.clear();
     }
+
+    // ---- hardware MIDI output (Track::midiOutDevice, SPEC §5.5): everything this
+    // track ORIGINATES is now assembled in midiScratch_ (baked + live + injected,
+    // re-stamped by midiOutChannel and shaped by midiMod) — queue it for the winmm
+    // sender BEFORE the feeder path hands the buffer off and clears it. Lock-free.
+    if (cfg_.midiOutSlot >= 0 && cfg_.midiOut != nullptr && !midiScratch_.empty())
+        cfg_.midiOut->queueFromRt(cfg_.midiOutSlot, midiScratch_);
 
     // ---- MIDI feeder (Track::midiTarget): deliver this span's events into the target
     // instrument node's merge buffer and contribute NO audio. The target processes

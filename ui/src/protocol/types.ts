@@ -391,6 +391,9 @@ export interface Track {
    * MIDI tracks drive one multitimbral instrument (SPEC §6).
    */
   midiOutChannel?: number;
+  /** Hardware MIDI output (kind "midi"/"instrument", SPEC §5.5): winmm device NAME —
+   *  everything this track plays is also sent to the device. ""/absent = none. */
+  midiOutDevice?: string;
   /** Cubase-style MIDI Modifiers (kind "midi"/"instrument"): playback-only transpose +
    *  velocity shaping — never written into clips or SMF exports. Absent = defaults. */
   midiMod?: MidiModifiers;
@@ -771,6 +774,8 @@ export interface TrackPatch {
   midiTarget?: number;
   /** kind "midi"/"instrument" — force this track's MIDI onto channel 1..16; 0 = as played. */
   midiOutChannel?: number;
+  /** kind "midi"/"instrument" — hardware MIDI output device NAME; "" clears (SPEC §5.5). */
+  midiOutDevice?: string;
   /** Partial MIDI-modifiers patch (kind "midi"/"instrument"): absent fields keep values. */
   midiMod?: Partial<MidiModifiers>;
   /** VCA-group id this track belongs to; 0 clears. */
@@ -2015,6 +2020,11 @@ export interface RequestMap {
 
   // §5.5 recording & media
   "midi/getInputs": { req: EmptyObject; reply: MidiGetInputsReply };
+  "midi/getOutputs": {
+    req: EmptyObject;
+    /** Hardware MIDI outputs (SPEC §5.5). `sent` = short messages delivered since open. */
+    reply: { outputs: Array<{ id: string; name: string; open: boolean; sent: number }> };
+  };
   "midi/setInputEnabled": { req: MidiSetInputEnabledRequest; reply: EmptyObject };
   "midi/preview": { req: MidiPreviewRequest; reply: EmptyObject };
   "midi/setThruTracks": { req: MidiSetThruTracksRequest; reply: EmptyObject };

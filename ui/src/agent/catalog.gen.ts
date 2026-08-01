@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "7097932506eaf86ebb180ecd874e3ac82598699a7168043a955eba7260eac7d8";
+export const AGENT_CATALOG_SHA256 = "daf3e2cca6b776fd469a1e9726327280547b4c905cd0a45b909fa1886b953384";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -3902,6 +3902,10 @@ export const AGENT_CATALOG: AgentCatalog = {
           "description": "MIDI output channel (kind \"midi\"/\"instrument\"): 0/absent = as played (events keep their own channel), 1..16 = force this track's MIDI onto that channel — how several MIDI tracks drive one multitimbral instrument (SPEC §6).",
           "type": "number"
         },
+        "midiOutDevice": {
+          "description": "Hardware MIDI output (kind \"midi\"/\"instrument\", SPEC §5.5): winmm device NAME — everything the track plays is also sent to the device. \"\"/absent = none.",
+          "type": "string"
+        },
         "midiTarget": {
           "description": "MIDI routing (kind \"midi\" only): id of an Instrument-kind track that receives this track's MIDI — one shared plugin instance for N midi tracks. Absent/0 = none, the track plays through its own inserts (SPEC §6).",
           "type": "number"
@@ -4203,6 +4207,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "midiOutChannel": {
           "description": "kind \"midi\"/\"instrument\" — force this track's MIDI onto channel 1..16 (for multitimbral instruments); 0 = as played.",
           "type": "number"
+        },
+        "midiOutDevice": {
+          "description": "kind \"midi\"/\"instrument\" — hardware MIDI output device NAME; \"\" clears (SPEC §5.5).",
+          "type": "string"
         },
         "midiTarget": {
           "description": "kind \"midi\" only — Instrument-track id to route this track's MIDI into; 0 clears.",
@@ -8618,6 +8626,55 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "midi/getOutputs",
+      "category": "midi",
+      "description": "List hardware MIDI outputs. Set a NAME into Track.midiOutDevice (cmd/track.set) to send the track's MIDI to that device; `sent` counts delivered messages.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "properties": {
+          "outputs": {
+            "items": {
+              "properties": {
+                "id": {
+                  "description": "winmm device index, stringified",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "device name — the value Track.midiOutDevice stores",
+                  "type": "string"
+                },
+                "open": {
+                  "type": "boolean"
+                },
+                "sent": {
+                  "description": "short messages delivered since the device was opened",
+                  "type": "number"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
       "name": "midi/preview",
       "category": "midi",
       "description": "Send a live note-on or note-off to a channel without editing the project.",
@@ -11013,6 +11070,7 @@ export const ENGINE_OPERATION_NAMES = [
   "media/relink",
   "midi/feedEvent",
   "midi/getInputs",
+  "midi/getOutputs",
   "midi/preview",
   "midi/setInputEnabled",
   "midimap/feedCc",
@@ -11503,6 +11561,10 @@ export const REQUEST_COVERAGE = {
   "midi/getInputs": {
     "kind": "operation",
     "operation": "midi/getInputs"
+  },
+  "midi/getOutputs": {
+    "kind": "operation",
+    "operation": "midi/getOutputs"
   },
   "midi/setInputEnabled": {
     "kind": "operation",
@@ -12399,6 +12461,9 @@ export const ENGINE_OPERATION_EXAMPLES = {
     }
   ],
   "midi/getInputs": [
+    {}
+  ],
+  "midi/getOutputs": [
     {}
   ],
   "midi/preview": [

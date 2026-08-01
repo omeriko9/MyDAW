@@ -400,6 +400,9 @@ export const shutdownEngine = () => ws.request("engine/shutdown", {});
 
 export const getMidiInputs = () => ws.request("midi/getInputs", {});
 
+/** Hardware MIDI outputs (SPEC §5.5) — Track.midiOutDevice picks one by NAME. */
+export const getMidiOutputs = () => ws.request("midi/getOutputs", {});
+
 export const setMidiInputEnabled = (id: string, enabled: boolean) =>
   ws.request("midi/setInputEnabled", { id, enabled });
 

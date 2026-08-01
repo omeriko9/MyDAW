@@ -407,6 +407,18 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
             inputs.push_back(json{{"id", d.id}, {"name", d.name}, {"enabled", d.enabled}});
         return json{{"inputs", std::move(inputs)}};
     }
+    if (type == "midi/getOutputs") {
+        // Hardware MIDI outputs (SPEC §5.5). `sent` is the total short messages
+        // delivered since open — the headless test's observable that events really
+        // left through winmm (there is no loopback to assert against).
+        json outputs = json::array();
+        for (const MidiOutDeviceInfo& d : app_.midiOutput.devices())
+            outputs.push_back(json{{"id", d.id},
+                                   {"name", d.name},
+                                   {"open", d.open},
+                                   {"sent", d.sent}});
+        return json{{"outputs", std::move(outputs)}};
+    }
     if (type == "midi/setInputEnabled") {
         if (!app_.midiInput.setEnabled(getOr(p, "id", ""), getOr<bool>(p, "enabled", true))) {
             ec = "not_found";
@@ -1046,6 +1058,9 @@ json Api::handleTransport(const std::string& type, const json& p, std::string& e
         if (app_.isRecordingSession())
             app_.stopRecordingAndCommit();
         app_.transport.stop();
+        // External synths hold their own notes — a stop must silence them like it
+        // silences the internal graph (SPEC §5.5 hardware MIDI out).
+        app_.midiOutput.allNotesOff();
     } else if (type == "transport/pause") {
         if (app_.isRecordingSession())
             app_.stopRecordingAndCommit();

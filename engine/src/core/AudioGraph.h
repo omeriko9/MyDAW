@@ -40,6 +40,7 @@ class AssetStore;
 class HostProcessManager;
 class BuiltinEffectManager;
 class MidiInput;
+class MidiOutput;
 class Metronome;
 class Transport;
 class AudioRecorder;
@@ -57,7 +58,8 @@ public:
     // (the corresponding feature is simply disabled — headless/test use).
     void configure(int sampleRate, int maxBlock, Meters* meters, AssetStore* assets,
                    HostProcessManager* host, BuiltinEffectManager* builtin,
-                   MidiInput* midiInput, Metronome* metronome);
+                   MidiInput* midiInput, Metronome* metronome,
+                   MidiOutput* midiOutput = nullptr);
 
     // Main thread: rebuild the RenderPlan from the model and atomically swap it in
     // (SPEC §7: structural changes rebuild; cycles route to master + log).

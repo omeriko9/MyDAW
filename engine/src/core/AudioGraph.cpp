@@ -29,6 +29,7 @@
 #include "core/IInsertNode.h"
 #include "core/effects/BuiltinEffectManager.h"
 #include "midi/MidiInput.h"
+#include "midi/MidiOutput.h"
 #include "plugins/HostProcess.h"
 #include "plugins/PluginProxyNode.h"
 #include "project/Model.h"
@@ -115,6 +116,7 @@ struct AudioGraph::Impl {
     HostProcessManager* host = nullptr;
     BuiltinEffectManager* builtin = nullptr;
     MidiInput* midiIn = nullptr;
+    MidiOutput* midiOut = nullptr;
     Metronome* metronome = nullptr;
 
     // Live-MIDI thru targets (the UI's track selection; setMidiThruTracks). Main
@@ -349,6 +351,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
         // stale value on a converted track can't silently re-stamp anything.
         if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument)
             cfg.midiOutChannel = std::clamp(t.midiOutChannel, 0, 16);
+        // Hardware MIDI output (Track::midiOutDevice, SPEC §5.5): resolve the device
+        // NAME to an open winmm slot here on the control thread — RT only ever sees a
+        // slot index. Resolution failure (device unplugged) logs once and stays -1.
+        if ((t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument) &&
+            !t.midiOutDevice.empty() && midiOut != nullptr) {
+            cfg.midiOutSlot = midiOut->ensureOpenByName(t.midiOutDevice);
+            cfg.midiOut = midiOut;
+        }
         // MIDI Modifiers (playback-only, SPEC §6): folded into the baked note events
         // below and applied to live thru in TrackNode. MIDI/Instrument tracks only.
         // Random offsets re-roll on every rebuild (Cubase re-rolls per playback); the
@@ -1082,7 +1092,7 @@ AudioGraph::~AudioGraph() = default;
 void AudioGraph::configure(int sampleRate, int maxBlock, Meters* meters,
                            AssetStore* assets, HostProcessManager* host,
                            BuiltinEffectManager* builtin, MidiInput* midiInput,
-                           Metronome* metronome) {
+                           Metronome* metronome, MidiOutput* midiOutput) {
     Impl& im = *impl_;
     im.sampleRate = sampleRate;
     im.maxBlock = maxBlock;
@@ -1091,6 +1101,7 @@ void AudioGraph::configure(int sampleRate, int maxBlock, Meters* meters,
     im.host = host;
     im.builtin = builtin;
     im.midiIn = midiInput;
+    im.midiOut = midiOutput;
     im.metronome = metronome;
     if (metronome)
         metronome->prepare(sampleRate);

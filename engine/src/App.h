@@ -36,6 +36,7 @@
 #include "media/AssetStore.h"
 #include "media/AudioRecorder.h"
 #include "midi/MidiInput.h"
+#include "midi/MidiOutput.h"
 #include "midi/MidiRecorder.h"
 #include "plugins/Blacklist.h"
 #include "plugins/PluginRegistry.h"
@@ -231,6 +232,7 @@ public:
     Blacklist blacklist;
     PluginScanner scanner{registry, blacklist}; // preloads plugin cache; no boot scan
     MidiInput midiInput;
+    MidiOutput midiOutput; // hardware MIDI out (Track::midiOutDevice, SPEC §5.5)
     MidiRecorder midiRecorder;
     AudioRecorder audioRecorder;
     // Live-MIDI thru targets (UI selection; setMidiThruTracks). Main loop only —

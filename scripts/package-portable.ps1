@@ -102,9 +102,20 @@ SourceFiles0=$work\
 %FILE3%=
 "@ | Set-Content $sed -Encoding ASCII
 
+# iexpress leaves ~*.CAB and ~*_LAYOUT.INF droppings when a previous run was killed,
+# and their presence can make the NEXT run silently produce nothing (seen 2026-08-02
+# during the 1.1.0 release; the ~*.CAB variant was eb9169c). Clear both, and retry
+# once — iexpress has a rare transient no-output failure even from a clean slate.
+Get-ChildItem $out -Filter '~*' -ErrorAction SilentlyContinue | Remove-Item -Force
 & "$env:WINDIR\System32\iexpress.exe" /N /Q $sed | Out-Null
+if (-not (Test-Path $target)) {
+    Write-Warning "iexpress produced no output — clearing droppings and retrying once"
+    Get-ChildItem $out -Filter '~*' -ErrorAction SilentlyContinue | Remove-Item -Force
+    Start-Sleep -Seconds 2
+    & "$env:WINDIR\System32\iexpress.exe" /N /Q $sed | Out-Null
+}
 if (-not (Test-Path $target)) { throw "iexpress produced no output (SED: $sed)" }
-Get-ChildItem $out -Filter '~*.CAB' -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem $out -Filter '~*' -ErrorAction SilentlyContinue | Remove-Item -Force
 
 $sha = (Get-FileHash $target -Algorithm SHA256).Hash.ToLower()
 $mb  = [math]::Round((Get-Item $target).Length / 1MB, 1)

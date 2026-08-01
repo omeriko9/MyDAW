@@ -224,7 +224,12 @@ drawn inline in the arrangement (ClipCanvas) with on-timeline swipe; MIDI loop-r
   exist). Testable on this machine (NI Audio Kontrol 1 has an ASIO driver).
 - Multichannel (>stereo) graph: generalize buffer pool channel count in
   `AudioGraph`/`TrackNode` (schema + plugin IPC already allow 8ch).
-- MIDI hardware output: `midiOut` sibling of `MidiInput` + per-track MIDI-out routing.
+- **MIDI hardware output** — DONE (2026-08-02): `midi/MidiOutput` winmm sibling of
+  `MidiInput` (name-keyed device slots, RT-safe MPSC ring → sender thread), per-track
+  `Track.midiOutDevice` routing (Inspector "MIDI Out"), `midi/getOutputs` with a
+  delivery counter, note-hygiene flush on stop/panic/shutdown. SPEC §5.5; test
+  `scripts/midi-out-test.mjs` (gate "midi-out"). Still open: sample-accurate hardware
+  timing (QPC scheduling), MIDI clock out.
 - **Native plugin-UI streaming to browser**: v1 = `Windows.Graphics.Capture` of the host
   process's editor window → JPEG/WebP frames over a dedicated WS + mouse/wheel/keyboard
   forwarding (design in ARCHITECTURE.md §future; WebRTC/H.264 later). Generic editor
