@@ -14,6 +14,9 @@ import {
 } from "../../lib/motion";
 import { ACCENT_SWATCHES, applyAccent, getAccent } from "../../lib/accent";
 import { getSettings, setSettings } from "../../store/actions";
+import { useStore } from "../../store/store";
+import { SHELL_MODES } from "../../shell/shellTypes";
+import type { ShellMode } from "../../shell/shellTypes";
 import { isBool, usePrefState } from "../../lib/prefs";
 import {
   RECOVERY_MODE_DEFAULT,
@@ -68,6 +71,8 @@ export function GeneralTab() {
   };
 
   const theme = useThemeName();
+  const shellMode = useStore((s) => s.shellMode);
+  const setShellMode = useStore((s) => s.setShellMode);
   const motion = useMotionPref();
   const [accent, setAccentLocal] = useState<string | null>(getAccent());
   const pickAccent = (hex: string | null) => {
@@ -98,6 +103,19 @@ export function GeneralTab() {
             width={140}
           />
           <span className="sett-note">also in View → Theme; saved per user</span>
+        </div>
+        <span className="sett-label">UI mode</span>
+        <div className="row gap1">
+          <Select
+            value={shellMode}
+            options={SHELL_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            onChange={(v) => setShellMode(v as ShellMode)}
+            width={140}
+          />
+          <span className="sett-note">
+            Classic docks / Ribbon / Workspaces — same panes, different arrangement; also
+            View → UI Mode (Ctrl+Alt+M cycles)
+          </span>
         </div>
         <span className="sett-label">Accent color</span>
         <div className="row gap1">

@@ -1,0 +1,313 @@
+/* Production Techniques wizard (TechniquesDialog.tsx) */
+
+/* Soft per-category tints — one hue per category, used at low opacity so every
+   theme keeps its own character underneath. */
+[data-cat="transitions"] {
+  --tech-tint: #9d7bd8; /* violet */
+}
+[data-cat="mixing"] {
+  --tech-tint: #5b9bd5; /* blue */
+}
+[data-cat="vocal"] {
+  --tech-tint: #d57ba6; /* rose */
+}
+[data-cat="editing"] {
+  --tech-tint: #d5a25b; /* amber */
+}
+[data-cat="master"] {
+  --tech-tint: #6dbb8a; /* green */
+}
+
+.tech-modal .modal-body {
+  min-height: 380px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+/* ---- browser ---- */
+
+.tech-browser {
+  display: flex;
+  gap: 12px;
+  min-height: 360px;
+}
+
+.tech-cats {
+  flex: 0 0 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+  padding-right: 10px;
+}
+
+.tech-cat-btn {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.tech-cat-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.tech-cat-btn[data-on="true"] {
+  color: color-mix(in srgb, var(--tech-tint, var(--accent)) 80%, var(--text));
+  background: color-mix(in srgb, var(--tech-tint, var(--accent)) 14%, transparent);
+}
+.tech-cat-btn[data-cat] {
+  border-left: 3px solid color-mix(in srgb, var(--tech-tint) 45%, transparent);
+}
+
+.tech-cards {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+
+.tech-card {
+  text-align: left;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--tech-tint, var(--text)) 7%, transparent);
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--tech-tint, var(--border)) 55%, transparent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tech-card:hover {
+  border-color: color-mix(in srgb, var(--tech-tint, var(--accent)) 70%, transparent);
+  border-left-color: var(--tech-tint, var(--accent));
+  background: color-mix(in srgb, var(--tech-tint, var(--accent)) 13%, transparent);
+}
+.tech-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.tech-card-tag {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tech-card-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+
+/* ---- wizard ---- */
+
+.tech-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tech-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tech-topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tech-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border-left: 3px solid var(--tech-tint, var(--accent));
+  padding-left: 9px;
+}
+.tech-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.tech-cat {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--tech-tint, var(--text-dim)) 75%, var(--text-dim));
+}
+.tech-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.tech-reqs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn, #d90) 6%, transparent);
+}
+.tech-req {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--warn, #d90);
+}
+.tech-req.ok {
+  color: var(--text-dim);
+}
+
+.tech-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tech-stage {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tech-stage.next {
+  border-color: var(--accent);
+}
+.tech-stage.st-applied {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.tech-stage.st-skipped,
+.tech-stage.st-manual {
+  opacity: 0.75;
+}
+
+.tech-stage-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tech-stage-status {
+  display: inline-flex;
+  color: var(--text-dim);
+}
+.tech-stage.st-applied .tech-stage-status {
+  color: var(--accent);
+}
+.tech-stage.st-error .tech-stage-status {
+  color: var(--warn, #d90);
+}
+.tech-stage-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tech-opt {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 4px;
+}
+
+.tech-stage-sum {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.tech-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.tech-note.ok {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.tech-note.err {
+  color: var(--warn, #d90);
+  background: color-mix(in srgb, var(--warn, #d90) 10%, transparent);
+}
+
+.tech-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.tech-param {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tech-param-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tech-manual {
+  border-left: 3px solid var(--accent);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tech-manual-text {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tech-manual .btn {
+  align-self: flex-start;
+}
+
+.tech-summary {
+  border: 1px solid color-mix(in srgb, var(--tech-tint, var(--accent)) 45%, transparent);
+  background: color-mix(in srgb, var(--tech-tint, var(--accent)) 8%, transparent);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tech-summary-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--tech-tint, var(--accent)) 80%, var(--text));
+}
+.tech-summary ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.tech-summary-total {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tech-foot {
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.tech-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-dim);
+}

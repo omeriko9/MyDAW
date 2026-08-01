@@ -984,6 +984,21 @@ startBeat).
   zoomY, scrollX, scrollY}, focusedPane (timeline|pianoRoll|clipEditor|mixer — set by
   pointerdown-capture on each pane root; keyboard routing prefers it), followPlayhead (bool,
   "J" toggles), panels {mixer, pianoRoll, clipEditor, inspector, browser, poppedOut}, dialogs}`.
+- UI shells (docs/UI_ALTERNATIVES_PLAN.md): the workspace is rendered by ONE of three
+  interchangeable shells under `ui/src/shell/` — `classic` (this section's layout: Browser |
+  Timeline | Agent + bottom dock), `ribbon` (category strip whose tabs select the primary view
+  and surface that view's commands as ribbon groups reusing the exported `MENUS` entries, over a
+  1–2 slot split work area), and `workspaces` (named tiling workspaces, recursive binary splits,
+  ≤4 panes, Alt+1..9 switches). `store.shellMode` picks the shell (pref `ui.shellMode`; each
+  shell's arrangement persists under its own pref so switching is lossless); switch via View →
+  UI Mode, Settings → General, or Ctrl+Alt+M (cycle). The pane COMPONENTS are identical in all
+  three (shell/paneRegistry is the single pane table; PaneHost = boundary + popped-out
+  placeholder; PopoutProvider hosts the pop-out portals shell-independently). Non-classic shells
+  publish their visible panes on `panels.shellPanes`, which `lib/keyboard.paneVisible` prefers
+  over the dock fields, so key routing follows whatever shell is on screen; flows that must
+  surface a pane go through `shell/reveal.revealPane` (dock tab / ribbon category / workspace).
+  Smoke: ui-smoke `shell-modes` walks Classic → Ribbon → Workspaces → Classic through each
+  shell's own switcher.
 - `ws.ts`: auto-reconnect, `request(type,payload) → Promise` (optional per-call timeout override),
   `on(eventType, cb)`. On reconnect → `session/hello` re-sync. Per-type reply timeouts (default
   15 s): `dialog/*`, `plugins/recreate`, `export/render`, `export/midi` 600 s;

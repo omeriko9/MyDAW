@@ -40,6 +40,9 @@
  *   G / H                 zoom out / in (Cubase-style; more / less time fits) — routed
  *                         to the focused pane (piano roll / clip editor), else timeline
  *   Shift+G / Shift+H     vertical zoom out / in (track height / piano-roll rows)
+ *   Ctrl+Alt+M            cycle the UI shell — Classic / Ribbon / Workspaces
+ *   Alt+1..9              switch workspaces (Workspaces shell only)
+ *   Alt+T                 Production Techniques wizard
  *   Home / End            locate project start / end
  *   Ctrl+A                select all (per focus context; default: all clips)
  *   Escape                clear selection (context may override, e.g. cancel a drag)
@@ -80,6 +83,7 @@ import {
   undo,
 } from "../store/actions";
 import { copySelection, cutSelection, findClipById, pasteAt } from "./clipboard";
+import { SHELL_MODES } from "../shell/shellTypes";
 import { applyLayoutSlot, saveLayoutSlot, type LayoutSlotIndex } from "./layouts";
 import { showToast } from "../components/common/ToastHost";
 import { toggleMetronome } from "../store/metronome";
@@ -168,13 +172,14 @@ export function zoomPane(name: KeyContextName, factor: number): boolean {
  * semantics (pane key contexts, transport quantize) so they cannot drift.
  */
 export function paneVisible(panels: PanelsState, tab: PoppedOutTab): boolean {
+  if (panels.poppedOut[tab]) return true;
+  // A non-classic shell (ribbon/workspaces) publishes its on-screen panes on
+  // shellPanes; while it is active the classic dock fields below are meaningless
+  // (they keep their values for when the user switches back).
+  if (panels.shellPanes) return panels.shellPanes.includes(tab);
   // Second dock slot (split dock) only shows while the dock itself is open
   // (bottomTab non-null) — bottomTab2 is remembered across dock close/reopen.
-  return (
-    panels.bottomTab === tab ||
-    (panels.bottomTab !== null && panels.bottomTab2 === tab) ||
-    !!panels.poppedOut[tab]
-  );
+  return panels.bottomTab === tab || (panels.bottomTab !== null && panels.bottomTab2 === tab);
 }
 
 /**
@@ -195,10 +200,18 @@ export function keyRoutingPane(s: {
   } else if (f === "timeline") {
     return "timeline";
   }
-  const tabs = [s.panels.bottomTab, s.panels.bottomTab === null ? null : s.panels.bottomTab2];
+  const tabs = openPaneTabs(s.panels);
   if (tabs.includes("pianoRoll")) return "pianoRoll";
   if (tabs.includes("clipEditor")) return "clipEditor";
   return "timeline";
+}
+
+/** The open-tab heuristic's candidate list: the active shell's visible panes when a
+ *  non-classic shell is up, else the (up to two) dock slots. Shared by
+ *  keyRoutingPane and activeContext so the indicator cannot drift from routing. */
+function openPaneTabs(panels: PanelsState): Array<PoppedOutTab | null> {
+  if (panels.shellPanes) return panels.shellPanes;
+  return [panels.bottomTab, panels.bottomTab === null ? null : panels.bottomTab2];
 }
 
 /**
@@ -214,8 +227,9 @@ export function keyRoutingPane(s: {
 function activeContext(): KeyContextHandlers | null {
   const s = useStore.getState();
   // Both dock slots count as "open tab" for the heuristic (slot 2 only while the
-  // dock is open) — keep in step with keyRoutingPane above.
-  const tabs = [s.panels.bottomTab, s.panels.bottomTab === null ? null : s.panels.bottomTab2];
+  // dock is open); a non-classic shell substitutes its own visible panes — keep in
+  // step with keyRoutingPane above (shared openPaneTabs).
+  const tabs = openPaneTabs(s.panels);
   const focused = s.focusedPane;
   if (focused === "pianoRoll" || focused === "clipEditor" || focused === "sheetMusic") {
     if (paneVisible(s.panels, focused)) {
@@ -568,6 +582,45 @@ function onKeyDown(e: KeyboardEvent): void {
       else showToast(`Layout ${slot} is empty — save one with Ctrl+Alt+Shift+${slot}`);
     }
     return;
+  }
+
+  // Ctrl+Alt+M — cycle the UI shell (Classic → Ribbon → Workspaces; also View →
+  // UI Mode and Settings → General). Same AltGr guard as the layout slots.
+  if (ctrl && e.altKey && key === "m" && !e.getModifierState("AltGraph")) {
+    consume();
+    if (e.repeat) return;
+    const st = useStore.getState();
+    const order = SHELL_MODES.map((m) => m.value);
+    const next = order[(order.indexOf(st.shellMode) + 1) % order.length];
+    st.setShellMode(next);
+    showToast(`UI Mode — ${SHELL_MODES.find((m) => m.value === next)!.label}`);
+    return;
+  }
+
+  // Alt+T — Production Techniques wizard (also Project menu + the topbar button).
+  if (!ctrl && e.altKey && e.code === "KeyT" && !e.getModifierState("AltGraph")) {
+    consume();
+    if (!e.repeat) useStore.getState().setDialogs({ techniques: true });
+    return;
+  }
+
+  // Alt+1..9 — switch workspaces (Workspaces shell only; Ctrl+digit belongs to the
+  // browser's tab switching, so Alt is the reachable modifier). AltGr guard as above.
+  if (!ctrl && e.altKey && !e.getModifierState("AltGraph")) {
+    const d = /^Digit([1-9])$/.exec(e.code)?.[1];
+    if (d !== undefined) {
+      const st = useStore.getState();
+      if (st.shellMode === "workspaces") {
+        consume();
+        if (e.repeat) return;
+        const ws = st.workspaces.list[Number(d) - 1];
+        if (ws) {
+          st.setWorkspaces({ ...st.workspaces, activeId: ws.id });
+          showToast(`Workspace — ${ws.name}`);
+        }
+        return;
+      }
+    }
   }
 
   if (ctrl && !e.altKey) {

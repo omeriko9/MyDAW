@@ -1,0 +1,284 @@
+/* UI shells (docs/UI_ALTERNATIVES_PLAN.md) — Ribbon + Workspaces chrome and the
+   shared pane-slot bits. The Classic shell keeps its existing transport.css rules. */
+
+/* ============================================================================
+ * Shared pane slots (SplitPane slots + workspace leaves)
+ * ========================================================================= */
+
+.sp-root {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.sp-cols {
+  flex-direction: row;
+}
+.sp-rows {
+  flex-direction: column;
+}
+
+.sp-slot,
+.ws-leaf {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.sp-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 4px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.sp-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sp-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.sp-pick:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-color: var(--border);
+}
+.sp-pick-label {
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * Ribbon shell
+ * ========================================================================= */
+
+.rib-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.rib-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rib-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius) var(--radius) 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rib-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.rib-tab[data-on="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--border);
+  border-bottom-color: transparent;
+}
+.rib-menu.compact {
+  padding: 0 6px;
+}
+
+.rib-groups {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 56px;
+  padding: 3px 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.rib-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 8px;
+}
+.rib-group + .rib-group {
+  border-left: 1px solid var(--border);
+}
+
+.rib-group-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 40px;
+  overflow: hidden;
+}
+
+.rib-group-title {
+  flex: 0 0 auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-align: center;
+  padding-top: 1px;
+}
+
+.rib-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rib-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-color: var(--border);
+}
+.rib-btn.on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rib-btn.danger {
+  color: var(--danger, #e5484d);
+}
+.rib-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rib-btn-label {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================================
+ * Workspaces shell
+ * ========================================================================= */
+
+.ws-strip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  padding: 0 6px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.ws-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.ws-tab[data-on="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--border);
+}
+
+.ws-rename {
+  height: 21px;
+  width: 110px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.ws-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding-right: 4px;
+}
+
+.ws-area {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ws-split {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.ws-row {
+  flex-direction: row;
+}
+.ws-col {
+  flex-direction: column;
+}
+
+.ws-cell {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.ws-cell > * {
+  flex: 1 1 auto;
+}
+.ws-row > .ws-cell:not(:first-of-type) {
+  border-left: 1px solid var(--border);
+}
+.ws-col > .ws-cell:not(:first-of-type) {
+  border-top: 1px solid var(--border);
+}

@@ -29,6 +29,7 @@ beforeEach(() => {
       poppedOut: {},
     },
     dialogs: {
+      techniques: false,
       settings: false,
       export: false,
       shortcuts: false,

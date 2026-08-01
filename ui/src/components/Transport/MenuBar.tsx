@@ -35,6 +35,7 @@ import {
   type LayoutSlotIndex,
 } from "../../lib/layouts";
 import { savePref } from "../../lib/prefs";
+import { SHELL_MODES } from "../../shell/shellTypes";
 import { applyTheme, getTheme, THEMES } from "../../lib/theme";
 import { toggleMetronome } from "../../store/metronome";
 import { closeContextMenu, openContextMenu } from "../common/ContextMenu";
@@ -338,6 +339,15 @@ function buildProjectMenu(): MenuEntry[] {
   const selTracks = s.selection.trackIds;
   const none = selTracks.length === 0;
   return [
+    {
+      label: "Production Techniques…",
+      icon: "sparkles",
+      shortcut: "Alt+T",
+      title:
+        "Guided wizards for classic production moves — risers, sidechain pump, vocal doubling, chops… (docs/PRODUCTION_TECHNIQUES_PLAN.md)",
+      onClick: () => useStore.getState().setDialogs({ techniques: true }),
+    },
+    "separator",
     ...adds,
     "separator",
     {
@@ -467,6 +477,21 @@ function buildViewMenu(): MenuEntry[] {
   const slots = getLayoutSlots();
   const slotIdx: LayoutSlotIndex[] = [1, 2, 3, 4];
   return [
+    {
+      label: "UI Mode",
+      icon: "layers",
+      title:
+        "How the workspace is organized — Classic docks, a Ribbon, or tiling Workspaces. The panes themselves are identical in all three.",
+      submenu: SHELL_MODES.map((m) => ({
+        label: m.label,
+        checked: s.shellMode === m.value,
+        shortcut: "Ctrl+Alt+M",
+        onClick: () => {
+          useStore.getState().setShellMode(m.value);
+          showToast(`UI Mode — ${m.label}`);
+        },
+      })),
+    },
     {
       label: "Theme",
       submenu: THEMES.map((t) => ({

@@ -272,6 +272,166 @@ export const checks = [
   },
 
   {
+    id: "shell-modes",
+    title: "the UI shell switches Classic → Ribbon → Workspaces → Classic through each shell's own switcher",
+    area: "shell",
+    guards: "docs/UI_ALTERNATIVES_PLAN.md — every shell must offer the way OUT of itself (View → UI Mode / ribbon View category); a shell that renders without its switcher strands the user in it, and a broken classic restore would trash the default workspace",
+    run: async (s, tt) => {
+      // Own precondition: the mode pref survives reloads — start from a clean classic.
+      await s.eval(() => { localStorage.removeItem("mydaw.ui.shellMode"); return true; });
+      await s.reload();
+      tt.eq(await s.eval(() => document.querySelector(".app-frame")?.dataset.shell ?? null),
+        "classic", "default shell is classic");
+
+      // Menu / ribbon entries carry shortcut hints in their textContent, so match by
+      // prefix, not equality.
+      const clickStarts = async (selector, text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+            .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`not found: ${selector} starting with ${JSON.stringify(text)}`);
+        await s.click(box.x, box.y);
+      };
+      // NB: a STRING predicate is evaluated verbatim (only functions get auto-called),
+      // so it must be an invoked IIFE or untilEval polls a function object forever.
+      const shellIs = (mode) =>
+        s.untilEval(`shell is ${mode}`, `(() =>
+          document.querySelector(".app-frame")?.dataset.shell === ${JSON.stringify(mode)})()`);
+
+      // classic → ribbon via the menu strip's View ▸ UI Mode
+      await clickStarts('[role="menuitem"][aria-label="View"]', "");
+      await s.untilEval("View menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("UI Mode")));
+      await clickStarts(".ctx-item", "UI Mode");
+      await s.untilEval("UI Mode submenu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Ribbon")));
+      await clickStarts(".ctx-item", "Ribbon");
+      await shellIs("ribbon");
+      tt.ok(await s.eval(() => !!document.querySelector(".rib-groups .rib-btn")),
+        "the ribbon renders contextual command buttons");
+      tt.ok(await s.eval(() => !!document.querySelector(".sp-head .sp-pick")),
+        "the split work area has a pane picker");
+
+      // ribbon → workspaces via the ribbon's own View category (its way out)
+      await clickStarts(".rib-tab", "View");
+      await s.untilEval("View category shows its groups", () =>
+        [...document.querySelectorAll(".rib-btn")].some((b) => b.textContent.trim().startsWith("UI Mode")));
+      await clickStarts(".rib-btn", "UI Mode");
+      await s.untilEval("UI Mode menu opens from the ribbon", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Workspaces")));
+      await clickStarts(".ctx-item", "Workspaces");
+      await shellIs("workspaces");
+      const strip = await s.eval(() => ({
+        tabs: [...document.querySelectorAll(".ws-tab")].map((b) => b.textContent.trim()),
+        active: document.querySelector('.ws-tab[data-on="true"]')?.textContent.trim() ?? null,
+        leafHeads: document.querySelectorAll(".ws-leaf .sp-head").length,
+      }));
+      tt.eq(strip.tabs.length, 4, `stock workspaces seeded (got ${JSON.stringify(strip.tabs)})`);
+      tt.ok(strip.active !== null, "one workspace is active");
+      tt.ok(strip.leafHeads >= 1, "the active workspace renders at least one pane tile");
+
+      // workspaces → classic via the (kept) menu strip
+      await clickStarts('[role="menuitem"][aria-label="View"]', "");
+      await s.untilEval("View menu opens again", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("UI Mode")));
+      await clickStarts(".ctx-item", "UI Mode");
+      await s.untilEval("UI Mode submenu opens again", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Classic")));
+      await clickStarts(".ctx-item", "Classic");
+      await shellIs("classic");
+
+      // Classic came back intact: the dock and its tabs render, and the mode persisted.
+      tt.ok(await s.eval(() => !!document.querySelector(".app-dock .app-dock-tabs")),
+        "classic bottom dock is back");
+      tt.eq(await s.eval(() => JSON.parse(localStorage.getItem("mydaw.ui.shellMode"))),
+        "classic", "the mode pref persisted");
+    },
+  },
+
+  {
+    id: "technique-master-glue",
+    title: "the Production Techniques wizard applies Master Glue stages and takes the last one back",
+    area: "techniques",
+    guards: "docs/PRODUCTION_TECHNIQUES_PLAN.md — Apply must create REAL engine inserts with dialed params (not UI state), and Take Back must undo exactly the stage's commands; a drifted undo count would silently eat the user's own edits",
+    run: async (s, tt) => {
+      const insertsOnMaster = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project.masterTrack.inserts;
+      const before = await insertsOnMaster();
+
+      const clickStarts = async (selector, text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+            .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`not found: ${selector} starting with ${JSON.stringify(text)}`);
+        await s.click(box.x, box.y);
+      };
+
+      // Project ▸ Production Techniques… → the wizard's card browser
+      await clickStarts('[role="menuitem"][aria-label="Project"]', "");
+      await s.untilEval("Project menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Production Techniques")));
+      await clickStarts(".ctx-item", "Production Techniques");
+      await s.untilEval("technique cards render", () =>
+        document.querySelectorAll(".tech-card").length >= 10);
+      await clickStarts(".tech-card", "Master Glue Chain");
+      await s.untilEval("wizard shows the three stages", () =>
+        document.querySelectorAll(".tech-stage").length === 3);
+
+      // Stage 1 — Glue: a real compressor lands on the master with dialed params
+      await clickStarts(".tech-stage.next .btn.primary", "Apply");
+      await s.until("glue compressor inserted on the master", async () =>
+        (await insertsOnMaster()).length === before.length + 1);
+      const afterGlue = await insertsOnMaster();
+      tt.eq(afterGlue[afterGlue.length - 1].uid, "builtin:compressor", "stage 1 added the stock compressor");
+
+      // Stage 2 — Ceiling: limiter after it
+      await s.untilEval("stage 2 becomes next", () =>
+        document.querySelectorAll(".tech-stage")[1]?.classList.contains("next") === true);
+      await clickStarts(".tech-stage.next .btn.primary", "Apply");
+      await s.until("limiter inserted after the glue", async () =>
+        (await insertsOnMaster()).length === before.length + 2);
+      const afterCeil = await insertsOnMaster();
+      tt.eq(afterCeil[afterCeil.length - 1].uid, "builtin:limiter", "stage 2 added the stock limiter");
+
+      // The engine shows the limiter BEFORE the stage finishes (params still being set,
+      // wizard still busy → buttons disabled, and stage 1's Take back is the one on
+      // screen until then). Wait for the UI's own "applied" state or the click lands on
+      // a disabled button and the confirm never opens (paid for: this check flaked).
+      await s.untilEval("stage 2 shows applied in the wizard", () =>
+        document.querySelectorAll(".tech-stage")[1]?.classList.contains("st-applied") === true);
+
+      // Take back the LAST applied stage (the limiter) — confirm dialog, then engine undo ×N.
+      // The confirm's button is .btn.danger — the STAGE's own "Take back" is a plain .btn
+      // inside the same .modal-overlay tree, so match the danger class, not text alone.
+      await clickStarts(".tech-stage .btn", "Take back");
+      await s.untilEval("take-back confirm opens", () =>
+        [...document.querySelectorAll(".modal-overlay .btn.danger")].some((b) =>
+          b.textContent.trim() === "Take back"));
+      await clickStarts(".modal-overlay .btn.danger", "Take back");
+      await s.until("the limiter is undone, the glue stays", async () => {
+        const now = await insertsOnMaster();
+        return now.length === before.length + 1 &&
+          now[now.length - 1].uid === "builtin:compressor";
+      });
+
+      // leave the project as found — undo the glue stage's commands engine-side
+      // (6 param sets then the addPlugin; capped so a surprise undo stack can't spin)
+      for (let n = 0; n < 12 && (await insertsOnMaster()).length > before.length; n++) {
+        await s.probe("edit/undo", {});
+      }
+      tt.eq((await insertsOnMaster()).length, before.length, "master restored for later checks");
+    },
+  },
+
+  {
     id: "palette-tab-keeps-keyboard",
     title: "Tab inside the command palette does not strand focus and freeze the keyboard",
     area: "palette-keyboard",

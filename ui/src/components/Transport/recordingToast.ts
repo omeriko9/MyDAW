@@ -12,7 +12,7 @@
 import { useStore } from "../../store/store";
 import type { Project } from "../../protocol/types";
 import { undo } from "../../store/actions";
-import { paneVisible } from "../../lib/keyboard";
+import { revealPane } from "../../shell/reveal";
 import { showToast, type ToastAction } from "../common/ToastHost";
 
 /** projectChanged echo grace period after the transport leaves "recording". */
@@ -28,7 +28,7 @@ function openInPianoRoll(clipId: number, trackId: number): void {
   const s = useStore.getState();
   s.setSelection({ clipIds: [clipId], trackIds: [trackId], noteIds: [] });
   s.setActiveMidiClipId(clipId);
-  if (!paneVisible(s.panels, "pianoRoll")) s.setPanels({ bottomTab: "pianoRoll" });
+  revealPane("pianoRoll"); // shell-aware: dock tab / ribbon category / workspace
   s.setFocusedPane("pianoRoll");
 }
 

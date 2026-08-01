@@ -17,6 +17,7 @@ import {
   type KeyContextName,
 } from "../lib/keyboard";
 import { pasteAt } from "../lib/clipboard";
+import { revealPane } from "../shell/reveal";
 import * as MF from "../lib/midiFunctions";
 import { applyLogicalEditor, type LeProgram } from "../lib/logicalEditor";
 import { editNotes } from "../store/actions";
@@ -173,6 +174,10 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
       }
       if (typeof args.bottomTab === "string" && BOTTOM_TABS.has(args.bottomTab)) {
         patch.bottomTab = args.bottomTab as BottomTab;
+        // Non-classic shells have no dock: map "show this pane" onto the active
+        // shell (ribbon category / workspace) so the op keeps meaning what it says.
+        if (store.shellMode !== "classic")
+          revealPane(args.bottomTab as Exclude<BottomTab, null>);
       } else if (args.bottomTab === null) {
         patch.bottomTab = null;
       }

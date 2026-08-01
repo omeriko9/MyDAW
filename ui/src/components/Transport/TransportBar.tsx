@@ -665,6 +665,11 @@ export default function TransportBar() {
           onClick={() => importProjectFlow()}
         />
         <IconButton
+          icon="stage"
+          tooltip="Production Techniques (Alt+T) — guided wizards: risers, sidechain pump, doubling…"
+          onClick={() => useStore.getState().setDialogs({ techniques: true })}
+        />
+        <IconButton
           icon="warning"
           tooltip="Panic — all notes off / reset"
           onClick={() => fire(panic())}

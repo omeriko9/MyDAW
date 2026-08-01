@@ -22,6 +22,7 @@ import ShortcutsDialog from "./ShortcutsDialog";
 import QuickHelpOverlay from "./QuickHelpOverlay";
 import CommandPalette from "../CommandPalette/CommandPalette";
 import RoomView from "../Mixer/RoomView";
+import TechniquesDialog from "../Techniques/TechniquesDialog";
 import ToastHost from "../common/ToastHost";
 
 export default function DialogsHost() {
@@ -36,6 +37,7 @@ export default function DialogsHost() {
       <QuickHelpOverlay />
       <CommandPalette />
       <RoomView />
+      <TechniquesDialog />
       <PluginLoadOverlay />
       <ToastHost />
     </>

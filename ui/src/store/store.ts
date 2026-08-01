@@ -31,6 +31,14 @@ import {
 } from "../lib/prefs";
 import { ws } from "../protocol/ws";
 import type { ConnectionState } from "../protocol/ws";
+import {
+  DEFAULT_RIBBON,
+  shellVisiblePanes,
+  stockWorkspaces,
+  validRibbon,
+  validWorkspaces,
+} from "../shell/shellTypes";
+import type { RibbonState, ShellMode, WorkspacesState } from "../shell/shellTypes";
 import type {
   Clip,
   EngineStatus,
@@ -169,9 +177,17 @@ export interface PanelsState {
   bottomTab2: BottomTab;
   /** Dock tabs currently popped out into separate browser windows (portal-rendered). */
   poppedOut: Partial<Record<PoppedOutTab, boolean>>;
+  /** Dock-capable panes visible in the ACTIVE non-classic shell (ribbon slots /
+   *  workspace tiles) — maintained by setShellMode/setRibbon/setWorkspaces so
+   *  lib/keyboard's paneVisible() follows what is actually on screen. undefined =
+   *  classic shell active (the bottomTab fields above rule, as always). Runtime
+   *  state, never persisted. */
+  shellPanes?: PoppedOutTab[];
 }
 
 export interface DialogsState {
+  /** Production Techniques wizard (Project menu; docs/PRODUCTION_TECHNIQUES_PLAN.md). */
+  techniques: boolean;
   settings: boolean;
   export: boolean;
   /** Keyboard-shortcut cheat sheet ("?" key / Help menu) */
@@ -252,6 +268,13 @@ export interface DawState {
   /** timeline page-jump auto-scroll keeping the playhead in view (the "J" shortcut toggles it) */
   followPlayhead: boolean;
   panels: PanelsState;
+  /** Which UI shell hosts the panes (docs/UI_ALTERNATIVES_PLAN.md). The panes are
+   *  identical in all three; only how they are reached and arranged differs. */
+  shellMode: ShellMode;
+  /** Ribbon shell arrangement (persisted under ui.shell.ribbon). */
+  ribbon: RibbonState;
+  /** Workspaces shell arrangement (persisted under ui.shell.workspaces). */
+  workspaces: WorkspacesState;
   activeMidiClipId: number | null;
   activeAudioClipId: number | null;
   dialogs: DialogsState;
@@ -270,6 +293,12 @@ export interface DawState {
   setFocusedPane(pane: FocusedPane): void;
   setFollowPlayhead(on: boolean): void;
   setPanels(patch: Partial<PanelsState>): void;
+  setShellMode(mode: ShellMode): void;
+  /** Patch the ribbon arrangement. Single-instance invariant enforced here: a patch
+   *  that would make both slots show the same pane SWAPS the slots instead. */
+  setRibbon(patch: Partial<RibbonState>): void;
+  /** Replace the workspaces state wholesale (callers use the pure tree helpers). */
+  setWorkspaces(next: WorkspacesState): void;
   setActiveMidiClipId(id: number | null): void;
   setActiveAudioClipId(id: number | null): void;
   setDialogs(patch: Partial<DialogsState>): void;
@@ -399,7 +428,7 @@ const prefPanels: PanelsState = {
   ...loadPref<
     Omit<
       PanelsState,
-      "poppedOut" | "minimap" | "agent" | "bottomTab2" | "bottomTabPrev" | "bigClock"
+      "poppedOut" | "minimap" | "agent" | "bottomTab2" | "bottomTabPrev" | "bigClock" | "shellPanes"
     >
   >(
     "ui.panels",
@@ -413,6 +442,20 @@ const prefPanels: PanelsState = {
   ),
   poppedOut: {},
 };
+/* UI shell (docs/UI_ALTERNATIVES_PLAN.md) — each shell persists its own arrangement
+   under its own key, so switching modes is lossless in both directions. */
+const prefShellMode = loadPref<ShellMode>(
+  "ui.shellMode",
+  "classic",
+  oneOf<ShellMode>("classic", "ribbon", "workspaces"),
+);
+const prefRibbon = loadPref<RibbonState>("ui.shell.ribbon", DEFAULT_RIBBON, validRibbon);
+const prefWorkspaces = loadPref<WorkspacesState>(
+  "ui.shell.workspaces",
+  stockWorkspaces(),
+  validWorkspaces,
+);
+prefPanels.shellPanes = shellVisiblePanes(prefShellMode, prefRibbon, prefWorkspaces);
 const prefTool = loadPref<Tool>("ui.tool", "select", oneOf("select", "draw", "erase", "split"));
 const prefSizingMode = loadPref<SizingMode>(
   "ui.sizingMode",
@@ -465,9 +508,12 @@ export const useStore = create<DawState>((set) => ({
   focusedPane: "timeline",
   followPlayhead: prefFollowPlayhead,
   panels: prefPanels,
+  shellMode: prefShellMode,
+  ribbon: prefRibbon,
+  workspaces: prefWorkspaces,
   activeMidiClipId: null,
   activeAudioClipId: null,
-  dialogs: { settings: false, export: false, shortcuts: false, palette: false, quickHelp: null, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
+  dialogs: { techniques: false, settings: false, export: false, shortcuts: false, palette: false, quickHelp: null, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
 
   setProject: (project) => set({ project }),
   setEngineStatus: (engineStatus) => set({ engineStatus }),
@@ -494,6 +540,43 @@ export const useStore = create<DawState>((set) => ({
           : {}),
         ...patch,
       },
+    })),
+  setShellMode: (mode) =>
+    set((s) => ({
+      shellMode: mode,
+      panels: { ...s.panels, shellPanes: shellVisiblePanes(mode, s.ribbon, s.workspaces) },
+    })),
+  setRibbon: (patch) =>
+    set((s) => {
+      let r: RibbonState = { ...s.ribbon, ...patch };
+      if (r.secondary !== null && r.secondary === r.primary) {
+        // Single-instance: picking the OTHER slot's pane swaps the slots (dock
+        // setHalfTab semantics); a patch that collides any other way drops the split.
+        if (patch.primary !== undefined && patch.primary === s.ribbon.secondary)
+          r = { ...r, secondary: s.ribbon.primary };
+        else if (
+          patch.secondary !== undefined &&
+          patch.secondary === s.ribbon.primary &&
+          s.ribbon.secondary !== null
+        )
+          r = { ...r, primary: s.ribbon.secondary, secondary: s.ribbon.primary };
+        else r = { ...r, secondary: null };
+      }
+      return {
+        ribbon: r,
+        panels:
+          s.shellMode === "ribbon"
+            ? { ...s.panels, shellPanes: shellVisiblePanes("ribbon", r, s.workspaces) }
+            : s.panels,
+      };
+    }),
+  setWorkspaces: (next) =>
+    set((s) => ({
+      workspaces: next,
+      panels:
+        s.shellMode === "workspaces"
+          ? { ...s.panels, shellPanes: shellVisiblePanes("workspaces", s.ribbon, next) }
+          : s.panels,
     })),
   setActiveMidiClipId: (activeMidiClipId) => set({ activeMidiClipId }),
   setActiveAudioClipId: (activeAudioClipId) => set({ activeAudioClipId }),
@@ -549,6 +632,9 @@ useStore.subscribe((s, prev) => {
     savePrefDebounced("ui.panels.bottomTabPrev", bottomTabPrev);
     savePrefDebounced("ui.panels.bigClock", bigClock);
   }
+  if (s.shellMode !== prev.shellMode) savePref("ui.shellMode", s.shellMode);
+  if (s.ribbon !== prev.ribbon) savePrefDebounced("ui.shell.ribbon", s.ribbon);
+  if (s.workspaces !== prev.workspaces) savePrefDebounced("ui.shell.workspaces", s.workspaces);
   if (s.tool !== prev.tool) savePref("ui.tool", s.tool);
   if (s.sizingMode !== prev.sizingMode) savePref("ui.sizingMode", s.sizingMode);
   if (s.followPlayhead !== prev.followPlayhead) savePref("ui.followPlayhead", s.followPlayhead);
