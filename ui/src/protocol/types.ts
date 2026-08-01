@@ -2009,6 +2009,9 @@ export interface RequestMap {
   "engine/getStatus": { req: EmptyObject; reply: EngineStatus };
   "engine/panic": { req: EmptyObject; reply: EmptyObject };
   "engine/getLog": { req: GetLogRequest; reply: GetLogReply };
+  /** File ▸ Exit (§5.4): clean engine shutdown — replies ok, broadcasts event/shutdown,
+   *  then the process exits (session.lock cleared: no recovery offer next launch). */
+  "engine/shutdown": { req: EmptyObject; reply: EmptyObject };
 
   // §5.5 recording & media
   "midi/getInputs": { req: EmptyObject; reply: MidiGetInputsReply };
@@ -2085,6 +2088,8 @@ export interface RecentProjectsEvent {
 export interface EventMap {
   "event/projectChanged": ProjectChangedEvent;
   "event/dirty": DirtyEvent;
+  /** Broadcast right before a deliberate engine exit (engine/shutdown, §5.4). */
+  "event/shutdown": EmptyObject;
   "event/recentProjects": RecentProjectsEvent;
   "event/transport": TransportEvent;
   "event/meters": MetersEvent;

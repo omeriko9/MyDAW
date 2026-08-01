@@ -175,6 +175,7 @@ function DockPlaceholder({ label, pop }: { label: string; pop: PopoutWindow }) {
 
 export default function App() {
   const connected = useStore((s) => s.connected);
+  const shutdownByUser = useStore((s) => s.shutdownByUser);
   const panels = useStore((s) => s.panels);
   const setPanels = useStore((s) => s.setPanels);
   const projectName = useStore((s) => s.project?.name ?? null);
@@ -549,8 +550,25 @@ export default function App() {
       <PluginEditorHost />
       <BigClock />
 
+      {/* deliberate exit (File ▸ Exit): goodbye screen — reconnect is stopped, the
+          engine is gone on purpose, so never show the scary "reconnecting…" spinner */}
+      {shutdownByUser && (
+        <div className="app-offline">
+          <div className="app-offline-card app-shutdown-card">
+            <Icon name="check" size={16} />
+            <div>
+              <div>MyDAW has exited — your project was saved.</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                You can close this tab. To start MyDAW again, double-click the MyDAW file
+                like before.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* engine-offline overlay — UI stays mounted underneath */}
-      {!connected && (
+      {!connected && !shutdownByUser && (
         <div className="app-offline">
           <div className="app-offline-card">
             <span className="spin">

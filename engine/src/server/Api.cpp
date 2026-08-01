@@ -20,6 +20,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <thread>
 #include <vector>
 
 #include "App.h"
@@ -154,7 +155,7 @@ bool Api::isBusyGuarded(const std::string& type) {
            type == "project/load" || type == "project/loadRecent" ||
            type == "project/new" || type == "project/recover" ||
            type == "project/saveAs" || type == "project/importForeign" ||
-           type == "plugins/recreate";
+           type == "plugins/recreate" || type == "engine/shutdown";
 }
 
 void Api::handleMessage(const json& msg, HttpWsServer::RespondFn respond) {
@@ -1085,6 +1086,22 @@ json Api::handleEngine(const std::string& type, const json& p, std::string& ec,
         return app_.engineStatus();
     if (type == "engine/panic") {
         app_.panic();
+        return json::object();
+    }
+    if (type == "engine/shutdown") {
+        // File ▸ Exit (SPEC §5.4): the same clean path as Ctrl+C — the run loop breaks
+        // and App::shutdown() stops audio, destroys plugin hosts and CLEARS session.lock
+        // (no recovery offer next launch). Busy-guarded, so an export/DOP render in
+        // flight refuses with busy_* instead of corrupting its output. The stop is
+        // delayed a beat on a worker so the ok-reply and the event/shutdown broadcast
+        // flush to every tab before the server goes down.
+        Log::info("engine: shutdown requested (File > Exit)");
+        app_.broadcastEvent("event/shutdown", json::object());
+        App* app = &app_;
+        app_.spawnWorker([app]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            app->requestStop();
+        });
         return json::object();
     }
     if (type == "engine/getLog")

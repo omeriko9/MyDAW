@@ -1390,6 +1390,61 @@ export const checks = [
       await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: f.id });
     },
   },
+
+  {
+    // ⚠️ MUST STAY THE LAST CHECK: it exits the slot's engine FOR REAL. Anything
+    // added after this line will find no engine to talk to.
+    id: "file-exit-shuts-the-engine-down",
+    title: "File → Exit saves, stops the engine cleanly, and shows the goodbye screen",
+    area: "menu-exit",
+    guards:
+      "v1.0.0 shipped with NO quit path: closing the tab left the engine running forever, " +
+      "and the only way out was a process kill — which leaves session.lock behind and " +
+      "triggers a bogus crash-recovery offer on the next launch. File ▸ Exit must save " +
+      "(autoSaveIfDirty house rule), broadcast event/shutdown (goodbye screen, reconnect " +
+      "stopped), and self-exit cleanly.",
+    run: async (s, tt) => {
+      // Give the project a save path FIRST so the exit flow's save leg writes to temp
+      // instead of auto-Save-As-ing into the real Documents folder, then dirty it so
+      // that leg actually runs.
+      const tmpProj = `${process.env.TEMP}\\mydaw-smoke-exit.mydaw`;
+      await s.probe("project/saveAs", { path: tmpProj });
+      await s.probe("cmd/track.add", { kind: "audio", name: "ExitDirty" });
+
+      await s.eval(`(() => {
+        const file = [...document.querySelectorAll(".ms-item")]
+          .find((b) => b.getAttribute("aria-label") === "File");
+        if (!file) return false;
+        file.click();
+        return true;
+      })()`);
+      await s.untilEval("the File menu offers Exit", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Exit"));
+      await s.eval(`(() => {
+        [...document.querySelectorAll(".ctx-item")]
+          .find((i) => i.textContent.trim() === "Exit").click();
+        return true;
+      })()`);
+
+      // The goodbye screen — not the "reconnecting…" spinner — must appear.
+      await s.untilEval("the goodbye screen replaces the UI", () =>
+        !!document.querySelector(".app-shutdown-card"));
+      await s.untilEval("and it is not the offline spinner", () =>
+        !document.querySelector(".app-offline .spin"));
+
+      // The engine must actually be gone (the ok-reply/broadcast raced first, by design).
+      let dead = false;
+      for (let i = 0; i < 16 && !dead; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          await s.probe("session/hello", { clientName: "post-exit" });
+        } catch {
+          dead = true;
+        }
+      }
+      tt.ok(dead, "the engine process exited — no listener answers the probe");
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------- runner */

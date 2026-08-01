@@ -46,6 +46,7 @@ import { fieldsDialog } from "../Dialogs/fields";
 import { addTrackMenuItems } from "../Timeline/TrackHeaders";
 import {
   closeProjectFlow,
+  exitFlow,
   importFilesFlow,
   importProjectFlow,
   loadRecentFlow,
@@ -219,6 +220,13 @@ function buildFileMenu(): MenuEntry[] {
       label: "Settings…",
       icon: "settings",
       onClick: () => useStore.getState().setDialogs({ settings: true }),
+    },
+    "separator",
+    {
+      label: "Exit",
+      icon: "close",
+      title: "Save the project (like every other flow), stop the audio engine and end the session",
+      onClick: () => void exitFlow(),
     },
   ];
 }

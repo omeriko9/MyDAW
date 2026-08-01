@@ -431,6 +431,14 @@ the entire drag.
   stream; reply `{actual:{sampleRate,bufferSize,latencyMs}}`. `engine/getStatus {}` → `{running,
   driver, device, sampleRate, bufferSize, latencyMs, xruns, cpuPercent, pdcSamples}`
 - `engine/panic {}` (all notes off / reset)
+- `engine/shutdown {}` — File ▸ Exit: replies ok, broadcasts `event/shutdown` to every tab,
+  then (after a ~250 ms flush grace on a worker) the run loop stops and `App::shutdown()`
+  performs the same clean teardown as Ctrl+C — audio stopped, plugin hosts destroyed,
+  **session.lock cleared** (so a clean exit never offers crash recovery; the UI's Exit flow
+  saves first via the autoSaveIfDirty rule for exactly that reason). Busy-guarded: refused
+  with `busy_exporting`/`busy_processing` while a render is in flight. Excluded from the
+  agent catalog (app-lifecycle, never an agent action). On `event/shutdown` the UI stops
+  reconnecting and shows a goodbye screen instead of the offline spinner.
 
 ### 5.5 Recording & media
 - `cmd/track.set recordArm` + `transport/record` records armed audio tracks (WASAPI capture of

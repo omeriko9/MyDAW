@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "106920fa19bcd048abc9c7595d3fcd4a0788b1abc6ccdcea9421c385e24ce112";
+export const AGENT_CATALOG_SHA256 = "7097932506eaf86ebb180ecd874e3ac82598699a7168043a955eba7260eac7d8";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -10897,6 +10897,11 @@ export const AGENT_CATALOG: AgentCatalog = {
       "use": "This is a UI window action (File > New Window), not an agent capability."
     },
     {
+      "request": "engine/shutdown",
+      "reason": "Terminates the engine process and the whole session; an app-lifecycle action an agent must never take on its own.",
+      "use": "Ask the user to use File > Exit in the UI."
+    },
+    {
       "request": "export/trackArchive",
       "reason": "Interactive Cubase Track Archive XML file export (may open a native save dialog); a file-interchange utility with partially inferred output, not a project edit.",
       "use": "Ask the user to run File > Export > Export Cubase Track Archive in the UI."
@@ -11489,6 +11494,11 @@ export const REQUEST_COVERAGE = {
   "engine/getLog": {
     "kind": "operation",
     "operation": "engine/getLog"
+  },
+  "engine/shutdown": {
+    "kind": "excluded",
+    "reason": "Terminates the engine process and the whole session; an app-lifecycle action an agent must never take on its own.",
+    "use": "Ask the user to use File > Exit in the UI."
   },
   "midi/getInputs": {
     "kind": "operation",

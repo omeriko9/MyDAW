@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "106920fa19bcd048abc9c7595d3fcd4a0788b1abc6ccdcea9421c385e24ce112";
+const char kAgentCatalogSha256[] = "7097932506eaf86ebb180ecd874e3ac82598699a7168043a955eba7260eac7d8";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -10875,6 +10875,11 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "request": "session/newWindow",
       "reason": "Spawns a detached second engine process + opens a browser tab; an app/window-management action, not a project edit.",
       "use": "This is a UI window action (File > New Window), not an agent capability."
+    },
+    {
+      "request": "engine/shutdown",
+      "reason": "Terminates the engine process and the whole session; an app-lifecycle action an agent must never take on its own.",
+      "use": "Ask the user to use File > Exit in the UI."
     },
     {
       "request": "export/trackArchive",

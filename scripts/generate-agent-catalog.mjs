@@ -436,9 +436,9 @@ const validateCatalog = () => {
   if (JSON.stringify(uiNames) !== JSON.stringify(expectedUiOperations)) {
     fail("UI operation set mismatch; got [" + uiNames.join(", ") + "]");
   }
-  if (engineNames.length !== 132 || uiNames.length !== 14 || exclusions.length !== 5) {
+  if (engineNames.length !== 132 || uiNames.length !== 14 || exclusions.length !== 6) {
     fail(
-      "expected 132 engine operations, 14 UI operations, and 5 exclusions; got " +
+      "expected 132 engine operations, 14 UI operations, and 6 exclusions; got " +
         engineNames.length +
         "/" +
         uiNames.length +

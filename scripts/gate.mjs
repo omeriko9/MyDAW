@@ -89,6 +89,8 @@ const SUITES = [
   { id: "stock-effects", tier: "fast", script: "stock-effects-test.mjs", requires: needsEngine },
   { id: "stock-instrument", tier: "fast", script: "stock-instrument-test.mjs", requires: needsEngine },
   { id: "stock-sampler", tier: "fast", script: "stock-sampler-test.mjs", requires: needsEngine },
+  { id: "shutdown", tier: "fast", script: "shutdown-test.mjs", requires: needsEngine,
+    note: "SPEC §5.4 File > Exit: clean self-exit that clears session.lock" },
   { id: "agent-engine", tier: "fast", script: "agent-engine-test.mjs", requires: needsEngine },
   { id: "mcp", tier: "fast", script: "mcp-test.mjs", requires: needsEngine },
 

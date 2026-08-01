@@ -10869,6 +10869,11 @@
       "use": "This is a UI window action (File > New Window), not an agent capability."
     },
     {
+      "request": "engine/shutdown",
+      "reason": "Terminates the engine process and the whole session; an app-lifecycle action an agent must never take on its own.",
+      "use": "Ask the user to use File > Exit in the UI."
+    },
+    {
       "request": "export/trackArchive",
       "reason": "Interactive Cubase Track Archive XML file export (may open a native save dialog); a file-interchange utility with partially inferred output, not a project edit.",
       "use": "Ask the user to run File > Export > Export Cubase Track Archive in the UI."

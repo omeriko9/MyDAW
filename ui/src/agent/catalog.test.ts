@@ -97,6 +97,7 @@ const REQUEST_TYPES = [
   "engine/getStatus",
   "engine/panic",
   "engine/getLog",
+  "engine/shutdown",
   "midi/getInputs",
   "midi/setInputEnabled",
   "midi/preview",
@@ -170,6 +171,7 @@ const UI_OPERATION_TYPES = [
 const EXCLUDED_REQUESTS = [
   "session/hello",
   "session/newWindow",
+  "engine/shutdown",
   "export/trackArchive",
   "export/cpr",
   "midi/setThruTracks",

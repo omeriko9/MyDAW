@@ -391,6 +391,8 @@ export const getEngineStatus = () => ws.request("engine/getStatus", {});
 export const panic = () => ws.request("engine/panic", {});
 export const getLog = (tail?: number) =>
   ws.request("engine/getLog", tail !== undefined ? { tail } : {});
+/** File ▸ Exit (§5.4): clean engine shutdown — event/shutdown then the process exits. */
+export const shutdownEngine = () => ws.request("engine/shutdown", {});
 
 /* ============================================================================
  * §5.5 — Recording & media

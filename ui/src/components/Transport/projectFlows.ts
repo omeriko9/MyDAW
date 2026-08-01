@@ -28,6 +28,7 @@ import {
   recoverProject,
   recreatePlugins,
   saveProject,
+  shutdownEngine,
   saveProjectAs,
 } from "../../store/actions";
 import { askAdoptFileTempo } from "../../lib/importTempo";
@@ -121,6 +122,22 @@ export async function closeProjectFlow(): Promise<void> {
     await newProject();
   } catch (e) {
     logFlowError("close project", e);
+  }
+}
+
+/**
+ * File ▸ Exit (SPEC §5.4): save first (the house autoSaveIfDirty rule — path-less
+ * projects auto-Save-As into Documents\MyDAW Projects), then a clean engine shutdown.
+ * The engine broadcasts event/shutdown (every tab flips to the goodbye screen and stops
+ * reconnecting), clears its session lock and exits. A clean exit means NO recovery offer
+ * next launch — which is exactly why Exit saves rather than asks.
+ */
+export async function exitFlow(): Promise<void> {
+  try {
+    if (!(await autoSaveIfDirty("Exit MyDAW"))) return;
+    await shutdownEngine();
+  } catch (e) {
+    logFlowError("exit", e);
   }
 }
 

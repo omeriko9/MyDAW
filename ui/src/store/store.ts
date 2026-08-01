@@ -194,6 +194,9 @@ export interface DialogsState {
 export interface DawState {
   /* connection / engine */
   connected: boolean;
+  /** File ▸ Exit completed: the engine shut down ON PURPOSE — show the goodbye screen
+   *  instead of the "reconnecting…" overlay (reconnect is stopped, nothing to reach). */
+  shutdownByUser: boolean;
   engineInfo: HelloEngineInfo | null;
   engineStatus: EngineStatus | null;
 
@@ -429,6 +432,7 @@ function raisePluginEditor(dialogs: DialogsState, instanceId: number): DialogsSt
 
 export const useStore = create<DawState>((set) => ({
   connected: false,
+  shutdownByUser: false,
   engineInfo: null,
   engineStatus: null,
 
@@ -650,6 +654,13 @@ ws.on("event/projectChanged", (ev) => {
 
 ws.on("event/dirty", (ev) => {
   useStore.setState({ dirty: ev.dirty });
+});
+
+ws.on("event/shutdown", () => {
+  // Deliberate exit (File ▸ Exit, any tab): stop reconnecting BEFORE the socket drops so
+  // the offline overlay never flashes; App renders the goodbye screen instead.
+  useStore.setState({ shutdownByUser: true });
+  ws.disconnect();
 });
 
 // Open Recent changes live (save / save-as / import) — hello only seeds it at connect.
