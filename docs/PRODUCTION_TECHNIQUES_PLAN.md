@@ -1,12 +1,16 @@
 # Production Techniques — plan
 
-Status: v1 SHIPPED 2026-08-01 (10 techniques, wizard, docs); batch 2 SHIPPED the same
-day (+30 → **40 techniques, 8 per category**). Wizard since v1.1: Alt+T + topbar
-button, per-category tints, Apply All, reveal-the-relevant-pane before each apply,
-and an all-done summary. The living per-category queue lives in
+Status: v1 SHIPPED 2026-08-01 (10 techniques, wizard, docs); batch 2 same day (+30);
+round 3 SHIPPED 2026-08-02 (+15 → **55 techniques, 11 per category**), together with
+the **stock Saturator** (`builtin:saturator` — the backlog's most-wanted primitive
+gap, now closed; vocal-heat / mixbus-color are built on it), chord-track-aware
+techniques (chord-swell, arp-builder read `project.chordEvents`), and a search box in
+the browser. Wizard since v1.1: Alt+T + topbar button, per-category tints, Apply All,
+reveal-the-relevant-pane before each apply, and an all-done summary. The living
+per-category queue lives in
 [PRODUCTION_TECHNIQUES_BACKLOG.md](PRODUCTION_TECHNIQUES_BACKLOG.md) — extend THERE,
-not by starting a new list (its Shipped section is now the authoritative catalog
-table; the v1 table below is kept as the original scope statement).
+not by starting a new list (its Shipped section is the authoritative catalog table;
+the v1 table below is kept as the original scope statement).
 
 ## 1. What this is
 

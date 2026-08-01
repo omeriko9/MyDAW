@@ -7,8 +7,10 @@ import {
   duplicateTrack,
   editNotes,
   moveClips,
+  setClip,
   setPluginParam,
   setTrack,
+  splitClips,
   stretchClip,
 } from "../../store/actions";
 import type { Clip, Track } from "../../protocol/types";
@@ -789,6 +791,252 @@ const adtDouble: TechniqueDef = {
   ],
 };
 
+/* ============================================================================
+ * Gang Vocal Stack
+ * ========================================================================= */
+
+const gangStack: TechniqueDef = {
+  id: "gang-stack",
+  category: "vocal",
+  title: "Gang Vocal Stack",
+  tagline: "One shout becomes a crowd.",
+  description:
+    "The chant/hook thickener: two extra copies hard left and right, each detuned a " +
+    "different ~25 cents, all thinned below 300 Hz — one performance reads as a room " +
+    "full of people. (Punk gang vocals, pop chant hooks, crowd \"heys\".)",
+  requirements: (ctx) => [
+    {
+      ok: ctx.project.tracks.some((t) => audioLike(t) && t.clips.some((c) => c.type === "audio")),
+      label: "A track with AUDIO takes (detunes are audio pitch-shifts)",
+    },
+  ],
+  stages: [
+    {
+      id: "crowd",
+      title: "Crowd",
+      reveal: "timeline",
+      summary:
+        "Duplicates the track twice (gang L / gang R), hard pans ±80%, −2 dB, and detunes " +
+        "the copies −25 / +25 cents.",
+      manual:
+        "Duplicate the shout track twice. Pan the copies hard left and hard right, pull " +
+        "them ~2 dB down, and pitch-shift one −25 cents and the other +25 (constant length).",
+      params: [
+        {
+          key: "trackId",
+          label: "Gang up this",
+          kind: "track",
+          trackFilter: audioLike,
+          default: (ctx) => defaultSelectedTrack(ctx, audioLike),
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const src = ctx.project.tracks.find((t) => t.id === (params.trackId as number));
+        if (!src) throw new Error("Pick the track to gang up.");
+        const detunes: Array<[string, number, number]> = [
+          ["gang L", -0.8, -0.25],
+          ["gang R", 0.8, 0.25],
+        ];
+        const copyIds: number[] = [];
+        for (const [tag, pan, cents] of detunes) {
+          const copy = (await tx.cmd(duplicateTrack(src.id))).track;
+          await tx.cmd(
+            setTrack(copy.id, { name: `${src.name} (${tag})`, pan, volume: src.volume * dbToLin(-2) }),
+          );
+          for (const clip of copy.clips)
+            if (clip.type === "audio") await tx.cmd(stretchClip(clip.id, pitchRatio(cents), true));
+          copyIds.push(copy.id);
+        }
+        state.gangIds = copyIds;
+        return { commands: tx.count, note: "Two detuned gang copies flank the original." };
+      },
+    },
+    {
+      id: "thin",
+      title: "Thin the crowd",
+      reveal: "mixer",
+      summary: "High-passes both gang copies at 300 Hz — crowd width without low-mid pile-up.",
+      manual:
+        "Low-cut both copies around 300 Hz. Stacked voices multiply the low mids first; " +
+        "the crowd only needs to add width and grit.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const ids = (state.gangIds as number[] | undefined) ?? [];
+        const copies = ctx.project.tracks.filter(
+          (t) => ids.includes(t.id) || /\(gang [LR]\)$/.test(t.name),
+        );
+        if (copies.length === 0) throw new Error("Run the Crowd stage first.");
+        for (const t of copies) await setEqBands(tx, t.id, [eqLowCut(300)]);
+        return { commands: tx.count, note: "Gang copies thinned below 300 Hz." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Pitch-Drop Tag
+ * ========================================================================= */
+
+const pitchDropTag: TechniqueDef = {
+  id: "pitch-drop-tag",
+  category: "vocal",
+  title: "Pitch-Drop Tag",
+  tagline: "The last word melts downward.",
+  description:
+    "The hip-hop/pop tag: the final word (or half-beat) of a phrase pitch-drops tape-" +
+    "style — it slows and falls as it ends, stamping a full stop on the line.",
+  requirements: (ctx) => [
+    {
+      ok: allAudioClips(ctx).some((f) => clipEndBeat(f.clip, ctx.project) - f.clip.startBeat >= 1),
+      label: "An audio phrase clip at least 1 beat long",
+    },
+  ],
+  stages: [
+    {
+      id: "drop",
+      title: "Drop the tail",
+      reveal: "timeline",
+      summary:
+        "Splits off the last half-beat and tape-drops it (pitch ×0.6, ~−9 st, slowing as " +
+        "it falls — it runs slightly past the old end).",
+      manual:
+        "Split the phrase half a beat before its end. Time-Stretch the tail with tape mode, " +
+        "ratio ~0.6 — pitch and speed fall together.",
+      params: [
+        {
+          key: "clipId",
+          label: "Tag this phrase",
+          kind: "clip",
+          default: (ctx) => resolveAudioClip(ctx, undefined)?.clip.id ?? 0,
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveAudioClip(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the phrase clip.");
+        const end = clipEndBeat(found.clip, ctx.project);
+        if (end - found.clip.startBeat < 1) throw new Error("The clip must be at least 1 beat long.");
+        const s = await tx.cmd(splitClips([found.clip.id], end - 0.5));
+        const tailId = s.newClipIds[0];
+        if (tailId === undefined) throw new Error("Split produced no tail.");
+        await tx.cmd(stretchClip(tailId, 0.6, true, true)); // tape: pitch ×0.6, length ÷0.6
+        state.tagTailId = tailId;
+        return { commands: tx.count, note: "The last word now melts downward." };
+      },
+    },
+    {
+      id: "fade",
+      title: "Let it die",
+      reveal: "timeline",
+      optional: true,
+      summary: "Fades the dropped tail out over its second half.",
+      manual: "Fade the dropped tail out so it dissolves instead of cutting.",
+      run: async (_ctx, _params, state) => {
+        const tx = new Tx();
+        const tailId = state.tagTailId as number | undefined;
+        if (tailId === undefined) throw new Error("Run the Drop stage first.");
+        await tx.cmd(setClip(tailId, { fadeOutSec: 0.35 }));
+        return { commands: tx.count, note: "Tag dissolves at the end." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Vocal Heat (saturation)
+ * ========================================================================= */
+
+const vocalHeat: TechniqueDef = {
+  id: "vocal-heat",
+  category: "vocal",
+  title: "Vocal Heat",
+  tagline: "Saturation instead of volume — the vocal sits IN the track.",
+  description:
+    "Harmonic saturation on the voice: gentle drive adds harmonics that cut through a " +
+    "dense mix without adding level — why a driven vocal reads as \"produced\" where a " +
+    "louder one just reads as loud. Uses the stock Saturator.",
+  requirements: (ctx) => [
+    { ok: ctx.project.tracks.some(audioLike), label: "A vocal track (audio or instrument)" },
+  ],
+  stages: [
+    {
+      id: "heat",
+      title: "Heat",
+      reveal: "mixer",
+      summary:
+        "Inserts the stock Saturator on the vocal: Drive 10 dB, Tone 8.5 kHz, Mix 60% " +
+        "(parallel-style blend), Output −4 dB.",
+      manual:
+        "Insert the stock Saturator: Drive ~10 dB, Tone pulled to ~8.5 kHz (drive adds top " +
+        "you don't want on esses), Mix around 60% so the clean voice stays underneath.",
+      params: [
+        {
+          key: "trackId",
+          label: "Vocal track",
+          kind: "track",
+          trackFilter: audioLike,
+          default: (ctx) => defaultSelectedTrack(ctx, audioLike),
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const trackId = params.trackId as number;
+        if (!ctx.project.tracks.some((t) => t.id === trackId)) throw new Error("Pick the vocal track.");
+        const sat = await addInsert(tx, trackId, "builtin:saturator", {
+          Drive: 10,
+          Tone: 8500,
+          Mix: 60,
+          Output: -4,
+        });
+        state.heatInstanceId = sat.instanceId;
+        return { commands: tx.count, note: "Vocal driven — harmonics instead of volume." };
+      },
+    },
+    {
+      id: "amount",
+      title: "Amount",
+      reveal: "mixer",
+      summary: "Dials the heat: Mild (6 dB / 40%), Warm (10 / 60), or Hot (18 / 80).",
+      manual:
+        "More drive + more mix = more forward. Stop one notch before you can HEAR " +
+        "distortion on sustained notes.",
+      params: [
+        {
+          key: "amount",
+          label: "Heat",
+          kind: "select",
+          options: [
+            { value: "mild", label: "Mild (6 dB / 40%)" },
+            { value: "warm", label: "Warm (10 dB / 60%)" },
+            { value: "hot", label: "Hot (18 dB / 80%)" },
+          ],
+          default: () => "warm",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const instanceId =
+          (state.heatInstanceId as number | undefined) ??
+          ctx.project.tracks.flatMap((t) => t.inserts).find((i) => i.uid === "builtin:saturator")
+            ?.instanceId;
+        if (instanceId === undefined) throw new Error("Run the Heat stage first.");
+        const presets: Record<string, { Drive: number; Mix: number }> = {
+          mild: { Drive: 6, Mix: 40 },
+          warm: { Drive: 10, Mix: 60 },
+          hot: { Drive: 18, Mix: 80 },
+        };
+        const p = presets[(params.amount as string) ?? "warm"];
+        for (const [name, value] of Object.entries(p)) {
+          const id = await paramIdByName(instanceId, name);
+          await tx.cmd(setPluginParam(instanceId, id, normFor("builtin:saturator", name, value)));
+        }
+        return { commands: tx.count, note: `Heat set to “${params.amount}”.` };
+      },
+    },
+  ],
+};
+
 export const vocalTechniques: TechniqueDef[] = [
   doubler,
   delayThrow,
@@ -798,4 +1046,7 @@ export const vocalTechniques: TechniqueDef[] = [
   adLibPlace,
   vocalGate,
   adtDouble,
+  gangStack,
+  pitchDropTag,
+  vocalHeat,
 ];

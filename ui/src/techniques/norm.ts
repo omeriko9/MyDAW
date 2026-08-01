@@ -49,6 +49,12 @@ export const BUILTIN_PARAM_SPECS: Record<string, Record<string, Spec>> = {
     Ceiling: { lin: [-24, 0] },
     Release: { log: [1, 1000] },
   },
+  "builtin:saturator": {
+    Drive: { lin: [0, 36] },
+    Tone: { log: [1000, 20000] },
+    Mix: { lin: [0, 100] },
+    Output: { lin: [-24, 6] },
+  },
   "builtin:delay": {
     Time: { lin: [1, 2000] },
     Feedback: { lin: [0, 95] },

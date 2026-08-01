@@ -4,12 +4,14 @@
  */
 
 import {
+  addChord,
   addMarker,
   addPlugin,
   addTrack,
   duplicateClips,
   moveClips,
   processAudioClip,
+  renderTrackInPlace,
   setClip,
   splitClips,
   stretchClip,
@@ -21,6 +23,8 @@ import {
   addInsert,
   addNotes,
   allAudioClips,
+  chordAt,
+  chordPitches,
   dbToLin,
   eqLowCut,
   focusMidiClip,
@@ -929,6 +933,282 @@ const impactRumble: TechniqueDef = {
   ],
 };
 
+/* ============================================================================
+ * Reverse-Reverb Swell
+ * ========================================================================= */
+
+const reverseReverb: TechniqueDef = {
+  id: "reverse-reverb-swell",
+  category: "transitions",
+  title: "Reverse-Reverb Swell",
+  tagline: "The reverb tail plays BEFORE the sound that made it.",
+  description:
+    "The studio-only impossibility: the clip is printed through a big reverb, and the " +
+    "printed TAIL is reversed and placed before the original — the room inhales into " +
+    "the word/hit. (Reverse Build-In's wetter, spookier cousin.)",
+  requirements: (ctx) => [
+    { ok: allAudioClips(ctx).length > 0, label: "An audio clip to swell into (word, snare, chord)" },
+  ],
+  stages: [
+    {
+      id: "print",
+      title: "Print the verb",
+      reveal: "timeline",
+      summary:
+        "Copies the clip to a new “Verb Print” track with a huge 100%-wet reverb and " +
+        "renders the track in place — the print (clip + 4 beats of tail) becomes audio.",
+      manual:
+        "Copy the clip to a scratch track, insert a big reverb at 100% wet, then " +
+        "right-click the track ▸ Render in Place covering the clip plus a few beats of " +
+        "tail. You now OWN the reverb tail as audio.",
+      params: [clipParamT("Swell into this clip")],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveAudioClipT(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the clip to swell into.");
+        const start = found.clip.startBeat;
+        const end = clipEndBeat(found.clip, ctx.project);
+        const print = await newTrack(tx, "audio", "Verb Print");
+        const dup = await tx.cmd(duplicateClips([found.clip.id], true));
+        const copyId = dup.clips[0]?.id;
+        if (copyId === undefined) throw new Error("Duplicate returned no clip.");
+        await tx.cmd(moveClips([copyId], 0, print.id));
+        await addInsert(tx, print.id, "builtin:reverb", { Size: 0.88, Damp: 0.25, Mix: 100 });
+        const r = await tx.cmd(renderTrackInPlace(print.id, start, end + 4));
+        state.rrPrintTrackId = print.id;
+        state.rrPrintAssetId = r.assetId;
+        state.rrTargetStart = start;
+        state.rrBpm = ctx.bpm;
+        return {
+          commands: tx.count,
+          note: "Reverb printed to audio (clip + 4-beat tail) on the Verb Print track.",
+        };
+      },
+    },
+    {
+      id: "flip",
+      title: "Flip & place",
+      reveal: "timeline",
+      summary:
+        "Reverses the printed audio, slides it so it ENDS exactly where the original " +
+        "starts, and shapes it (long fade-in, −4 dB).",
+      manual:
+        "Process ▸ Reverse the printed clip, drag it so its END lands on the original " +
+        "clip's start, add a long fade-in and tuck it a few dB down.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const trackId = state.rrPrintTrackId as number | undefined;
+        const assetId = state.rrPrintAssetId as number | undefined;
+        const track = ctx.project.tracks.find((t) => t.id === trackId);
+        if (!track || assetId === undefined)
+          throw new Error("Run the Print stage first.");
+        const clip = track.clips.find((c) => c.type === "audio" && c.assetId === assetId);
+        if (!clip)
+          throw new Error("The rendered print hasn't arrived yet — give it a second and Apply again.");
+        const len = clipEndBeat(clip, ctx.project) - clip.startBeat;
+        const targetStart = state.rrTargetStart as number;
+        if (targetStart - len < 0)
+          throw new Error(`No room — the swell needs ${len.toFixed(1)} beats of space before the clip.`);
+        await tx.cmd(processAudioClip(clip.id, "reverse"));
+        await tx.cmd(moveClips([clip.id], targetStart - len - clip.startBeat));
+        const bpm = (state.rrBpm as number) ?? 120;
+        await tx.cmd(
+          setClip(clip.id, { fadeInSec: (60 / bpm) * len * 0.6, gain: Math.pow(10, -4 / 20) }),
+        );
+        return { commands: tx.count, note: "The room now inhales into the hit." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Half-Time Drop
+ * ========================================================================= */
+
+const halfTime: TechniqueDef = {
+  id: "half-time-drop",
+  category: "transitions",
+  title: "Half-Time Drop",
+  tagline: "Same notes, half the speed — instant weight.",
+  description:
+    "The section suddenly plays at half tempo without the project tempo moving: the " +
+    "clip is time-stretched ×2 at its own pitch. Trap breakdowns, DnB switch-ups, " +
+    "the “everything gets heavy” moment.",
+  requirements: (ctx) => [
+    { ok: allAudioClips(ctx).length > 0, label: "An audio clip to drop to half-time" },
+  ],
+  stages: [
+    {
+      id: "stretch",
+      title: "Stretch",
+      reveal: "timeline",
+      summary:
+        "Time-stretches the clip ×2 (pitch preserved, spectral engine) — it now occupies " +
+        "twice the bars, so mind what follows it.",
+      manual:
+        "Right-click the clip ▸ Time-Stretch, ratio 2.0, pitch preserved. The clip doubles " +
+        "in length — move or mute whatever it now overlaps.",
+      params: [clipParamT("Half-time this clip")],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveAudioClipT(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the clip to half-time.");
+        await tx.cmd(stretchClip(found.clip.id, 2, false, false));
+        state.halfClipId = found.clip.id;
+        return {
+          commands: tx.count,
+          note: "Clip now plays at half speed, same pitch — it covers twice the bars.",
+        };
+      },
+    },
+    {
+      id: "smooth",
+      title: "Smooth ends",
+      reveal: "timeline",
+      optional: true,
+      summary: "10 ms fades on both ends of the stretched clip — stretch edges can click.",
+      manual: "Short fades on the stretched clip's ends.",
+      run: async (_ctx, _params, state) => {
+        const tx = new Tx();
+        const clipId = state.halfClipId as number | undefined;
+        if (clipId === undefined) throw new Error("Run the Stretch stage first.");
+        await tx.cmd(setClip(clipId, { fadeInSec: 0.01, fadeOutSec: 0.01 }));
+        return { commands: tx.count, note: "Stretch edges smoothed." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Chord Swell (chord-track aware)
+ * ========================================================================= */
+
+const chordSwell: TechniqueDef = {
+  id: "chord-swell",
+  category: "transitions",
+  title: "Chord Swell",
+  tagline: "A pad blooms into the downbeat — in the song's actual chord.",
+  description:
+    "A soft pad swells over the bars before a section, voiced from the CHORD TRACK at " +
+    "the landing bar — the transition breathes in harmony with the song instead of on " +
+    "a generic note.",
+  requirements: (ctx) => [
+    {
+      ok: (ctx.project.chordEvents ?? []).length > 0,
+      label: "A chord on the chord track (the swell reads its voicing from it)",
+      fix: {
+        label: "Add a C major at the start for me",
+        run: async () => {
+          await addChord({ beat: 0, root: 0, quality: "maj" });
+        },
+      },
+    },
+  ],
+  stages: [
+    {
+      id: "pad",
+      title: "Pad",
+      reveal: "timeline",
+      summary:
+        "Adds a “Swell” track (soft slow-attack PolySynth) holding the landing bar's chord " +
+        "tones through the bars before it.",
+      manual:
+        "Add an instrument track with a soft pad sound (slow attack, low cutoff). Hold the " +
+        "chord of the NEXT section for 2 bars before it — read the chord track for the notes.",
+      params: [
+        {
+          key: "atBar",
+          label: "Lands on bar",
+          kind: "number",
+          min: 2,
+          max: 999,
+          step: 1,
+          default: (ctx) => Math.max(Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1, 3),
+        },
+        {
+          key: "lengthBars",
+          label: "Swell (bars)",
+          kind: "number",
+          min: 1,
+          max: 8,
+          step: 1,
+          default: () => 2,
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, params.atBar as number));
+        const start = Math.max(0, end - (params.lengthBars as number) * ctx.beatsPerBar);
+        const chord = chordAt(ctx.project, end) ?? chordAt(ctx.project, start);
+        if (!chord) throw new Error("No chord on the chord track — add one first (see requirements).");
+        const track = await newTrack(tx, "instrument", "Swell");
+        const synth = await addInsert(tx, track.id, "builtin:polysynth", {
+          "Osc 1 Wave": 0,
+          "Osc Mix": 0.2,
+          Sub: 0.15,
+          Cutoff: 900,
+          Resonance: 0.15,
+          "Amp Attack": 800,
+          "Amp Sustain": 1,
+          "Amp Release": 700,
+          Width: 0.8,
+          Gain: -10,
+        });
+        const pitches = chordPitches(chord.root, chord.quality, 48);
+        const clip = await newMidiClip(tx, track.id, start, end - start);
+        await addNotes(
+          tx,
+          clip.id,
+          [...pitches, pitches[0] + 12].map((pitch) => ({
+            pitch,
+            velocity: 92,
+            startBeat: 0,
+            lengthBeats: end - start,
+          })),
+        );
+        state.swellTrackId = track.id;
+        state.swellInstanceId = synth.instanceId;
+        state.swellStart = start;
+        state.swellEnd = end;
+        return {
+          commands: tx.count,
+          note: `Pad holds the ${chord.quality} chord into bar ${params.atBar}.`,
+        };
+      },
+    },
+    {
+      id: "bloom",
+      title: "Bloom",
+      reveal: "timeline",
+      summary: "Automates the bloom: Cutoff 500 Hz → 8 kHz and Gain −16 → −4 dB across the swell.",
+      manual:
+        "Automate the pad's Cutoff and Gain rising across the swell — closed and quiet " +
+        "at the start, open and present at the downbeat.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const trackId = state.swellTrackId as number | undefined;
+        const instanceId = state.swellInstanceId as number | undefined;
+        if (trackId === undefined || instanceId === undefined)
+          throw new Error("Run the Pad stage first.");
+        const start = state.swellStart as number;
+        const end = state.swellEnd as number;
+        const uid = "builtin:polysynth";
+        const cutoffId = await paramIdByName(instanceId, "Cutoff");
+        const gainId = await paramIdByName(instanceId, "Gain");
+        await ramp(tx, trackId, pluginParamRef(instanceId, cutoffId), [
+          { t: start, v: normFor(uid, "Cutoff", 500), curve: 0.4 },
+          { t: end, v: normFor(uid, "Cutoff", 8000) },
+        ]);
+        await ramp(tx, trackId, pluginParamRef(instanceId, gainId), [
+          { t: start, v: normFor(uid, "Gain", -16), curve: 0.35 },
+          { t: end, v: normFor(uid, "Gain", -4) },
+        ]);
+        return { commands: tx.count, note: "The chord blooms into the downbeat." };
+      },
+    },
+  ],
+};
+
 export const transitionTechniques: TechniqueDef[] = [
   riser,
   snareRoll,
@@ -938,4 +1218,7 @@ export const transitionTechniques: TechniqueDef[] = [
   noiseSweep,
   preDropSilence,
   impactRumble,
+  reverseReverb,
+  halfTime,
+  chordSwell,
 ];

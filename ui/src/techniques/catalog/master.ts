@@ -9,6 +9,7 @@ import {
   setPlugin,
   setPluginParam,
   setTrack,
+  setTrackEq,
   setVca,
 } from "../../store/actions";
 import { useStore } from "../../store/store";
@@ -612,6 +613,228 @@ const mixBusPump: TechniqueDef = {
   ],
 };
 
+/* ============================================================================
+ * Mix-Bus Color (saturation)
+ * ========================================================================= */
+
+const mixBusColor: TechniqueDef = {
+  id: "mixbus-color",
+  category: "master",
+  title: "Mix-Bus Color",
+  tagline: "The \"console sound\": gentle drive across the whole mix.",
+  description:
+    "Subtle saturation on the master — a few dB of drive blended low adds the harmonic " +
+    "glue people describe as tape/console warmth. The mix sounds finished before the " +
+    "limiter even works. Uses the stock Saturator.",
+  requirements: () => [],
+  stages: [
+    {
+      id: "color",
+      title: "Color",
+      reveal: "mixer",
+      summary:
+        "Inserts the stock Saturator on the master: Drive 6 dB, Tone wide open (15 kHz), " +
+        "Mix 35% (mostly clean underneath), Output −1.5 dB.",
+      manual:
+        "Insert the stock Saturator on the master: low Drive (~6 dB), Mix around a third " +
+        "so the clean mix carries, Output trimmed so bypassing it doesn't change loudness " +
+        "(loud always wins A/B tests dishonestly).",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const sat = await addInsert(tx, ctx.project.masterTrack.id, "builtin:saturator", {
+          Drive: 6,
+          Tone: 15000,
+          Mix: 35,
+          Output: -1.5,
+        });
+        state.colorInstanceId = sat.instanceId;
+        return { commands: tx.count, note: "Console color on the mix bus — blended, not slammed." };
+      },
+    },
+    {
+      id: "flavor",
+      title: "Flavor",
+      reveal: "mixer",
+      summary: "Picks the character: Clean console, Tape (darker, more drive), or Driven.",
+      manual:
+        "Darker Tone + more Drive reads as tape; open Tone + less Drive reads as console. " +
+        "A/B with bypass at MATCHED loudness before you believe anything.",
+      params: [
+        {
+          key: "flavor",
+          label: "Flavor",
+          kind: "select",
+          options: [
+            { value: "console", label: "Clean console (4 dB / 25%)" },
+            { value: "tape", label: "Tape (8 dB / 45%, darker)" },
+            { value: "driven", label: "Driven (14 dB / 60%)" },
+          ],
+          default: () => "tape",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const instanceId =
+          (state.colorInstanceId as number | undefined) ??
+          ctx.project.masterTrack.inserts.find((i) => i.uid === "builtin:saturator")?.instanceId;
+        if (instanceId === undefined) throw new Error("Run the Color stage first.");
+        const presets: Record<string, { Drive: number; Mix: number; Tone: number }> = {
+          console: { Drive: 4, Mix: 25, Tone: 16000 },
+          tape: { Drive: 8, Mix: 45, Tone: 11000 },
+          driven: { Drive: 14, Mix: 60, Tone: 8500 },
+        };
+        const p = presets[(params.flavor as string) ?? "tape"];
+        for (const [name, value] of Object.entries(p)) {
+          const id = await paramIdByName(instanceId, name);
+          await tx.cmd(setPluginParam(instanceId, id, normFor("builtin:saturator", name, value)));
+        }
+        return { commands: tx.count, note: `Mix-bus flavor: “${params.flavor}”.` };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Master EQ Tilt
+ * ========================================================================= */
+
+const masterTilt: TechniqueDef = {
+  id: "master-eq-tilt",
+  category: "master",
+  title: "Master EQ Tilt",
+  tagline: "One gentle see-saw sets the whole record's tone.",
+  description:
+    "Mastering's broadest stroke: a shelf pair tilting the entire spectrum — brighter " +
+    "(modern/streaming) or warmer (vintage/vinyl). Fractions of a dB read clearly at " +
+    "the master; anything past ±2 dB is a mix note, not a master move.",
+  requirements: () => [],
+  stages: [
+    {
+      id: "tilt",
+      title: "Tilt",
+      reveal: "mixer",
+      summary:
+        "Adds the shelf pair to the MASTER's channel EQ (kept alongside existing bands): " +
+        "brighter (−1 low / +1.5 high), warmer (inverse), or a subtle smile.",
+      manual:
+        "On the master's channel EQ: a low shelf around 120 Hz and a high shelf around " +
+        "8 kHz, tilted opposite ways by ~1 dB. Listen for balance, not for the EQ.",
+      params: [
+        {
+          key: "tilt",
+          label: "Direction",
+          kind: "select",
+          options: [
+            { value: "bright", label: "Brighter (−1 low / +1.5 high)" },
+            { value: "warm", label: "Warmer (+1.5 low / −1 high)" },
+            { value: "smile", label: "Smile (+0.8 both, −0.8 mids)" },
+          ],
+          default: () => "bright",
+        },
+      ],
+      run: async (ctx, params) => {
+        const tx = new Tx();
+        const master = ctx.project.masterTrack;
+        const t = params.tilt as string;
+        const bands =
+          t === "warm"
+            ? [
+                { enabled: true, type: 1, freqHz: 120, gainDb: 1.5, q: 0.7 },
+                { enabled: true, type: 2, freqHz: 8000, gainDb: -1, q: 0.7 },
+              ]
+            : t === "smile"
+              ? [
+                  { enabled: true, type: 1, freqHz: 110, gainDb: 0.8, q: 0.7 },
+                  { enabled: true, type: 0, freqHz: 800, gainDb: -0.8, q: 0.9 },
+                  { enabled: true, type: 2, freqHz: 9000, gainDb: 0.8, q: 0.7 },
+                ]
+              : [
+                  { enabled: true, type: 1, freqHz: 120, gainDb: -1, q: 0.7 },
+                  { enabled: true, type: 2, freqHz: 8000, gainDb: 1.5, q: 0.7 },
+                ];
+        await tx.cmd(setTrackEq(master.id, { bypass: false, bands: [...(master.eq?.bands ?? []), ...bands] }));
+        return { commands: tx.count, note: `Master tilted “${t}”.` };
+      },
+    },
+    {
+      id: "sanity",
+      title: "Sanity A/B",
+      reveal: "mixer",
+      optional: true,
+      summary:
+        "Bypasses the master EQ for honest comparison — re-run (or take back) to toggle. " +
+        "One command; take it back to re-enable.",
+      manual:
+        "Toggle the master EQ's bypass while the chorus plays. If bypassed sounds better, " +
+        "the tilt was wrong — smaller, or the other way.",
+      run: async (ctx) => {
+        const tx = new Tx();
+        await tx.cmd(setTrackEq(ctx.project.masterTrack.id, { bypass: true }));
+        return { commands: tx.count, note: "Master EQ bypassed — listen, then Take Back to re-engage." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Loudness Ladder
+ * ========================================================================= */
+
+const loudnessLadder: TechniqueDef = {
+  id: "loudness-ladder",
+  category: "master",
+  title: "Loudness Ladder",
+  tagline: "Measure, adjust, re-measure — never chase numbers blind.",
+  description:
+    "The honest way to hit −14 LUFS (or any target): a true-peak-safe limiter first, " +
+    "then MEASURED renders — the export reports integrated LUFS and peak, and you " +
+    "adjust the chain, not the master fader. MyDAW's export can also scale a render " +
+    "onto the target for you.",
+  requirements: () => [],
+  stages: [
+    {
+      id: "ceiling",
+      title: "Safety ceiling",
+      reveal: "mixer",
+      summary:
+        "Makes sure a limiter closes the master chain at −1 dB (inserts the stock Limiter " +
+        "if none is there; retunes the existing one's ceiling if there is).",
+      manual:
+        "The LAST insert on the master must be a limiter with its ceiling at −1 dB(TP " +
+        "headroom for lossy encoders). Everything upstream can then be judged by ear.",
+      run: async (ctx) => {
+        const tx = new Tx();
+        const master = ctx.project.masterTrack;
+        const existing = master.inserts.find((i) => i.uid === "builtin:limiter");
+        if (existing) {
+          const id = await paramIdByName(existing.instanceId, "Ceiling");
+          await tx.cmd(setPluginParam(existing.instanceId, id, normFor("builtin:limiter", "Ceiling", -1)));
+          return { commands: tx.count, note: "Existing limiter's ceiling set to −1 dB." };
+        }
+        await addInsert(tx, master.id, "builtin:limiter", { Ceiling: -1, Release: 120 });
+        return { commands: tx.count, note: "Limiter added at −1 dB to close the chain." };
+      },
+    },
+    {
+      id: "measure",
+      title: "Measure & aim",
+      reveal: "mixer",
+      summary:
+        "Opens Export Audio: render with the −14 LUFS preset — the reply reports measured " +
+        "LUFS and peak. Adjust upstream and render again until it sits right. (No project " +
+        "edits.)",
+      manual:
+        "Export with the −14 LUFS target and READ the measured numbers in the result. Too " +
+        "dynamic? More glue/saturation upstream. Squashed? Less. The ladder is: change one " +
+        "thing, re-render, compare — never just push the limiter.",
+      run: async () => {
+        useStore.getState().setDialogs({ export: true });
+        return { commands: 0, note: "Export opened — use the −14 LUFS preset and read the measured LUFS." };
+      },
+    },
+  ],
+};
+
 export const masterTechniques: TechniqueDef[] = [
   masterGlue,
   parallelCrush,
@@ -621,4 +844,7 @@ export const masterTechniques: TechniqueDef[] = [
   drumBusGlue,
   monoCheck,
   mixBusPump,
+  mixBusColor,
+  masterTilt,
+  loudnessLadder,
 ];

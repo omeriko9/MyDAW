@@ -391,6 +391,56 @@ private:
 };
 
 // ===========================================================================
+// Saturator — tanh waveshaper + post tone LP (the "stock saturator" gap from
+// docs/PRODUCTION_TECHNIQUES_BACKLOG.md: tape/console warmth through drive).
+// ===========================================================================
+class SaturatorEffect : public EffectBase {
+public:
+    enum { kDrive, kTone, kMix, kOutput };
+    SaturatorEffect() {
+        addParam(kDrive, "Drive", "dB", linNorm(12.f, 0.f, 36.f), 0);
+        addParam(kTone, "Tone", "Hz", logNorm(12000.f, 1000.f, 20000.f), 0);
+        addParam(kMix, "Mix", "%", linNorm(100.f, 0.f, 100.f), 0);
+        addParam(kOutput, "Output", "dB", linNorm(-4.f, -24.f, 6.f), 0);
+        finalizeParams();
+    }
+    void reset() noexcept override { lp_[0] = lp_[1] = 0.f; }
+    void process(float* const* io, int numCh, int n, const MidiBuffer& /*midi*/) noexcept override {
+        const float drive = dbToLin(linMap(nrm(kDrive), 0.f, 36.f));
+        const float toneHz = logMap(nrm(kTone), 1000.f, 20000.f);
+        const float mix = linMap(nrm(kMix), 0.f, 1.f);
+        const float out = dbToLin(linMap(nrm(kOutput), -24.f, 6.f));
+        // one-pole LP after the shaper — drive adds harmonics, Tone tames the top
+        const float a = 1.f - std::exp(-2.f * kPi * toneHz / static_cast<float>(sr_));
+        const int ch = numCh >= 2 ? 2 : 1;
+        for (int c = 0; c < ch; ++c) {
+            float* x = io[c];
+            float lp = lp_[c];
+            for (int i = 0; i < n; ++i) {
+                const float dry = x[i];
+                float y = std::tanh(dry * drive);
+                lp += a * (y - lp);
+                y = lp;
+                x[i] = (dry + (y - dry) * mix) * out;
+            }
+            lp_[c] = lp;
+        }
+    }
+    std::string valueText(uint32_t id) const override {
+        switch (id) {
+            case kDrive: return fmt("%.1f dB", linMap(nrm(kDrive), 0.f, 36.f));
+            case kTone: return fmt("%.0f Hz", logMap(nrm(kTone), 1000.f, 20000.f));
+            case kMix: return fmt("%.0f %%", linMap(nrm(kMix), 0.f, 100.f));
+            case kOutput: return fmt("%.1f dB", linMap(nrm(kOutput), -24.f, 6.f));
+        }
+        return "";
+    }
+
+private:
+    float lp_[2] = {0.f, 0.f};
+};
+
+// ===========================================================================
 // Reverb — Freeverb (8 combs + 4 allpass per channel)
 // ===========================================================================
 class ReverbEffect : public EffectBase {
@@ -1315,12 +1365,13 @@ struct Entry {
 template <class T>
 std::unique_ptr<IEffect> makeT() { return std::make_unique<T>(); }
 
-const std::array<Entry, 10>& entries() {
-    static const std::array<Entry, 10> e{{
+const std::array<Entry, 11>& entries() {
+    static const std::array<Entry, 11> e{{
         {"builtin:utility", "Utility", "Utility", false, &makeT<UtilityEffect>},
         {"builtin:gate", "Noise Gate", "Dynamics", false, &makeT<GateEffect>},
         {"builtin:compressor", "Compressor", "Dynamics", false, &makeT<CompressorEffect>},
         {"builtin:limiter", "Limiter", "Dynamics", false, &makeT<LimiterEffect>},
+        {"builtin:saturator", "Saturator", "Distortion", false, &makeT<SaturatorEffect>},
         {"builtin:delay", "Delay", "Delay", false, &makeT<DelayEffect>},
         {"builtin:reverb", "Reverb", "Reverb", false, &makeT<ReverbEffect>},
         {"builtin:synth", "Synth", "Instrument", true, &makeT<SynthInstrument>},

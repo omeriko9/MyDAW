@@ -470,13 +470,29 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
 
 function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
   const [cat, setCat] = useState<(typeof CATEGORY_ORDER)[number] | "all">("all");
-  const list = useMemo(
-    () => TECHNIQUES.filter((t) => cat === "all" || t.category === cat),
-    [cat],
-  );
+  const [query, setQuery] = useState("");
+  const list = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return TECHNIQUES.filter(
+      (t) =>
+        (cat === "all" || t.category === cat) &&
+        (q === "" ||
+          t.title.toLowerCase().includes(q) ||
+          t.tagline.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q) ||
+          t.id.includes(q)),
+    );
+  }, [cat, query]);
   return (
     <div className="tech-browser">
       <div className="tech-cats">
+        <input
+          className="tech-search"
+          placeholder="Search techniques…"
+          value={query}
+          data-autofocus
+          onChange={(e) => setQuery(e.currentTarget.value)}
+        />
         <button
           type="button"
           className="tech-cat-btn"
@@ -499,6 +515,9 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
         ))}
       </div>
       <div className="tech-cards">
+        {list.length === 0 && (
+          <div className="tech-empty">Nothing matches “{query}” — try the category rail.</div>
+        )}
         {list.map((t) => (
           <button key={t.id} type="button" className="tech-card" data-cat={t.category} onClick={() => onPick(t)}>
             <div className="tech-card-title">{t.title}</div>

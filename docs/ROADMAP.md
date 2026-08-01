@@ -92,7 +92,8 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
 Stock in-engine effects so a fresh install can mix without third-party plugins. They appear and
 behave as normal inserts (picker/browser, generic editor, automation, bypass/wetDry, save/load)
 but process in-engine with no host process. Catalog: **Utility** (gain/pan/phase/mono), **Noise
-Gate**, **Compressor**, **Limiter**, **Delay**, **Reverb** (Freeverb). Architecture in SPEC §8.6
+Gate**, **Compressor**, **Limiter**, **Saturator** (tanh drive + tone, added 2026-08-02 —
+closed the Production-Techniques backlog's most-wanted gap), **Delay**, **Reverb** (Freeverb). Architecture in SPEC §8.6
 (`core/effects/`, `core/IInsertNode.h`, `BuiltinEffectManager`). Test: `scripts/stock-effects-test.mjs`
 (render RMS + param + bypass + persistence, 12/12).
 

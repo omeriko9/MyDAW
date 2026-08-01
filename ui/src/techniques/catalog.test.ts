@@ -43,10 +43,10 @@ function fakeCtx(): TechniqueCtx {
 }
 
 describe("technique catalog integrity", () => {
-  it("ships 40 techniques, 8 per category (v1 batch + the 30-technique expansion)", () => {
-    expect(TECHNIQUES.length).toBe(40);
+  it("ships 55 techniques, 11 per category (v1 + batch 2 + round 3)", () => {
+    expect(TECHNIQUES.length).toBe(55);
     for (const cat of CATEGORY_ORDER)
-      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(8);
+      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(11);
   });
 
   it("ids are unique and kebab-case", () => {

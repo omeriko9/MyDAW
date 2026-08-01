@@ -824,6 +824,285 @@ const vocalPresence: TechniqueDef = {
   ],
 };
 
+/* ============================================================================
+ * Trance Gate
+ * ========================================================================= */
+
+const tranceGate: TechniqueDef = {
+  id: "trance-gate",
+  category: "mixing",
+  title: "Trance Gate",
+  tagline: "A sustained pad becomes a rhythm.",
+  description:
+    "Rhythmic volume gating: the level chops in a 1/16 (or chosen) pattern, turning a " +
+    "held pad or vocal into a pulsing sequence — trance and synthwave DNA, written as " +
+    "editable volume automation.",
+  requirements: (ctx) => [
+    { ok: allAudioClips(ctx).length > 0, label: "An audio clip to gate (pad, strings, vocal)" },
+  ],
+  stages: [
+    {
+      id: "pattern",
+      title: "Gate pattern",
+      reveal: "timeline",
+      summary:
+        "Writes the chop pattern on the volume lane across the clip: hold, hard drop, pump " +
+        "back — at the chosen rate and depth.",
+      manual:
+        "On the volume automation lane, draw a repeating pattern across the clip: full level " +
+        "for most of each step, a sharp drop near the step's end, back up at the next step.",
+      params: [
+        {
+          key: "clipId",
+          label: "Gate this clip",
+          kind: "clip",
+          default: (ctx) => resolveAudioClip(ctx, undefined)?.clip.id ?? 0,
+        },
+        {
+          key: "rate",
+          label: "Rate",
+          kind: "select",
+          options: [
+            { value: "0.25", label: "1/16 (classic)" },
+            { value: "0.5", label: "1/8" },
+            { value: "0.75", label: "3/16 (rolling)" },
+          ],
+          default: () => "0.25",
+        },
+        {
+          key: "depth",
+          label: "Depth",
+          kind: "select",
+          options: [
+            { value: "0", label: "Full chop (silence)" },
+            { value: "0.3", label: "Deep (−10 dB)" },
+            { value: "0.55", label: "Pulse (−5 dB)" },
+          ],
+          default: () => "0.3",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveAudioClip(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the clip to gate.");
+        const step = Number(params.rate);
+        const lo = Number(params.depth);
+        const start = found.clip.startBeat;
+        const end = Math.min(clipEndBeat(found.clip, ctx.project), start + 16);
+        const points: Array<{ t: number; v: number }> = [];
+        for (let s = start; s < end - 1e-9 && points.length < 118; s += step) {
+          const duty = step * 0.6;
+          points.push({ t: s, v: 1 });
+          points.push({ t: s + duty, v: 1 });
+          points.push({ t: s + duty + 0.02, v: lo });
+        }
+        points.push({ t: end, v: 1 });
+        await ramp(tx, found.track.id, "volume", points);
+        state.tgTrackId = found.track.id;
+        state.tgStart = start;
+        state.tgEnd = end;
+        state.tgStep = step;
+        return { commands: tx.count, note: `Gate pattern at ${params.rate}-beat steps written.` };
+      },
+    },
+    {
+      id: "motion",
+      title: "Wide gate",
+      reveal: "timeline",
+      optional: true,
+      summary: "Adds a subtle ±20% pan flip on each gate step — the chops bounce across the field.",
+      manual: "On the pan lane, alternate a small left/right offset per gate step.",
+      run: async (_ctx, _params, state) => {
+        const tx = new Tx();
+        const trackId = state.tgTrackId as number | undefined;
+        if (trackId === undefined) throw new Error("Run the Gate pattern stage first.");
+        const start = state.tgStart as number;
+        const end = state.tgEnd as number;
+        const step = state.tgStep as number;
+        const points: Array<{ t: number; v: number }> = [];
+        let side = -0.2;
+        for (let s = start; s < end - 1e-9 && points.length < 120; s += step) {
+          points.push({ t: s, v: side });
+          side = -side;
+        }
+        points.push({ t: end, v: 0 });
+        await ramp(tx, trackId, "pan", points);
+        return { commands: tx.count, note: "Chops now bounce gently left–right." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * EQ Slotting (carve & boost)
+ * ========================================================================= */
+
+const eqSlotting: TechniqueDef = {
+  id: "eq-slotting",
+  category: "mixing",
+  title: "EQ Slotting",
+  tagline: "Cut it there, boost it here — two parts stop fighting.",
+  description:
+    "The masking fix: when two parts compete for a band (vocal vs guitar at presence, " +
+    "kick vs bass at the fundamental), CUT the yielding part where you BOOST the " +
+    "keeping part. Mirror moves, a few dB, problem gone.",
+  requirements: (ctx) => [
+    {
+      ok: ctx.project.tracks.filter(isMixerTrack).length >= 2,
+      label: "Two tracks that fight for the same band",
+    },
+  ],
+  stages: [
+    {
+      id: "carve",
+      title: "Carve",
+      reveal: "mixer",
+      summary: "Cuts −3.5 dB at the chosen band on the YIELDING track (added to its EQ).",
+      manual:
+        "On the track that should step back, add a peak CUT of 3–4 dB at the contested " +
+        "frequency, medium Q.",
+      params: [
+        {
+          key: "yieldId",
+          label: "Yields (gets the cut)",
+          kind: "track",
+          trackFilter: isMixerTrack,
+          default: (ctx) => defaultSelectedTrack(ctx, isMixerTrack),
+        },
+        {
+          key: "freq",
+          label: "Contested band",
+          kind: "select",
+          options: [
+            { value: "90", label: "90 Hz — kick vs bass" },
+            { value: "300", label: "300 Hz — body/mud" },
+            { value: "1200", label: "1.2 kHz — box/honk" },
+            { value: "2500", label: "2.5 kHz — presence (vocal vs guitar)" },
+            { value: "5000", label: "5 kHz — edge" },
+          ],
+          default: () => "2500",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const track = ctx.project.tracks.find((t) => t.id === (params.yieldId as number));
+        if (!track) throw new Error("Pick the yielding track.");
+        const freq = Number(params.freq);
+        await setEqBands(tx, track.id, [
+          ...(track.eq?.bands ?? []),
+          { enabled: true, type: 0, freqHz: freq, gainDb: -3.5, q: 1.4 },
+        ]);
+        state.slotFreq = freq;
+        state.slotYieldId = track.id;
+        return { commands: tx.count, note: `−3.5 dB carved at ${freq} Hz on “${track.name}”.` };
+      },
+    },
+    {
+      id: "boost",
+      title: "Boost",
+      reveal: "mixer",
+      summary: "Boosts +2 dB at the SAME band on the KEEPING track — it now owns the slot.",
+      manual:
+        "On the track that should win, add a gentler peak BOOST (+1.5–2.5 dB) at exactly " +
+        "the frequency you cut on the other one.",
+      params: [
+        {
+          key: "keepId",
+          label: "Keeps (gets the boost)",
+          kind: "track",
+          trackFilter: isMixerTrack,
+          default: (ctx) => ctx.project.tracks.find(isMixerTrack)?.id ?? 0,
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const track = ctx.project.tracks.find((t) => t.id === (params.keepId as number));
+        if (!track) throw new Error("Pick the keeping track.");
+        if (track.id === (state.slotYieldId as number))
+          throw new Error("Keeper and yielder must be different tracks.");
+        const freq = (state.slotFreq as number) ?? 2500;
+        await setEqBands(tx, track.id, [
+          ...(track.eq?.bands ?? []),
+          { enabled: true, type: 0, freqHz: freq, gainDb: 2, q: 1.2 },
+        ]);
+        return { commands: tx.count, note: `+2 dB at ${freq} Hz on “${track.name}” — the slot is theirs.` };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * LCR Spread
+ * ========================================================================= */
+
+const lcrSpread: TechniqueDef = {
+  id: "lcr-spread",
+  category: "mixing",
+  title: "LCR Spread",
+  tagline: "Hard left, center, hard right — nothing in between.",
+  description:
+    "The LCR panning philosophy: every part sits fully Left, dead Center, or fully " +
+    "Right. Brutally simple, and mixes come out wider and clearer than timid 30% pans — " +
+    "the classic big-rock/pop stage.",
+  requirements: (ctx) => [
+    {
+      ok: ctx.selection.trackIds.filter((id) =>
+        ctx.project.tracks.some((t) => t.id === id && isMixerTrack(t) && t.kind !== "bus"),
+      ).length >= 2,
+      label: "Select two or more tracks to place on the LCR stage",
+    },
+  ],
+  stages: [
+    {
+      id: "spread",
+      title: "Spread",
+      reveal: "mixer",
+      summary:
+        "Places the selected tracks around the LCR stage in order: L, R, C, L, R, C… " +
+        "(full pans, deliberately no in-betweens).",
+      manual:
+        "Pan each selected track to −100%, +100% or 0 — nothing else. Pair similar parts " +
+        "opposite each other (two guitars L/R), keep anchors (kick, bass, lead) center.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const targets = ctx.project.tracks.filter(
+          (t) => ctx.selection.trackIds.includes(t.id) && isMixerTrack(t) && t.kind !== "bus",
+        );
+        if (targets.length < 2) throw new Error("Select at least two tracks.");
+        const cycle = [-1, 1, 0];
+        const placed: number[] = [];
+        for (let i = 0; i < targets.length; i++) {
+          await tx.cmd(setTrack(targets[i].id, { pan: cycle[i % 3] }));
+          placed.push(targets[i].id);
+        }
+        state.lcrIds = placed;
+        return { commands: tx.count, note: `${targets.length} tracks placed hard L / hard R / C.` };
+      },
+    },
+    {
+      id: "soften",
+      title: "Soften (optional retreat)",
+      reveal: "mixer",
+      optional: true,
+      summary: "Scales all placed pans to 70% if full LCR feels too stark for the genre.",
+      manual: "Pull the hard pans back to ~70% — LCR discipline, gentler edges.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const ids = state.lcrIds as number[] | undefined;
+        if (!ids || ids.length === 0) throw new Error("Run the Spread stage first.");
+        let n = 0;
+        for (const id of ids) {
+          const t = ctx.project.tracks.find((x) => x.id === id);
+          if (!t || t.pan === 0) continue;
+          await tx.cmd(setTrack(t.id, { pan: Math.sign(t.pan) * 0.7 }));
+          n++;
+        }
+        return { commands: tx.count, note: `${n} side tracks eased to ±70%.` };
+      },
+    },
+  ],
+};
+
 export const mixingTechniques: TechniqueDef[] = [
   sidechainPump,
   vocalReverb,
@@ -833,4 +1112,7 @@ export const mixingTechniques: TechniqueDef[] = [
   autoPan,
   gatedReverb,
   vocalPresence,
+  tranceGate,
+  eqSlotting,
+  lcrSpread,
 ];

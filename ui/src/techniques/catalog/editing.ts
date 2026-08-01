@@ -4,6 +4,9 @@
  */
 
 import {
+  addChord,
+  addPlugin,
+  addTrack,
   createSamplerTrack,
   duplicateClips,
   deleteClips,
@@ -20,6 +23,8 @@ import {
   Tx,
   addNotes,
   allAudioClips,
+  chordAt,
+  chordPitches,
   focusMidiClip,
   msToBeats,
   newMidiClip,
@@ -817,6 +822,390 @@ const pitchChopRiser: TechniqueDef = {
   ],
 };
 
+/* ============================================================================
+ * Arpeggio Builder (chord-track aware)
+ * ========================================================================= */
+
+const arpBuilder: TechniqueDef = {
+  id: "arp-builder",
+  category: "editing",
+  title: "Arpeggio Builder",
+  tagline: "The chord track becomes a running arp.",
+  description:
+    "Writes an arpeggio as real, editable MIDI: chord tones from the CHORD TRACK cycled " +
+    "at 1/16 or 1/8 across the chosen bars, following chord changes as they come. No " +
+    "arp plugin — the notes are yours to reshape.",
+  requirements: (ctx) => [
+    {
+      ok: (ctx.project.chordEvents ?? []).length > 0,
+      label: "Chords on the chord track (the arp reads them)",
+      fix: {
+        label: "Add a C major at the start for me",
+        run: async () => {
+          await addChord({ beat: 0, root: 0, quality: "maj" });
+        },
+      },
+    },
+    {
+      ok: ctx.project.tracks.some((t) => t.kind === "instrument" || t.kind === "midi"),
+      label: "An instrument (or MIDI) track to play the arp",
+      fix: {
+        label: "Add a PolySynth track for me",
+        run: async () => {
+          const r = await addTrack("instrument", { name: "Arp" });
+          await addPlugin(r.track.id, "builtin:polysynth");
+        },
+      },
+    },
+  ],
+  stages: [
+    {
+      id: "arp",
+      title: "Arpeggio",
+      reveal: "pianoRoll",
+      summary:
+        "Writes the arp across the chosen bars: chord tones (plus octave) cycled upward at " +
+        "the chosen rate, re-reading the chord track at every chord change.",
+      manual:
+        "Draw the chord's tones one after another (root, third, fifth, octave, repeat) at " +
+        "1/16 across the bars, switching tones when the chord track changes.",
+      params: [
+        {
+          key: "trackId",
+          label: "Play on",
+          kind: "track",
+          trackFilter: (t) => t.kind === "instrument" || t.kind === "midi",
+          default: (ctx) =>
+            ctx.project.tracks.find((t) => t.kind === "instrument" || t.kind === "midi")?.id ?? 0,
+        },
+        {
+          key: "atBar",
+          label: "From bar",
+          kind: "number",
+          min: 1,
+          max: 999,
+          step: 1,
+          default: (ctx) => Math.floor(ctx.playheadBeat / ctx.beatsPerBar) + 1,
+        },
+        {
+          key: "bars",
+          label: "Bars",
+          kind: "number",
+          min: 1,
+          max: 8,
+          step: 1,
+          default: () => 2,
+        },
+        {
+          key: "rate",
+          label: "Rate",
+          kind: "select",
+          options: [
+            { value: "0.25", label: "1/16 (driving)" },
+            { value: "0.5", label: "1/8 (classic)" },
+          ],
+          default: () => "0.25",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const trackId = params.trackId as number;
+        if (!ctx.project.tracks.some((t) => t.id === trackId))
+          throw new Error("Pick the track to play the arp.");
+        const start = ((params.atBar as number) - 1) * ctx.beatsPerBar;
+        const len = (params.bars as number) * ctx.beatsPerBar;
+        const step = Number(params.rate);
+        const notes: NoteInput[] = [];
+        let idx = 0;
+        for (let b = 0; b < len - 1e-9 && notes.length < 256; b += step) {
+          const chord = chordAt(ctx.project, start + b);
+          if (!chord) continue;
+          const tones = chordPitches(chord.root, chord.quality, 48);
+          const cycle = [...tones, tones[0] + 12];
+          notes.push({
+            pitch: cycle[idx % cycle.length],
+            velocity: idx % 4 === 0 ? 112 : 92,
+            startBeat: b,
+            lengthBeats: step * 0.85,
+          });
+          idx++;
+        }
+        if (notes.length === 0) throw new Error("No chords found in that range.");
+        const clip = await newMidiClip(tx, trackId, start, len);
+        await addNotes(tx, clip.id, notes);
+        focusMidiClip(clip.id);
+        state.arpClipId = clip.id;
+        return { commands: tx.count, note: `${notes.length}-note arp following the chord track.` };
+      },
+    },
+    {
+      id: "groove",
+      title: "Groove",
+      reveal: "pianoRoll",
+      optional: true,
+      summary: "Humanizes the arp: off-steps pushed 8 ms late, alternating ±3 ms drift.",
+      manual: "Nudge the even-numbered steps a hair late — machine arps breathe when they lean.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const found = resolveMidiClip(ctx, state.arpClipId as number | undefined);
+        if (!found) throw new Error("Run the Arpeggio stage first.");
+        const late = msToBeats(8, ctx.bpm);
+        const drift = msToBeats(3, ctx.bpm);
+        const updates = found.clip.notes.map((n, i) => ({
+          noteId: n.id,
+          patch: {
+            startBeat: Math.max(0, n.startBeat + (i % 2 === 1 ? late : 0) + (i % 3 === 0 ? drift : -drift) * 0.5),
+          },
+        }));
+        await tx.cmd(editNotes(found.clip.id, { update: updates }));
+        return { commands: tx.count, note: "Arp leans instead of marching." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Ghost Notes
+ * ========================================================================= */
+
+const ghostNotes: TechniqueDef = {
+  id: "ghost-notes",
+  category: "editing",
+  title: "Ghost Notes",
+  tagline: "The in-between hits you feel more than hear.",
+  description:
+    "Real drummers fill the space between backbeats with barely-audible taps. This " +
+    "adds velocity-25 ghosts on the empty 1/16 slots around the existing hits — the " +
+    "difference between a beat and a GROOVE.",
+  requirements: (ctx) => [
+    {
+      ok: ctx.project.tracks.some((t) => t.clips.some((c) => c.type === "midi" && c.notes.length > 0)),
+      label: "A MIDI drum clip with hits",
+    },
+  ],
+  stages: [
+    {
+      id: "ghosts",
+      title: "Ghosts",
+      reveal: "pianoRoll",
+      summary:
+        "Adds quiet (vel ~25) hits at the chosen pitch on empty 1/16 slots that neighbor " +
+        "an existing hit. One undo entry.",
+      manual:
+        "On the snare lane, add very quiet 1/16 notes in the gaps next to the real hits — " +
+        "velocity 20–30, never on top of an existing note.",
+      params: [
+        {
+          key: "clipId",
+          label: "Drum clip",
+          kind: "clip",
+          clipKind: "midi",
+          default: (ctx) => resolveMidiClip(ctx, undefined)?.clip.id ?? 0,
+        },
+        {
+          key: "pitch",
+          label: "Ghost pitch (MIDI)",
+          kind: "number",
+          min: 0,
+          max: 127,
+          step: 1,
+          default: () => 38, // GM snare
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveMidiClip(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the drum clip.");
+        const notes = found.clip.notes;
+        if (notes.length === 0) throw new Error("The clip has no hits to ghost around.");
+        const pitch = params.pitch as number;
+        const occupied = (slot: number) =>
+          notes.some((n) => Math.abs(n.startBeat - slot) < 0.12);
+        const neighborHit = (slot: number) =>
+          notes.some((n) => n.velocity > 60 && Math.abs(n.startBeat - slot) <= 0.26);
+        const add: NoteInput[] = [];
+        for (let slot = 0; slot < found.clip.lengthBeats - 1e-9 && add.length < 96; slot += 0.25) {
+          if (occupied(slot) || !neighborHit(slot)) continue;
+          add.push({
+            pitch,
+            velocity: 22 + ((add.length % 3) * 4), // 22/26/30 — uneven on purpose
+            startBeat: slot,
+            lengthBeats: 0.12,
+          });
+        }
+        if (add.length === 0) throw new Error("No empty neighboring 1/16 slots found.");
+        await tx.cmd(editNotes(found.clip.id, { add }));
+        focusMidiClip(found.clip.id);
+        state.ghostClipId = found.clip.id;
+        return { commands: tx.count, note: `${add.length} ghosts tucked between the hits.` };
+      },
+    },
+    {
+      id: "settle",
+      title: "Settle",
+      reveal: "pianoRoll",
+      optional: true,
+      summary: "Wobbles every quiet (vel < 40) note's velocity ±6 so the ghosts never repeat exactly.",
+      manual: "Vary the ghost velocities a little — identical ghosts read as a machine again.",
+      run: async (ctx, _params, state) => {
+        const tx = new Tx();
+        const found = resolveMidiClip(ctx, state.ghostClipId as number | undefined);
+        if (!found) throw new Error("Run the Ghosts stage first.");
+        const updates = found.clip.notes
+          .filter((n) => n.velocity < 40)
+          .map((n, i) => ({
+            noteId: n.id,
+            patch: { velocity: Math.min(127, Math.max(1, n.velocity + ((i % 3) - 1) * 6)) },
+          }));
+        if (updates.length === 0) throw new Error("No ghost-level notes to settle.");
+        await tx.cmd(editNotes(found.clip.id, { update: updates }));
+        return { commands: tx.count, note: "Ghosts un-machined." };
+      },
+    },
+  ],
+};
+
+/* ============================================================================
+ * Strum Humanizer
+ * ========================================================================= */
+
+const strum: TechniqueDef = {
+  id: "strum-humanizer",
+  category: "editing",
+  title: "Strum Humanizer",
+  tagline: "Block chords become strummed chords.",
+  description:
+    "MIDI chords hit all notes at once; hands don't. This staggers each chord's notes " +
+    "a few ms apart (low→high = downstroke) with a velocity slope — piano and guitar " +
+    "parts stop sounding pasted.",
+  requirements: (ctx) => [
+    {
+      ok: ctx.project.tracks.some((t) =>
+        t.clips.some(
+          (c) =>
+            c.type === "midi" &&
+            c.notes.some((a) => c.notes.some((b) => a.id !== b.id && Math.abs(a.startBeat - b.startBeat) < 0.02)),
+        ),
+      ),
+      label: "A MIDI clip with chords (notes sharing a start)",
+    },
+  ],
+  stages: [
+    {
+      id: "strum",
+      title: "Strum",
+      reveal: "pianoRoll",
+      summary:
+        "Staggers every chord's notes by the chosen spread in the chosen direction " +
+        "(down = low strings first). One undo entry.",
+      manual:
+        "For each chord, nudge its notes apart by 5–15 ms from the lowest to the highest " +
+        "(a downstroke) or highest to lowest (an upstroke).",
+      params: [
+        {
+          key: "clipId",
+          label: "MIDI clip",
+          kind: "clip",
+          clipKind: "midi",
+          default: (ctx) => resolveMidiClip(ctx, undefined)?.clip.id ?? 0,
+        },
+        {
+          key: "spread",
+          label: "Spread",
+          kind: "select",
+          options: [
+            { value: "8", label: "Tight (8 ms/note)" },
+            { value: "14", label: "Natural (14 ms/note)" },
+            { value: "24", label: "Lazy (24 ms/note)" },
+          ],
+          default: () => "14",
+        },
+        {
+          key: "dir",
+          label: "Stroke",
+          kind: "select",
+          options: [
+            { value: "down", label: "Down (low first)" },
+            { value: "up", label: "Up (high first)" },
+          ],
+          default: () => "down",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveMidiClip(ctx, params.clipId as number);
+        if (!found) throw new Error("Pick the MIDI clip.");
+        const per = msToBeats(Number(params.spread), ctx.bpm);
+        const down = params.dir !== "up";
+        // group notes sharing a start beat (chords)
+        const groups = new Map<number, typeof found.clip.notes>();
+        for (const n of found.clip.notes) {
+          const key = Math.round(n.startBeat * 96) / 96;
+          const g = groups.get(key) ?? [];
+          g.push(n);
+          groups.set(key, g);
+        }
+        const updates: Array<{ noteId: number; patch: { startBeat: number; velocity?: number } }> = [];
+        for (const g of groups.values()) {
+          if (g.length < 2) continue;
+          const ordered = [...g].sort((a, b) => (down ? a.pitch - b.pitch : b.pitch - a.pitch));
+          ordered.forEach((n, i) => {
+            updates.push({
+              noteId: n.id,
+              patch: {
+                startBeat: n.startBeat + per * i,
+                velocity: Math.max(1, n.velocity - i * 3), // later strings a touch softer
+              },
+            });
+          });
+        }
+        if (updates.length === 0) throw new Error("No chords (simultaneous notes) found in the clip.");
+        await tx.cmd(editNotes(found.clip.id, { update: updates }));
+        focusMidiClip(found.clip.id);
+        state.strumClipId = found.clip.id;
+        return { commands: tx.count, note: `${groups.size} chords strummed ${down ? "down" : "up"}.` };
+      },
+    },
+    {
+      id: "push",
+      title: "Land on the beat",
+      reveal: "pianoRoll",
+      optional: true,
+      summary:
+        "Shifts every strummed chord EARLY by half its spread, so the strum lands ON the " +
+        "beat instead of starting there.",
+      manual:
+        "Real players start the strum slightly BEFORE the beat so the chord peaks on it — " +
+        "shift each chord early by about half the strum spread.",
+      params: [
+        {
+          key: "spread",
+          label: "Spread used",
+          kind: "select",
+          options: [
+            { value: "8", label: "Tight (8 ms/note)" },
+            { value: "14", label: "Natural (14 ms/note)" },
+            { value: "24", label: "Lazy (24 ms/note)" },
+          ],
+          default: () => "14",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const found = resolveMidiClip(ctx, state.strumClipId as number | undefined);
+        if (!found) throw new Error("Run the Strum stage first.");
+        const early = msToBeats(Number(params.spread), ctx.bpm) * 1.5;
+        const updates = found.clip.notes.map((n) => ({
+          noteId: n.id,
+          patch: { startBeat: Math.max(0, n.startBeat - early) },
+        }));
+        await tx.cmd(editNotes(found.clip.id, { update: updates }));
+        return { commands: tx.count, note: "Strums now peak on the beat." };
+      },
+    },
+  ],
+};
+
 export const editingTechniques: TechniqueDef[] = [
   chopKit,
   stutter,
@@ -826,4 +1215,7 @@ export const editingTechniques: TechniqueDef[] = [
   midiEcho,
   beatShuffle,
   pitchChopRiser,
+  arpBuilder,
+  ghostNotes,
+  strum,
 ];

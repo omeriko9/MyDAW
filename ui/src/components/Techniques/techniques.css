@@ -41,6 +41,20 @@
   padding-right: 10px;
 }
 
+.tech-search {
+  margin-bottom: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+}
+.tech-search:focus {
+  border-color: var(--accent);
+}
+
 .tech-cat-btn {
   text-align: left;
   padding: 6px 8px;

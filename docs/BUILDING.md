@@ -100,6 +100,20 @@ Three things the gate does that are easy to get wrong by hand:
 
 ## Packaging a release (portable single exe)
 
+One command, current state → GitHub release:
+
+```powershell
+pwsh scripts/release.ps1 -Version 1.1.0 -Publish
+```
+
+Chains build.ps1 → `node scripts/gate.mjs --full` → package-portable.ps1 →
+`gh release create v<v>` with the exe + `.sha256` attached (uploads onto the tag if it
+already exists). `-SkipBuild` packages what's on disk, `-SkipGate` skips verification
+(you own whatever ships), omitting `-Publish` stops after `dist\` and prints the gh
+command. A dirty working tree warns loudly — a release should correspond to a commit.
+
+The packaging step alone:
+
 ```powershell
 pwsh scripts/package-portable.ps1 -Version 1.0.0
 ```

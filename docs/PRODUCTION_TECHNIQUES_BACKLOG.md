@@ -5,7 +5,7 @@ what the feature is and how it grows; THIS file tracks what shipped per category
 what is queued next. When a technique ships: move its row to the shipped table, note
 the date, and add any new primitive gaps discovered. Do not start a third list.
 
-## Shipped — 40 techniques, 8 per category (v1: 2026-08-01 · batch 2: same day)
+## Shipped — 55 techniques, 11 per category (v1 + batch 2: 2026-08-01 · round 3: 2026-08-02)
 
 ### Transitions & arrangement FX
 | Technique | id | Notes |
@@ -18,6 +18,9 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | Noise Sweep | `noise-sweep` | pure noise, cutoff opens while PAN crosses −0.8→0.8 |
 | Pre-Drop Silence | `predrop-silence` | slice around the gap + MUTE (auditionable), DROP marker |
 | Impact Rumble | `impact-rumble` | sine+sub boom on the downbeat into a huge 100%-wet verb |
+| Reverse-Reverb Swell | `reverse-reverb-swell` | print verb via renderInPlace, DOP reverse, place before |
+| Half-Time Drop | `half-time-drop` | clip.stretch ×2 pitch-preserved |
+| Chord Swell | `chord-swell` | pad voiced from the CHORD TRACK blooms into the bar |
 
 ### Mixing — space & dynamics
 | Technique | id | Notes |
@@ -30,6 +33,9 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | Auto-Pan Motion | `auto-pan` | triangle pan lane at 1/8..1-bar rates + matching tremolo |
 | Gated Reverb | `gated-reverb` | reverb → stock gate (full range, 120 ms hold) — the 80s snare |
 | Vocal Presence Chain | `vocal-presence` | HPF+mud dip → 3:1 comp → +3 dB air shelf |
+| Trance Gate | `trance-gate` | rhythmic volume-lane chop pattern (+pan bounce) |
+| EQ Slotting | `eq-slotting` | mirror cut/boost at a contested band on two tracks |
+| LCR Spread | `lcr-spread` | hard L / C / hard R placement over the selection |
 
 ### Vocal production
 | Technique | id | Notes |
@@ -42,6 +48,9 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | Ad-Lib Placement | `adlib-space` | pan aside −3 dB + own wet bus (delay→verb 100%) |
 | Noise Gate Cleanup | `vocal-gate` | gentle gate: Range −18 dB, breath-safety timing stage |
 | ADT — Fake Double | `adt-double` | +30 cents + 14 ms drift on a −5 dB copy (Abbey Road) |
+| Gang Vocal Stack | `gang-stack` | 2 copies hard-panned, ±25¢ detunes, HPF 300 |
+| Pitch-Drop Tag | `pitch-drop-tag` | last half-beat tape-dropped (ratio 0.6) |
+| Vocal Heat | `vocal-heat` | stock SATURATOR drive/mix presets on the voice |
 
 ### Editing & sound design
 | Technique | id | Notes |
@@ -54,6 +63,9 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | MIDI Note Echo | `midi-echo` | note copies at 1/8..1/4, 65%/40% (+25% tail tap) |
 | Beat Shuffle Fill | `beat-shuffle` | last bar's beats reordered 4-3-2-1 |
 | Chop Pitch Riser | `pitch-chop-riser` | sampler chops climb a scale on 8ths into the drop |
+| Arpeggio Builder | `arp-builder` | CHORD-TRACK-aware arp as editable MIDI (+groove) |
+| Ghost Notes | `ghost-notes` | vel-25 hits on empty 1/16 slots next to real hits |
+| Strum Humanizer | `strum-humanizer` | chord notes staggered low→high + velocity slope |
 
 ### Bus, glue & master
 | Technique | id | Notes |
@@ -66,13 +78,14 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | Drum Bus Glue | `drum-bus-glue` | route kit → bus, 4:1/10 ms/150 ms serial glue |
 | Mono Compatibility Check | `mono-check` | Utility Mono on master (engage), then REMOVE (disengage) |
 | Mix-Bus Pump | `mixbus-pump` | master comp keyed from kick — French-house pump, presets |
+| Mix-Bus Color | `mixbus-color` | stock SATURATOR on the master, console/tape/driven |
+| Master EQ Tilt | `master-eq-tilt` | shelf-pair tilt on the master EQ + bypass A/B stage |
+| Loudness Ladder | `loudness-ladder` | −1 dB ceiling ensured + measured-render loop |
 
 ## Queued — Transitions & arrangement FX
 
 | Technique | Ingredients (all existing unless noted) | Size |
 |---|---|---|
-| Reverse-REVERB Swell | print the verb tail (`renderTrackInPlace`/`bounceSelection`), DOP reverse — the wetter cousin of Reverse Build-In | M |
-| Half-Time Drop | section split + `clip.stretch` ×2 + arrangement shove (the shove needs care) | M |
 | Impact + sub drop one-shots | GAP: no bundled sample content (licensing first) | M |
 | DJ backspin | reverse + accelerating varispeed — needs segmented tape stretch | M |
 
@@ -83,7 +96,6 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 | Telephone-EQ by AUTOMATION | GAP: EQ bands are not automatable paramRefs (section-track workaround shipped) | M |
 | Mid/Side width | GAP: no M/S processing in Utility | M |
 | De-esser chain | GAP: no stock de-esser (comp lacks a detector filter) | M |
-| Frequency-conscious slotting (EQ mirroring) | two-track EQ cut/boost pairs — easy, queue when wanted | S |
 
 ## Queued — Vocal production
 
@@ -97,7 +109,7 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 
 | Technique | Ingredients | Size |
 |---|---|---|
-| Chord-aware chop pitches | chord events exist — pitch chop patterns from the chord track | M |
+| Chord-aware chop pitches | arp-builder shipped; chop-kit variant reading chordAt() is now trivial | S |
 | Granular freeze pad | GAP: no granular engine | L |
 | Arrangement A/B sections | arranger sections exist — "try the chorus twice" wizard | M |
 
@@ -105,16 +117,14 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 
 | Technique | Ingredients | Size |
 |---|---|---|
-| Loudness-target ladder | export loudnessTarget exists; measure → adjust → re-measure loop | M |
 | Mono-lows / width by band | GAP: no multiband utility | M |
-| Saturation stage | GAP: no stock saturator/distortion (risers + crush want it too) | M |
 | Master fade-out | GAP: master-track automation lanes have no timeline row to edit them in | S |
 
 ## Primitive gaps (engine/UI work that unlocks queued rows)
 
 | Gap | Unlocks | Notes |
 |---|---|---|
-| Stock saturator/distortion insert | Saturation stage, riser grit, crush color | most-wanted; `core/effects` pattern is settled |
+| ~~Stock saturator~~ CLOSED 2026-08-02 | `builtin:saturator` shipped (Drive/Tone/Mix/Output) — vocal-heat, mixbus-color use it | retrofit riser grit / crush color when touched next |
 | Tempo-sync toggle on Delay time | slapback/throw that follow tempo changes | wizard computes ms today — works, just not tempo-tracking |
 | EQ bands as automation targets | telephone-by-automation, filter sweeps sans insert | paramRef scheme extension + plan rebuild cost |
 | Multiband utility (or M/S mode) | mono-lows, width-by-band | |

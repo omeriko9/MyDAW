@@ -255,6 +255,39 @@ export function resolveMidiClip(
  *  ratio = 2^(semitones/12) (engine clamps 0.25..4 = ±24 st). */
 export const pitchRatio = (semitones: number) => Math.pow(2, semitones / 12);
 
+/* ============================================================================
+ * Chord track (project.chordEvents) — chord-aware techniques
+ * ========================================================================= */
+
+const CHORD_INTERVALS: Record<string, number[]> = {
+  maj: [0, 4, 7],
+  min: [0, 3, 7],
+  dim: [0, 3, 6],
+  aug: [0, 4, 8],
+  maj7: [0, 4, 7, 11],
+  min7: [0, 3, 7, 10],
+  "7": [0, 4, 7, 10],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
+};
+
+/** Chord governing `beat` (the last event at or before it; the first one as pickup). */
+export function chordAt(project: Project, beat: number) {
+  const evs = project.chordEvents ?? [];
+  if (evs.length === 0) return null;
+  const sorted = [...evs].sort((a, b) => a.beat - b.beat);
+  let cur = sorted[0];
+  for (const e of sorted) if (e.beat <= beat + 1e-9) cur = e;
+  return cur;
+}
+
+/** Chord tones as MIDI pitches voiced from `baseOctavePitch` (e.g. 48 = C2-region). */
+export function chordPitches(root: number, quality: string, baseOctavePitch = 48): number[] {
+  const intervals = CHORD_INTERVALS[quality] ?? CHORD_INTERVALS[quality.replace(/[0-9#b].*$/, "")] ?? CHORD_INTERVALS.maj;
+  const base = baseOctavePitch + ((root - baseOctavePitch) % 12 + 12) % 12;
+  return intervals.map((i) => base + i);
+}
+
 /**
  * Resolve a clip-param value: explicit id → that audio clip; 0/absent → the first
  * SELECTED audio clip; null when neither resolves.
