@@ -113,40 +113,42 @@
   overflow: hidden;
 }
 
-/* Per-kind shading — one hue per track type at low opacity (theme keeps its own
-   character underneath), matched by a stronger 3px edge stripe so the kind still
-   reads when the row is selected. Selection/drop states below override the fill. */
+/* Per-kind shading — the header BACKGROUND carries the track type (2026-08-02
+   feedback: the first pass tinted at 7%, which vanished into the panel — the fill
+   itself must read as a different color at a glance). Mixed over var(--panel) so
+   every theme keeps its own character: pastels on light themes, deep tints on dark.
+   The 3px edge stripe keeps the kind readable when selection overrides the fill. */
 .tlh-row[data-kind] {
   border-left: 3px solid transparent;
 }
 .tlh-row[data-kind="audio"] {
-  background: color-mix(in srgb, #5b9bd5 7%, var(--panel));
-  border-left-color: color-mix(in srgb, #5b9bd5 55%, transparent);
+  background: color-mix(in srgb, #5b9bd5 20%, var(--panel));
+  border-left-color: color-mix(in srgb, #5b9bd5 70%, transparent);
 }
 .tlh-row[data-kind="midi"] {
-  background: color-mix(in srgb, #6dbb8a 7%, var(--panel));
-  border-left-color: color-mix(in srgb, #6dbb8a 55%, transparent);
+  background: color-mix(in srgb, #6dbb8a 20%, var(--panel));
+  border-left-color: color-mix(in srgb, #6dbb8a 70%, transparent);
 }
 .tlh-row[data-kind="instrument"] {
-  background: color-mix(in srgb, #9d7bd8 7%, var(--panel));
-  border-left-color: color-mix(in srgb, #9d7bd8 55%, transparent);
+  background: color-mix(in srgb, #9d7bd8 20%, var(--panel));
+  border-left-color: color-mix(in srgb, #9d7bd8 70%, transparent);
 }
 .tlh-row[data-kind="bus"] {
-  background: color-mix(in srgb, #d5a25b 7%, var(--panel));
-  border-left-color: color-mix(in srgb, #d5a25b 55%, transparent);
+  background: color-mix(in srgb, #d5a25b 20%, var(--panel));
+  border-left-color: color-mix(in srgb, #d5a25b 70%, transparent);
 }
 .tlh-row[data-kind="folder"] {
-  background: color-mix(in srgb, var(--text) 5%, var(--panel));
-  border-left-color: color-mix(in srgb, var(--text) 30%, transparent);
+  background: color-mix(in srgb, var(--text) 12%, var(--panel));
+  border-left-color: color-mix(in srgb, var(--text) 40%, transparent);
 }
-/* view rows (marker/arranger/chord/transpose): one shared neutral rose tint —
+/* view rows (marker/arranger/chord/transpose): one shared rose tint —
    they are project-data lanes, not channels */
 .tlh-row[data-kind="marker"],
 .tlh-row[data-kind="arranger"],
 .tlh-row[data-kind="chord"],
 .tlh-row[data-kind="transpose"] {
-  background: color-mix(in srgb, #d57ba6 5%, var(--panel));
-  border-left-color: color-mix(in srgb, #d57ba6 40%, transparent);
+  background: color-mix(in srgb, #d57ba6 14%, var(--panel));
+  border-left-color: color-mix(in srgb, #d57ba6 55%, transparent);
 }
 
 .tlh-row[data-selected="true"] {
