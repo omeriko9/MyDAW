@@ -12,9 +12,16 @@ import type { TechniqueCtx } from "./types";
  * position is the intent, the build length is the flexible part.
  */
 
-const ctxAt = (playheadBeat: number, beatsPerBar = 4): TechniqueCtx =>
+const ctxAt = (playheadBeat: number, beatsPerBar = 4, clipStarts: number[] = []): TechniqueCtx =>
   ({
-    project: { tracks: [], chordEvents: [], masterTrack: { inserts: [] } },
+    project: {
+      tracks: clipStarts.map((startBeat, i) => ({
+        id: i + 1,
+        clips: [{ id: i + 1, startBeat, lengthBeats: 4, type: "midi" }],
+      })),
+      chordEvents: [],
+      masterTrack: { inserts: [] },
+    },
     selection: { trackIds: [], clipIds: [], noteIds: [] },
     bpm: 120,
     beatsPerBar,
@@ -26,8 +33,17 @@ describe("landing bars follow the playhead", () => {
   it("lands on the bar line the playhead is heading into", () => {
     expect(landingBar(ctxAt(16.5))).toBe(6); // mid-bar-5 → the bar 5 ends on
     expect(landingBar(ctxAt(16))).toBe(5); // parked ON a bar line → that bar
-    expect(landingBar(ctxAt(0))).toBe(2); // never bar 1: nothing could lead into it
     expect(landingBar(ctxAt(18, 3))).toBe(7); // 3/4: beat 18 IS the bar-7 line
+  });
+
+  it("aims at the song's entrance when the playhead was never placed", () => {
+    // Playhead at 0 is not a request to drop at bar 2 — that is before the music.
+    expect(landingBar(ctxAt(0, 4, [8.25, 20]))).toBe(3); // clip enters IN bar 3
+    expect(landingBar(ctxAt(0, 4, [16]))).toBe(5); // exactly on a bar line
+    expect(landingBar(ctxAt(0, 4, []))).toBe(2); // empty project: nothing to aim at
+    expect(landingBar(ctxAt(0, 4, [0]))).toBe(2); // content at zero: same
+    // A PLACED playhead still wins over content.
+    expect(landingBar(ctxAt(16.5, 4, [8.25]))).toBe(6);
   });
 
   it("EVERY landing-bar default in the catalog is that bar, never pushed later", () => {

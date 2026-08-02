@@ -79,16 +79,34 @@ export function nextBarBeat(ctx: TechniqueCtx, beat = ctx.playheadBeat): number 
 /** Bar numbers are 1-based everywhere the user sees them; beat = (bar-1) * beatsPerBar. */
 export const barToBeat = (ctx: TechniqueCtx, bar: number) => (bar - 1) * ctx.beatsPerBar;
 
+/** Earliest clip start in the project (null when there is nothing to build into). */
+export function firstContentBeat(ctx: TechniqueCtx): number | null {
+  let first = Infinity;
+  for (const t of ctx.project.tracks)
+    for (const c of t.clips) if (c.startBeat < first) first = c.startBeat;
+  return Number.isFinite(first) ? first : null;
+}
+
 /**
- * The bar the playhead is heading into — the default landing/drop bar for anything
- * that builds INTO a moment.
+ * The default landing/drop bar for anything that builds INTO a moment.
  *
- * Deliberately NOT nudged to make a fixed lead-in length fit (it once was, and a riser
- * asked for at bar 6 silently appeared at bar 9). The user's position wins; a lead-in
- * that doesn't fit is trimmed by `leadInRange` and says so.
+ * A placed playhead IS the answer: the bar it is heading into. It is deliberately NOT
+ * nudged later to make a fixed lead-in fit (it once was, and a riser asked for at bar 6
+ * appeared at bar 9) — `leadInRange` trims the lead-in and says so instead.
+ *
+ * A playhead still at zero is not a choice, though; taking it literally lands the drop at
+ * bar 2, before the music even starts. So when nothing has been placed, the build aims at
+ * the bar the FIRST CLIP enters on — the song's own entrance is the moment to build into.
  */
-export const landingBar = (ctx: TechniqueCtx) =>
-  Math.max(2, Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1);
+export function landingBar(ctx: TechniqueCtx): number {
+  if (ctx.playheadBeat > 0)
+    return Math.max(2, Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1);
+  const first = firstContentBeat(ctx);
+  if (first === null || first <= 0)
+    return 2; // empty project (or content at zero): nothing to aim at
+  // The bar the content starts IN — a clip entering mid-bar still belongs to that bar.
+  return Math.max(2, Math.floor(first / ctx.beatsPerBar) + 1);
+}
 
 /**
  * The span of `lengthBars` ending on `endBar` — clamped at the project start rather
