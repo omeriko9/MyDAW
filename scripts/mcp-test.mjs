@@ -258,6 +258,37 @@ async function main() {
     assert(Array.isArray(op.examples) && op.examples.length > 0);
   });
 
+  await test("hardware MIDI out is a first-class MCP capability (SPEC §5.5)", async () => {
+    // describe: the op and the track-patch field are discoverable
+    const op = (await callTool("mydaw_describe", { name: "midi/getOutputs" }))
+      .structuredContent.operations[0];
+    assert.equal(op.name, "midi/getOutputs");
+    const setOp = (await callTool("mydaw_describe", { name: "cmd/track.set" }))
+      .structuredContent.operations[0];
+    assert(JSON.stringify(setOp.input).includes("midiOutDevice"),
+      "cmd/track.set schema names midiOutDevice");
+    // execute: enumeration works; routing round-trips through the tracks view
+    const outs = (await callTool("mydaw_execute", { operation: "midi/getOutputs", payload: {} }))
+      .structuredContent.outputs;
+    assert(Array.isArray(outs), "outputs array");
+    if (outs.length > 0) {
+      const t = (await callTool("mydaw_execute", {
+        operation: "cmd/track.add",
+        payload: { kind: "midi", name: "MCP Outboard" },
+      })).structuredContent.track;
+      const set = await callTool("mydaw_execute", {
+        operation: "cmd/track.set",
+        payload: { trackId: t.id, patch: { midiOutDevice: outs[0].name } },
+      });
+      assert(!set.isError, JSON.stringify(set.structuredContent));
+      const view = (await callTool("mydaw_query", { view: "track", where: { trackId: t.id } }))
+        .structuredContent;
+      assert.equal(JSON.stringify(view).includes(outs[0].name), true,
+        "tracks view reports midiOutDevice");
+      await callTool("mydaw_execute", { operation: "cmd/track.remove", payload: { trackId: t.id } });
+    }
+  });
+
   await test("mydaw_ui is honestly unavailable without a controller", async () => {
     const result = await callTool("mydaw_ui", {
       operation: "ui/theme.set",

@@ -326,7 +326,8 @@ void addTrackFields(FieldSet& fields) {
     static const char* names[] = {
         "id", "index", "kind", "name", "color", "height", "parentId", "channels", "volume",
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
-        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiOutChannel", "vcaId", "eq",
+        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiOutChannel",
+        "midiOutDevice", "vcaId", "eq",
         "clipCount", "insertCount", "sendCount", "automationLaneCount", "takeFolderCount",
         "activeVersionId", "versions",
     };
@@ -360,6 +361,8 @@ json trackSummary(const Track& track) {
         item["midiTarget"] = track.midiTarget;
     if (track.midiOutChannel > 0)
         item["midiOutChannel"] = track.midiOutChannel;
+    if (!track.midiOutDevice.empty())
+        item["midiOutDevice"] = track.midiOutDevice; // hardware MIDI out (SPEC §5.5)
     if (track.vcaId != 0)
         item["vcaId"] = track.vcaId;
     item["eq"] = toJson(track.eq);
