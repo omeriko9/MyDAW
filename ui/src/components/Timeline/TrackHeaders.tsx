@@ -892,6 +892,7 @@ export default function TrackHeaders({
         key={t.id}
         className="tlh-row"
         style={{ top: row.top, height: row.height }}
+        data-kind={t.kind}
         data-selected={selected ? "true" : undefined}
         data-drop-into={reorderVis?.dropIntoId === t.id ? "true" : undefined}
         data-droppable={dropTrackId === t.id ? "true" : undefined}
@@ -1217,6 +1218,45 @@ export default function TrackHeaders({
       <div className="tl-corner" style={{ height: RULER_H }}>
         <span className="tl-corner-title">Tracks</span>
         <span className="grow" />
+        {(() => {
+          // Global M/S (group toggles, same semantics as the M/S keys): view rows have
+          // no mixer strip and stay out of it. S doubles as the "clear all solos"
+          // button — with solos active one click un-solos everything.
+          const mixerTracks = (project?.tracks ?? []).filter((t) => !isViewRowKind(t.kind));
+          const anyUnmuted = mixerTracks.some((t) => !t.mute);
+          const anySolo = mixerTracks.some((t) => t.solo);
+          const muteAll = () => {
+            for (const t of mixerTracks)
+              if (t.mute !== anyUnmuted) fire(setTrack(t.id, { mute: anyUnmuted }));
+          };
+          const soloAll = () => {
+            const solo = !anySolo;
+            for (const t of mixerTracks)
+              if (t.solo !== solo) fire(setTrack(t.id, { solo }));
+          };
+          return (
+            <>
+              <Toggle
+                on={mixerTracks.length > 0 && !anyUnmuted}
+                onChange={muteAll}
+                variant="danger"
+                className="tlh-btn"
+                tooltip={anyUnmuted ? "Mute ALL tracks" : "Unmute ALL tracks"}
+              >
+                M
+              </Toggle>
+              <Toggle
+                on={anySolo}
+                onChange={soloAll}
+                variant="warn"
+                className="tlh-btn"
+                tooltip={anySolo ? "Clear ALL solos" : "Solo ALL tracks"}
+              >
+                S
+              </Toggle>
+            </>
+          );
+        })()}
         <IconButton
           icon="plus"
           size={22}

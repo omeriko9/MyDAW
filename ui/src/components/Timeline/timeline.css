@@ -113,6 +113,42 @@
   overflow: hidden;
 }
 
+/* Per-kind shading — one hue per track type at low opacity (theme keeps its own
+   character underneath), matched by a stronger 3px edge stripe so the kind still
+   reads when the row is selected. Selection/drop states below override the fill. */
+.tlh-row[data-kind] {
+  border-left: 3px solid transparent;
+}
+.tlh-row[data-kind="audio"] {
+  background: color-mix(in srgb, #5b9bd5 7%, var(--panel));
+  border-left-color: color-mix(in srgb, #5b9bd5 55%, transparent);
+}
+.tlh-row[data-kind="midi"] {
+  background: color-mix(in srgb, #6dbb8a 7%, var(--panel));
+  border-left-color: color-mix(in srgb, #6dbb8a 55%, transparent);
+}
+.tlh-row[data-kind="instrument"] {
+  background: color-mix(in srgb, #9d7bd8 7%, var(--panel));
+  border-left-color: color-mix(in srgb, #9d7bd8 55%, transparent);
+}
+.tlh-row[data-kind="bus"] {
+  background: color-mix(in srgb, #d5a25b 7%, var(--panel));
+  border-left-color: color-mix(in srgb, #d5a25b 55%, transparent);
+}
+.tlh-row[data-kind="folder"] {
+  background: color-mix(in srgb, var(--text) 5%, var(--panel));
+  border-left-color: color-mix(in srgb, var(--text) 30%, transparent);
+}
+/* view rows (marker/arranger/chord/transpose): one shared neutral rose tint —
+   they are project-data lanes, not channels */
+.tlh-row[data-kind="marker"],
+.tlh-row[data-kind="arranger"],
+.tlh-row[data-kind="chord"],
+.tlh-row[data-kind="transpose"] {
+  background: color-mix(in srgb, #d57ba6 5%, var(--panel));
+  border-left-color: color-mix(in srgb, #d57ba6 40%, transparent);
+}
+
 .tlh-row[data-selected="true"] {
   background: var(--accent-soft);
 }

@@ -353,6 +353,47 @@ export const checks = [
   },
 
   {
+    id: "corner-mute-solo-all",
+    title: "the Tracks-corner M/S buttons mute/solo every channel at once (and back)",
+    area: "track-headers",
+    guards: "global M = group toggle over every non-view-row track; S doubles as clear-all-solos — a drifted filter would silently mute view rows or skip buses",
+    run: async (s, tt) => {
+      const tracksState = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const rows = p.tracks.filter((t) => !["marker", "arranger", "chord", "transpose"].includes(t.kind));
+        return { rows, allMuted: rows.every((t) => t.mute), anyMuted: rows.some((t) => t.mute),
+                 anySolo: rows.some((t) => t.solo), allSolo: rows.every((t) => t.solo) };
+      };
+      // own precondition: start from nothing muted/soloed
+      const st0 = await tracksState();
+      for (const t of st0.rows) await s.probe("cmd/track.set", { trackId: t.id, patch: { mute: false, solo: false } });
+
+      const cornerBtn = async (text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(".tl-corner .tlh-btn")]
+            .find((b) => b.textContent.trim() === ${JSON.stringify(text)});
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`corner button not found: ${text}`);
+        await s.click(box.x, box.y);
+      };
+
+      await cornerBtn("M");
+      await s.until("all channels muted", async () => (await tracksState()).allMuted);
+      await cornerBtn("M");
+      await s.until("all channels unmuted again", async () => !(await tracksState()).anyMuted);
+
+      await cornerBtn("S");
+      await s.until("all channels soloed", async () => (await tracksState()).allSolo);
+      await cornerBtn("S");
+      await s.until("solos cleared", async () => !(await tracksState()).anySolo);
+      tt.ok(true, "M/S round-trips over every mixer track");
+    },
+  },
+
+  {
     id: "technique-master-glue",
     title: "the Production Techniques wizard applies Master Glue stages and takes the last one back",
     area: "techniques",
@@ -853,7 +894,9 @@ export const checks = [
       await s.reload();
 
       const plus = await s.eval(() => {
-        const el = document.querySelector('.tl-corner [aria-label="Add track"], .tl-corner button');
+        // aria-label ONLY — the corner also hosts the global M/S toggles now, so a
+        // bare ".tl-corner button" fallback would click Mute-All instead (paid for).
+        const el = document.querySelector('.tl-corner [aria-label="Add track"]');
         if (!el) return null;
         const b = el.getBoundingClientRect();
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
