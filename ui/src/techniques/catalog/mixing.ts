@@ -15,12 +15,14 @@ import { clipEndBeat } from "../../lib/keyboard";
 import {
   Tx,
   addInsert,
+  addNotes,
   allAudioClips,
   dbToLin,
   eqHighCut,
   eqLowCut,
   isMixerTrack,
   msToBeats,
+  newMidiClip,
   newTrack,
   paramIdByName,
   ramp,
@@ -161,6 +163,65 @@ const sidechainPump: TechniqueDef = {
           await tx.cmd(setPluginParam(instanceId, id, normFor("builtin:compressor", name, value)));
         }
         return { commands: tx.count, note: `Pump depth set to “${params.amount}”.` };
+      },
+    },
+    {
+      id: "ghost",
+      title: "Ghost kick",
+      reveal: "timeline",
+      optional: true,
+      summary:
+        "Adds a MUTED 4-on-the-floor trigger track and re-keys the pump from it — the mix " +
+        "keeps breathing even where the real kick rests (breakdowns, intros). The engine's " +
+        "sidechain reads pre-fader, so a muted key still drives the detector.",
+      manual:
+        "Make an instrument track with a short kick-ish patch, quarter notes on every beat, " +
+        "MUTE it, and point the pump compressor's Sidechain source at it. Silent, but the " +
+        "detector hears it.",
+      params: [
+        {
+          key: "bars",
+          label: "Bars of trigger",
+          kind: "number",
+          min: 1,
+          max: 128,
+          step: 1,
+          default: () => 16,
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const instanceId = findPumpComp(ctx, state);
+        const ghost = await newTrack(tx, "instrument", "Ghost Kick (silent key)");
+        await addInsert(tx, ghost.id, "builtin:polysynth", {
+          "Osc 1 Wave": 3, // sine
+          "Osc Mix": 0,
+          Sub: 0.4,
+          Cutoff: 300,
+          "Amp Attack": 1,
+          "Amp Decay": 120,
+          "Amp Sustain": 0,
+          "Amp Release": 60,
+          Gain: 0,
+        });
+        const beats = (params.bars as number) * ctx.beatsPerBar;
+        const clip = await newMidiClip(tx, ghost.id, 0, beats);
+        await addNotes(
+          tx,
+          clip.id,
+          Array.from({ length: Math.min(512, Math.floor(beats)) }, (_, i) => ({
+            pitch: 24,
+            velocity: 120,
+            startBeat: i,
+            lengthBeats: 0.4,
+          })),
+        );
+        await tx.cmd(setTrack(ghost.id, { mute: true }));
+        await tx.cmd(setPlugin(instanceId, { sidechainSource: ghost.id }));
+        return {
+          commands: tx.count,
+          note: "Pump now keyed from the silent ghost — it breathes even when the kick rests.",
+        };
       },
     },
   ],
@@ -726,6 +787,52 @@ const gatedReverb: TechniqueDef = {
         if (!bus) throw new Error("Run the Bus stage first.");
         await sendTo(tx, ctx.project, trackId, bus.id, dbToLin(-6));
         return { commands: tx.count, note: "Hits now bloom huge and stop dead." };
+      },
+    },
+    {
+      id: "character",
+      title: "Character",
+      reveal: "mixer",
+      optional: true,
+      summary:
+        "Retunes the bloom-and-chop: Huge ’80s (max room, 160 ms hold), Tight (small, snappy), " +
+        "or Modern (in between, darker).",
+      manual:
+        "Bigger Size + longer Hold = Phil Collins; small Size + short Hold = a modern thickener. " +
+        "The gate's Hold IS the sound — tune it to the groove.",
+      params: [
+        {
+          key: "flavor",
+          label: "Character",
+          kind: "select",
+          options: [
+            { value: "huge", label: "Huge ’80s (max room, 160 ms)" },
+            { value: "tight", label: "Tight (small room, 70 ms)" },
+            { value: "modern", label: "Modern (mid room, 110 ms, darker)" },
+          ],
+          default: () => "huge",
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const bus =
+          ctx.project.tracks.find((t) => t.id === (state.gateVerbBusId as number)) ??
+          ctx.project.tracks.find((t) => t.kind === "bus" && /gate/i.test(t.name));
+        if (!bus) throw new Error("Run the Bus stage first.");
+        const verb = bus.inserts.find((i) => i.uid === "builtin:reverb");
+        const gate = bus.inserts.find((i) => i.uid === "builtin:gate");
+        if (!verb || !gate) throw new Error("The Gate Verb bus is missing its reverb/gate inserts.");
+        const presets: Record<string, { size: number; damp: number; hold: number; release: number }> = {
+          huge: { size: 0.95, damp: 0.1, hold: 160, release: 80 },
+          tight: { size: 0.55, damp: 0.3, hold: 70, release: 40 },
+          modern: { size: 0.8, damp: 0.45, hold: 110, release: 60 },
+        };
+        const p = presets[(params.flavor as string) ?? "huge"];
+        await tx.cmd(setPluginParam(verb.instanceId, await paramIdByName(verb.instanceId, "Size"), normFor("builtin:reverb", "Size", p.size)));
+        await tx.cmd(setPluginParam(verb.instanceId, await paramIdByName(verb.instanceId, "Damp"), normFor("builtin:reverb", "Damp", p.damp)));
+        await tx.cmd(setPluginParam(gate.instanceId, await paramIdByName(gate.instanceId, "Hold"), normFor("builtin:gate", "Hold", p.hold)));
+        await tx.cmd(setPluginParam(gate.instanceId, await paramIdByName(gate.instanceId, "Release"), normFor("builtin:gate", "Release", p.release)));
+        return { commands: tx.count, note: `Gated-verb character: “${params.flavor}”.` };
       },
     },
   ],

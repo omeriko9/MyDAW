@@ -43,10 +43,12 @@ function fakeCtx(): TechniqueCtx {
 }
 
 describe("technique catalog integrity", () => {
-  it("ships 55 techniques, 11 per category (v1 + batch 2 + round 3)", () => {
-    expect(TECHNIQUES.length).toBe(55);
+  it("ships 61 techniques: 11 per classic category + 6 macros (round 4)", () => {
+    expect(TECHNIQUES.length).toBe(61);
     for (const cat of CATEGORY_ORDER)
-      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(11);
+      expect(TECHNIQUES.filter((t) => t.category === cat).length).toBe(
+        cat === "macros" ? 6 : cat === "custom" ? 0 : 11,
+      );
   });
 
   it("ids are unique and kebab-case", () => {
@@ -56,10 +58,10 @@ describe("technique catalog integrity", () => {
     expect(techniqueById("sidechain-pump")?.title).toBe("Sidechain Pump");
   });
 
-  it("every technique has 2–4 stages, each with summary AND manual instructions", () => {
+  it("stage counts fit the tier: classic 2–4, macros 5–8; all carry summary AND manual", () => {
     for (const t of TECHNIQUES) {
-      expect(t.stages.length, t.id).toBeGreaterThanOrEqual(2);
-      expect(t.stages.length, t.id).toBeLessThanOrEqual(4);
+      expect(t.stages.length, t.id).toBeGreaterThanOrEqual(t.category === "macros" ? 5 : 2);
+      expect(t.stages.length, t.id).toBeLessThanOrEqual(t.category === "macros" ? 8 : 4);
       expect(t.description.length, t.id).toBeGreaterThan(40);
       const stageIds = new Set(t.stages.map((s) => s.id));
       expect(stageIds.size, t.id).toBe(t.stages.length);

@@ -10,6 +10,7 @@ import { mixingTechniques } from "./mixing";
 import { vocalTechniques } from "./vocal";
 import { editingTechniques } from "./editing";
 import { masterTechniques } from "./master";
+import { macroTechniques } from "./macros";
 import type { TechniqueDef, TechniqueCategory } from "../types";
 import type { IconName } from "../../components/common/icons";
 
@@ -19,6 +20,7 @@ export const TECHNIQUES: TechniqueDef[] = [
   ...vocalTechniques,
   ...editingTechniques,
   ...masterTechniques,
+  ...macroTechniques,
 ];
 
 export function techniqueById(id: string): TechniqueDef | undefined {
@@ -91,6 +93,13 @@ export const TECHNIQUE_ICONS: Record<string, IconName> = {
   "mixbus-color": "sparkles",
   "master-eq-tilt": "settings",
   "loudness-ladder": "chevronUp",
+  // macros — full flows
+  "the-drop": "flag",
+  "vocal-chain": "mic",
+  "radio-master": "power",
+  "drum-makeover": "metronome",
+  "hook-factory": "scissors",
+  "podcast-prep": "headphones",
 };
 
 const CATEGORY_FALLBACK_ICON: Record<TechniqueCategory, IconName> = {
@@ -99,6 +108,8 @@ const CATEGORY_FALLBACK_ICON: Record<TechniqueCategory, IconName> = {
   vocal: "mic",
   editing: "scissors",
   master: "sliders",
+  macros: "stage",
+  custom: "scriptList",
 };
 
 export function techniqueIcon(t: TechniqueDef): IconName {

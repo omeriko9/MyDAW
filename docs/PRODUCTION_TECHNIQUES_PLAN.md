@@ -1,7 +1,11 @@
 # Production Techniques — plan
 
 Status: v1 SHIPPED 2026-08-01 (10 techniques, wizard, docs); batch 2 same day (+30);
-round 3 SHIPPED 2026-08-02 (+15 → **55 techniques, 11 per category**), together with
+round 3 SHIPPED 2026-08-02 (+15 → 55, 11 per category); round 4 same day added the
+**Macros — Full Flows** category: six 5–8-stage techniques (The Drop, Full Vocal
+Chain, Radio-Ready Master, Drum Kit Makeover, Vocal Hook Factory, Podcast Episode
+Prep) that compose the primitive techniques into complete production moments —
+**61 total**. The stage-count test is tiered: classic 2–4, macros 5–8, together with
 the **stock Saturator** (`builtin:saturator` — the backlog's most-wanted primitive
 gap, now closed; vocal-heat / mixbus-color are built on it), chord-track-aware
 techniques (chord-swell, arp-builder read `project.chordEvents`), and a search box in

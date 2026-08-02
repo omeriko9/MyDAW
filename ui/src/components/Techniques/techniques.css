@@ -20,6 +20,9 @@
 [data-cat="macros"] {
   --tech-tint: #4fb8c9; /* teal — the multi-stage full flows */
 }
+[data-cat="custom"] {
+  --tech-tint: #b8c94f; /* chartreuse — the user's own creations */
+}
 
 .tech-modal .modal-body {
   min-height: 520px;
@@ -76,6 +79,7 @@
 }
 
 .tech-card {
+  position: relative;
   text-align: left;
   padding: 10px 12px;
   background: color-mix(in srgb, var(--tech-tint, var(--text)) 7%, transparent);
@@ -491,4 +495,121 @@
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+/* ---- favorites star + custom-card actions ---- */
+
+.tech-card-actions {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+}
+.tech-card:hover .tech-card-actions,
+.tech-card-actions:has(.tech-fav.on) {
+  opacity: 1;
+}
+
+.tech-fav {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 3px;
+  color: var(--text-dim);
+}
+.tech-fav:hover {
+  color: #e0b64f;
+}
+.tech-fav.on {
+  color: #e0b64f;
+}
+
+.tech-cat-fav {
+  color: #e0b64f;
+}
+
+.tech-card-new {
+  border-style: dashed;
+}
+
+/* ---- custom-technique builder ---- */
+
+.tech-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tech-builder-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tech-builder-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.tech-builder-field > span {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tech-builder-field input,
+.tech-builder-field textarea {
+  padding: 6px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  resize: vertical;
+}
+.tech-builder-field input:focus,
+.tech-builder-field textarea:focus {
+  border-color: var(--tech-tint, var(--accent));
+}
+
+.tech-builder-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--tech-tint, var(--border)) 55%, transparent);
+  border-radius: var(--radius);
+}
+
+.tech-builder-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tech-builder-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--tech-tint, var(--border)) 55%, transparent);
+  border-radius: var(--radius);
+}
+.tech-builder-step-n {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--tech-tint, var(--accent)) 80%, var(--text));
+}
+.tech-builder-step-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }

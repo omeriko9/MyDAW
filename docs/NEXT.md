@@ -52,14 +52,18 @@ new non-RT sender thread fed by a lock-free ring.)
 
 ## QUEUED
 
-### 1. `stock-sampler` flakes under gate load (2× on 2026-08-02)
+### 1. Engine suites flake when the gate runs under I/O load (3× on 2026-08-02)
 
-Fails only INSIDE full gate runs (2 of ~6 that day, incl. one 233 s run under heavy
-I/O), passes 5/5 standalone every time — the same cry-wolf class as the fixed
-track-types estimator, but load-correlated rather than estimator-correlated, so the
-suspects are timeouts/timing in the harness (upload → render → peak read) rather
-than measurement. Next occurrence has full logs (gate runs now tee to a file when
-investigating). Diagnose from a captured failure; do NOT just lengthen timeouts
+Pattern nailed down over three occurrences: `stock-sampler` twice and `track-types`
+once (post-estimator-fix, so NOT measurement) failed ONLY inside gate runs that took
+230 s+ instead of the normal ~113 s — and each slow run coincided with concurrent
+repo writes (ui build → Dropbox sync churn) from the working session. Every suite
+passes 5/5 standalone. So: load-starved harness timing, not suite bugs.
+
+Working rule until fixed: never write to the repo while a gate runs. Real fix
+candidates: gate marks build/ AND the repo tmp paths Dropbox-ignored during runs,
+or per-suite retry-once-on-slow-run, or engine-boot/render timeout headroom scaled
+by a load probe. Diagnose from a captured slow-run log; don't lengthen timeouts
 blindly.
 
 ---

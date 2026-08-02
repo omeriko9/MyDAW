@@ -11,7 +11,14 @@
 import type { Project, Track } from "../protocol/types";
 import type { Selection } from "../store/store";
 
-export type TechniqueCategory = "transitions" | "mixing" | "vocal" | "editing" | "master";
+export type TechniqueCategory =
+  | "transitions"
+  | "mixing"
+  | "vocal"
+  | "editing"
+  | "master"
+  | "macros"
+  | "custom";
 
 export const CATEGORY_LABELS: Record<TechniqueCategory, string> = {
   transitions: "Transitions & FX",
@@ -19,6 +26,8 @@ export const CATEGORY_LABELS: Record<TechniqueCategory, string> = {
   vocal: "Vocal Production",
   editing: "Editing & Sound Design",
   master: "Bus, Glue & Master",
+  macros: "Macros — Full Flows",
+  custom: "Custom — Your Techniques",
 };
 
 export const CATEGORY_ORDER: TechniqueCategory[] = [
@@ -27,6 +36,8 @@ export const CATEGORY_ORDER: TechniqueCategory[] = [
   "vocal",
   "editing",
   "master",
+  "macros",
+  "custom",
 ];
 
 /** Snapshot handed to requirements() and run() — read state, never mutate. */

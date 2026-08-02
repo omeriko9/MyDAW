@@ -24,6 +24,22 @@ import { showToast } from "../common/ToastHost";
 import { confirmDialog } from "../Dialogs/confirm";
 import { usePopoutWindow } from "../common/usePopoutWindow";
 import { TECHNIQUES, techniqueIcon } from "../../techniques/catalog";
+import {
+  freshCustomId,
+  loadCustomTechniques,
+  resolveCustom,
+  saveCustomTechniques,
+  type CustomStepRef,
+  type CustomTechniqueData,
+} from "../../techniques/custom";
+import {
+  loadCatOrder,
+  loadTechFavorites,
+  moveCategory,
+  saveCatOrder,
+  toggleTechFavorite,
+} from "../../techniques/userPrefs";
+import { contextMenuHandler } from "../common/ContextMenu";
 import { allAudioClips, allMidiClips, beatsPerBarOf, bpmOf, isMixerTrack } from "../../techniques/ops";
 import {
   CATEGORY_LABELS,
@@ -471,28 +487,71 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
  * Browser + dialog shell
  * ========================================================================= */
 
-function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
-  const [cat, setCat] = useState<(typeof CATEGORY_ORDER)[number] | "all">("all");
+function Browser({
+  onPick,
+  onNewCustom,
+  onEditCustom,
+  onCustomsChanged,
+  customsVersion,
+}: {
+  onPick: (t: TechniqueDef) => void;
+  onNewCustom: () => void;
+  onEditCustom: (data: CustomTechniqueData) => void;
+  onCustomsChanged: () => void;
+  /** Bumped by the host after save/delete so the list reloads. */
+  customsVersion: number;
+}) {
+  const [cat, setCat] = useState<(typeof CATEGORY_ORDER)[number] | "all" | "favorites">("all");
   const [query, setQuery] = useState("");
+  const [favs, setFavs] = useState<string[]>(() => loadTechFavorites());
+  const [catOrder, setCatOrder] = useState(() => loadCatOrder());
+  const customs = useMemo(() => loadCustomTechniques(), [customsVersion]);
+  const customDefs = useMemo(
+    () => customs.map((d) => ({ data: d, ...resolveCustom(d, TECHNIQUES) })),
+    [customs],
+  );
+  const allDefs = useMemo(
+    () => [...TECHNIQUES, ...customDefs.map((c) => c.def)],
+    [customDefs],
+  );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return TECHNIQUES.filter(
+    return allDefs.filter(
       (t) =>
-        (cat === "all" || t.category === cat) &&
+        (cat === "all" || (cat === "favorites" ? favs.includes(t.id) : t.category === cat)) &&
         (q === "" ||
           t.title.toLowerCase().includes(q) ||
           t.tagline.toLowerCase().includes(q) ||
           t.description.toLowerCase().includes(q) ||
           t.id.includes(q)),
     );
-  }, [cat, query]);
+  }, [allDefs, cat, favs, query]);
+
+  const reorder = (c: (typeof CATEGORY_ORDER)[number], to: "top" | "up" | "down") => {
+    const next = moveCategory(catOrder, c, to);
+    saveCatOrder(next);
+    setCatOrder(next);
+  };
+
+  const deleteCustom = (data: CustomTechniqueData) => {
+    void confirmDialog({
+      title: "Delete custom technique",
+      message: `Delete “${data.title}”? Projects it was applied to keep their edits — only the recipe goes.`,
+      confirmLabel: "Delete",
+      danger: true,
+    }).then((ok) => {
+      if (!ok) return;
+      saveCustomTechniques(loadCustomTechniques().filter((d) => d.id !== data.id));
+      onCustomsChanged();
+    });
+  };
   return (
     <div className="tech-browse-wrap">
       <div className="tech-search-row">
         <Icon name="search" size={15} />
         <input
           className="tech-search"
-          placeholder="Search all 55 techniques — name, sound, or what it does…"
+          placeholder={`Search all ${TECHNIQUES.length} techniques — name, sound, or what it does…`}
           value={query}
           data-autofocus
           onChange={(e) => setQuery(e.currentTarget.value)}
@@ -517,13 +576,21 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
         <div className="tech-cats">
         <button
           type="button"
+          className="tech-cat-btn tech-cat-fav"
+          data-on={cat === "favorites" ? "true" : undefined}
+          onClick={() => setCat("favorites")}
+        >
+          ★ Favorites ({favs.filter((id) => allDefs.some((t) => t.id === id)).length})
+        </button>
+        <button
+          type="button"
           className="tech-cat-btn"
           data-on={cat === "all" ? "true" : undefined}
           onClick={() => setCat("all")}
         >
-          All ({TECHNIQUES.length})
+          All ({allDefs.length})
         </button>
-        {CATEGORY_ORDER.map((c) => (
+        {catOrder.map((c) => (
           <button
             key={c}
             type="button"
@@ -531,18 +598,92 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
             data-cat={c}
             data-on={cat === c ? "true" : undefined}
             onClick={() => setCat(c)}
+            title="Right-click to reorder the categories"
+            onContextMenu={contextMenuHandler(() => [
+              { label: "Move to top", onClick: () => reorder(c, "top") },
+              { label: "Move up", onClick: () => reorder(c, "up") },
+              { label: "Move down", onClick: () => reorder(c, "down") },
+              "separator",
+              {
+                label: "Reset order",
+                onClick: () => {
+                  saveCatOrder([...CATEGORY_ORDER]);
+                  setCatOrder([...CATEGORY_ORDER]);
+                },
+              },
+            ])}
           >
-            {CATEGORY_LABELS[c]} ({TECHNIQUES.filter((t) => t.category === c).length})
+            {CATEGORY_LABELS[c]} ({allDefs.filter((t) => t.category === c).length})
           </button>
         ))}
       </div>
         <div className="tech-cards">
-          {list.length === 0 && (
+          {(cat === "custom" || cat === "all") && query === "" && (
+            <div
+              role="button"
+              tabIndex={0}
+              className="tech-card tech-card-new"
+              data-cat="custom"
+              onClick={onNewCustom}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onNewCustom();
+                }
+              }}
+            >
+              <span className="tech-card-icon">
+                <Icon name="plus" size={20} />
+              </span>
+              <span className="tech-card-text">
+                <span className="tech-card-title">New Custom Technique…</span>
+                <span className="tech-card-tag">Compose your own flow from any catalog steps.</span>
+                <span className="tech-card-meta">{CATEGORY_LABELS.custom}</span>
+              </span>
+            </div>
+          )}
+          {list.length === 0 && query !== "" && (
             <div className="tech-empty">Nothing matches “{query}” — try the category rail.</div>
           )}
-          {list.map((t) => (
-            <TechCard key={t.id} t={t} onPick={onPick} />
-          ))}
+          {list.map((t) => {
+            const custom = customDefs.find((c) => c.def.id === t.id);
+            const fav = favs.includes(t.id);
+            return (
+              <TechCard
+                key={t.id}
+                t={t}
+                onPick={onPick}
+                actions={
+                  <>
+                    <button
+                      type="button"
+                      className={"tech-fav" + (fav ? " on" : "")}
+                      title={fav ? "Remove from Favorites" : "Add to Favorites"}
+                      onClick={() => setFavs(toggleTechFavorite(t.id))}
+                    >
+                      {fav ? "★" : "☆"}
+                    </button>
+                    {custom !== undefined && (
+                      <>
+                        <IconButton
+                          icon="pencil"
+                          size={17}
+                          tooltip="Edit this technique"
+                          onClick={() => onEditCustom(custom.data)}
+                        />
+                        <IconButton
+                          icon="trash"
+                          size={17}
+                          tooltip="Delete this technique"
+                          onClick={() => deleteCustom(custom.data)}
+                        />
+                      </>
+                    )}
+                  </>
+                }
+              />
+            );
+          })}
         </div>
       </div>
     </div>
@@ -554,8 +695,17 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
  * description and every stage (title, optional tag, one-line summary). Positioned
  * beside the card, clamped to the card's own window — works in the pop-out too.
  */
-function TechCard({ t, onPick }: { t: TechniqueDef; onPick: (t: TechniqueDef) => void }) {
-  const ref = useRef<HTMLButtonElement | null>(null);
+function TechCard({
+  t,
+  onPick,
+  actions,
+}: {
+  t: TechniqueDef;
+  onPick: (t: TechniqueDef) => void;
+  /** Extra buttons (edit/delete on custom cards) — rendered top-right, clicks stop. */
+  actions?: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
   const timer = useRef(0);
   const [hover, setHover] = useState<{ left: number; top: number; flip: boolean } | null>(null);
 
@@ -584,14 +734,22 @@ function TechCard({ t, onPick }: { t: TechniqueDef; onPick: (t: TechniqueDef) =>
 
   return (
     <>
-      <button
+      <div
         ref={ref}
-        type="button"
+        role="button"
+        tabIndex={0}
         className="tech-card"
         data-cat={t.category}
         onClick={() => {
           onLeave();
           onPick(t);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onLeave();
+            onPick(t);
+          }
         }}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
@@ -606,7 +764,12 @@ function TechCard({ t, onPick }: { t: TechniqueDef; onPick: (t: TechniqueDef) =>
             {CATEGORY_LABELS[t.category]} · {t.stages.length} stages
           </span>
         </span>
-      </button>
+        {actions !== undefined && (
+          <span className="tech-card-actions" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </span>
+        )}
+      </div>
       {hover !== null &&
         ref.current !== null &&
         createPortal(
@@ -640,10 +803,163 @@ function TechCard({ t, onPick }: { t: TechniqueDef; onPick: (t: TechniqueDef) =>
   );
 }
 
+/**
+ * Builder — compose a custom technique from any catalog stages. Each borrowed step
+ * keeps its params, manual text and reveal target; the preview line under every
+ * step shows what Apply will do so the flow reads before it runs.
+ */
+function Builder({
+  initial,
+  onDone,
+}: {
+  initial: CustomTechniqueData;
+  onDone: (saved: boolean) => void;
+}) {
+  const [title, setTitle] = useState(initial.title);
+  const [tagline, setTagline] = useState(initial.tagline);
+  const [description, setDescription] = useState(initial.description);
+  const [steps, setSteps] = useState<CustomStepRef[]>(initial.steps);
+  const [pickTech, setPickTech] = useState(TECHNIQUES[0].id);
+  const tech = TECHNIQUES.find((t) => t.id === pickTech) ?? TECHNIQUES[0];
+  const [pickStage, setPickStage] = useState(tech.stages[0].id);
+  const stageOf = (ref: CustomStepRef) => {
+    const t = TECHNIQUES.find((x) => x.id === ref.tech);
+    return { t, s: t?.stages.find((x) => x.id === ref.stage) };
+  };
+
+  const setTech = (id: string) => {
+    setPickTech(id);
+    const t = TECHNIQUES.find((x) => x.id === id);
+    if (t) setPickStage(t.stages[0].id);
+  };
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d;
+    if (j < 0 || j >= steps.length) return;
+    const next = [...steps];
+    [next[i], next[j]] = [next[j], next[i]];
+    setSteps(next);
+  };
+  const save = () => {
+    if (title.trim() === "") {
+      showToast("Give the technique a name first.", "error");
+      return;
+    }
+    if (steps.length === 0) {
+      showToast("Add at least one step.", "error");
+      return;
+    }
+    const list = loadCustomTechniques();
+    const data: CustomTechniqueData = {
+      id: initial.id,
+      title: title.trim(),
+      tagline: tagline.trim(),
+      description: description.trim(),
+      steps,
+    };
+    const i = list.findIndex((d) => d.id === data.id);
+    if (i >= 0) list[i] = data;
+    else list.push(data);
+    saveCustomTechniques(list);
+    showToast(`“${data.title}” saved — it lives in Custom (and Search).`, "success");
+    onDone(true);
+  };
+
+  return (
+    <div className="tech-builder" data-cat="custom">
+      <div className="tech-topline">
+        <button type="button" className="btn tech-back" onClick={() => onDone(false)}>
+          <Icon name="chevronLeft" size={14} /> Cancel
+        </button>
+        <div className="grow" />
+        <button type="button" className="btn primary" onClick={save}>
+          Save technique
+        </button>
+      </div>
+
+      <div className="tech-head">
+        <div className="tech-title">{initial.steps.length === 0 ? "New Custom Technique" : `Edit “${initial.title}”`}</div>
+        <div className="tech-cat">{CATEGORY_LABELS.custom}</div>
+      </div>
+
+      <div className="tech-builder-fields">
+        <label className="tech-builder-field">
+          <span>Name</span>
+          <input value={title} placeholder="My verse-to-chorus lift" onChange={(e) => setTitle(e.currentTarget.value)} />
+        </label>
+        <label className="tech-builder-field">
+          <span>Tagline (card one-liner)</span>
+          <input value={tagline} placeholder="What the listener hears" onChange={(e) => setTagline(e.currentTarget.value)} />
+        </label>
+        <label className="tech-builder-field">
+          <span>Description (tooltip paragraph)</span>
+          <textarea
+            value={description}
+            rows={2}
+            placeholder="When to reach for it, what it does…"
+            onChange={(e) => setDescription(e.currentTarget.value)}
+          />
+        </label>
+      </div>
+
+      <div className="tech-builder-add">
+        <span className="tech-param-label">Add a step:</span>
+        <Select
+          value={pickTech}
+          options={TECHNIQUES.map((t) => ({ value: t.id, label: `${t.title} (${CATEGORY_LABELS[t.category]})` }))}
+          onChange={setTech}
+          width={280}
+        />
+        <Select
+          value={pickStage}
+          options={tech.stages.map((s) => ({
+            value: s.id,
+            label: `${s.title}${s.optional ? " (optional)" : ""}`,
+          }))}
+          onChange={setPickStage}
+          width={210}
+        />
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => setSteps([...steps, { tech: tech.id, stage: pickStage }])}
+        >
+          Add
+        </button>
+      </div>
+
+      <div className="tech-builder-steps">
+        {steps.length === 0 && (
+          <div className="tech-empty">No steps yet — borrow any stage from the catalog above.</div>
+        )}
+        {steps.map((ref, i) => {
+          const { t, s } = stageOf(ref);
+          return (
+            <div key={`${i}-${ref.tech}-${ref.stage}`} className="tech-builder-step">
+              <span className="tech-builder-step-n">{i + 1}.</span>
+              <span className="tech-builder-step-text">
+                <span className="tech-hover-step-title">
+                  {s?.title ?? ref.stage}
+                  <em> — {t?.title ?? `${ref.tech} (missing)`}</em>
+                </span>
+                <span className="tech-hover-step-sum">{s?.summary ?? "This source stage no longer exists."}</span>
+              </span>
+              <IconButton icon="chevronUp" size={17} tooltip="Move up" onClick={() => move(i, -1)} />
+              <IconButton icon="chevronDown" size={17} tooltip="Move down" onClick={() => move(i, 1)} />
+              <IconButton icon="x" size={17} tooltip="Remove step" onClick={() => setSteps(steps.filter((_, k) => k !== i))} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function TechniquesDialog() {
   const open = useStore((s) => s.dialogs.techniques);
   const setDialogs = useStore((s) => s.setDialogs);
   const [picked, setPicked] = useState<TechniqueDef | null>(null);
+  const [builder, setBuilder] = useState<CustomTechniqueData | null>(null);
+  const [customsVersion, setCustomsVersion] = useState(0);
   const [popped, setPopped] = useState(false);
   const pop = usePopoutWindow({
     name: "MyDAW-techniques",
@@ -673,11 +989,33 @@ export default function TechniquesDialog() {
     }
   };
 
-  // Wizard/browse state lives HERE (always mounted via DialogsHost), so attach ↔
-  // detach keeps the picked technique and its stage session intact.
+  // Wizard/browse/builder state lives HERE (always mounted via DialogsHost), so
+  // attach ↔ detach keeps the picked technique and its stage session intact.
   const body =
-    picked === null ? (
-      <Browser onPick={setPicked} />
+    builder !== null ? (
+      <Builder
+        initial={builder}
+        onDone={(saved) => {
+          setBuilder(null);
+          if (saved) setCustomsVersion((n) => n + 1);
+        }}
+      />
+    ) : picked === null ? (
+      <Browser
+        onPick={setPicked}
+        onNewCustom={() =>
+          setBuilder({
+            id: freshCustomId(loadCustomTechniques()),
+            title: "",
+            tagline: "",
+            description: "",
+            steps: [],
+          })
+        }
+        onEditCustom={(data) => setBuilder(data)}
+        onCustomsChanged={() => setCustomsVersion((n) => n + 1)}
+        customsVersion={customsVersion}
+      />
     ) : (
       <Wizard technique={picked} onBack={() => setPicked(null)} />
     );

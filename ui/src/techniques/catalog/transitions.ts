@@ -255,6 +255,59 @@ const riser: TechniqueDef = {
         return { commands: tx.count, note: "Riser Verb bus ready; send ramps 0 → 0.7 into the drop." };
       },
     },
+    {
+      id: "grit",
+      title: "Grit",
+      reveal: "timeline",
+      optional: true,
+      summary:
+        "Stock Saturator on the riser with its DRIVE automated 0 → 18 dB across the build — " +
+        "the distortion climbs with the tension. (The original riser recipe's missing " +
+        "ingredient, restored once the Saturator existed.)",
+      manual:
+        "Insert the stock Saturator on the riser (Mix ~70%) and automate its Drive from " +
+        "0 dB at the riser's start to ~18 dB at the drop — the sound should fray as it rises.",
+      params: [
+        {
+          key: "dropBar",
+          label: "Drop at bar",
+          kind: "number",
+          min: 2,
+          max: 999,
+          step: 1,
+          default: defaultDropBar,
+        },
+        {
+          key: "lengthBars",
+          label: "Length (bars)",
+          kind: "number",
+          min: 1,
+          max: 32,
+          step: 1,
+          default: () => 8,
+        },
+      ],
+      run: async (ctx, params, state) => {
+        const tx = new Tx();
+        const { track } = findRiser(ctx, state);
+        const start = (state.riserStart as number) ??
+          riserRange(ctx, params as { dropBar: number; lengthBars: number }).start;
+        const end = (state.riserEnd as number) ??
+          riserRange(ctx, params as { dropBar: number; lengthBars: number }).end;
+        const sat = await addInsert(tx, track.id, "builtin:saturator", {
+          Drive: 0,
+          Tone: 9000,
+          Mix: 70,
+          Output: -4,
+        });
+        const driveId = await paramIdByName(sat.instanceId, "Drive");
+        await ramp(tx, track.id, pluginParamRef(sat.instanceId, driveId), [
+          { t: start, v: normFor("builtin:saturator", "Drive", 0), curve: 0.4 },
+          { t: end, v: normFor("builtin:saturator", "Drive", 18) },
+        ]);
+        return { commands: tx.count, note: "The riser now frays as it climbs — distortion rides the build." };
+      },
+    },
   ],
 };
 

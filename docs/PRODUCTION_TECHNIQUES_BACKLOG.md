@@ -5,12 +5,24 @@ what the feature is and how it grows; THIS file tracks what shipped per category
 what is queued next. When a technique ships: move its row to the shipped table, note
 the date, and add any new primitive gaps discovered. Do not start a third list.
 
-## Shipped — 55 techniques, 11 per category (v1 + batch 2: 2026-08-01 · round 3: 2026-08-02)
+## Shipped — 61 techniques (v1 + batch 2: 2026-08-01 · round 3 + macros: 2026-08-02)
+
+### Macros — full flows (5–8 stages; round 4, Omer's ask for complex techniques)
+| Technique | id | Notes |
+|---|---|---|
+| The Drop | `the-drop` | 8 stages: riser + motion, noise roll, stereo sweep, pre-drop silence (macro's own tracks exempt), impact+rumble, downlifter, DROP marker |
+| Full Vocal Chain | `vocal-chain` | 7: gate, clean EQ, comp, saturator heat, L/R doubles, EQ'd ducked verb, last-phrase throw |
+| Radio-Ready Master | `radio-master` | 6: headroom −6, stem buses w/ NAME-heuristic routing, drum glue, console color, mix glue, ceiling+measured LUFS |
+| Drum Kit Makeover | `drum-makeover` | 7: bus+route, glue, parallel crush, gated snare verb, ghost notes, humanize, bass-to-kick pump |
+| Vocal Hook Factory | `hook-factory` | 6: sampler kit, chop pattern, pitch riser, MIDI echoes, wet FX room, trance-gate groove |
+| Podcast Episode Prep | `podcast-prep` | 5: voice gate, broadcast presence, bed auto-duck, opening balance, ceiling + −16 LUFS pass |
+
+### The five classic categories (11 each)
 
 ### Transitions & arrangement FX
 | Technique | id | Notes |
 |---|---|---|
-| Build-Up Riser | `riser-buildup` | polysynth noise+saw, cutoff/gain ramps, verb-send ramp |
+| Build-Up Riser | `riser-buildup` | polysynth noise+saw, cutoff/gain ramps, verb-send ramp, GRIT stage (saturator Drive ramp, restored 2026-08-02) |
 | Snare-Roll Accelerator | `snare-roll` | 1/8→1/16→1/32 + velocity climb, one-undo batch |
 | Tape Stop | `tape-stop` | `clip.stretch` tape varispeed ×0.5 on the split tail |
 | Reverse Build-In | `reverse-build` | duplicate → DOP reverse → place before, long fade-in |
@@ -25,13 +37,13 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 ### Mixing — space & dynamics
 | Technique | id | Notes |
 |---|---|---|
-| Sidechain Pump | `sidechain-pump` | comp keyed from kick, tempo-timed release, depth presets |
+| Sidechain Pump | `sidechain-pump` | comp keyed from kick, tempo-timed release, depth presets, GHOST-KICK stage (muted silent-key trigger track) |
 | Polished Vocal Reverb | `vocal-reverb-send` | EQ'd 100%-wet bus + send + vocal-keyed ducking |
 | Haas Widener | `haas-widener` | duplicate, ±70% pans, 15 ms late; mono-safety stage |
 | Telephone Section | `telephone-section` | clip → own track, 700–3.2k bandpass + 8:1 crunch |
 | Ducking Bed | `ducking-bed` | VO auto-duck: slow attack/500 ms release, depth presets |
 | Auto-Pan Motion | `auto-pan` | triangle pan lane at 1/8..1-bar rates + matching tremolo |
-| Gated Reverb | `gated-reverb` | reverb → stock gate (full range, 120 ms hold) — the 80s snare |
+| Gated Reverb | `gated-reverb` | reverb → stock gate — the 80s snare; CHARACTER stage (Huge/Tight/Modern size+hold presets) |
 | Vocal Presence Chain | `vocal-presence` | HPF+mud dip → 3:1 comp → +3 dB air shelf |
 | Trance Gate | `trance-gate` | rhythmic volume-lane chop pattern (+pan bounce) |
 | EQ Slotting | `eq-slotting` | mirror cut/boost at a contested band on two tracks |
@@ -124,7 +136,7 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 
 | Gap | Unlocks | Notes |
 |---|---|---|
-| ~~Stock saturator~~ CLOSED 2026-08-02 | `builtin:saturator` shipped (Drive/Tone/Mix/Output) — vocal-heat, mixbus-color use it | retrofit riser grit / crush color when touched next |
+| ~~Stock saturator~~ CLOSED 2026-08-02 | `builtin:saturator` shipped — vocal-heat, mixbus-color, riser Grit, radio-master use it | riser-grit retrofit DONE same day |
 | Tempo-sync toggle on Delay time | slapback/throw that follow tempo changes | wizard computes ms today — works, just not tempo-tracking |
 | EQ bands as automation targets | telephone-by-automation, filter sweeps sans insert | paramRef scheme extension + plan rebuild cost |
 | Multiband utility (or M/S mode) | mono-lows, width-by-band | |
