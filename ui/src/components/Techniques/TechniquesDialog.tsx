@@ -10,17 +10,20 @@
  * forces the user back out to click the timeline mid-flow.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { transportBus, useStore } from "../../store/store";
 import { undo } from "../../store/actions";
 import { revealPane } from "../../shell/reveal";
 import { Modal } from "../common/Modal";
 import { Select } from "../common/Select";
 import { NumberDrag } from "../common/NumberDrag";
+import { IconButton } from "../common/IconButton";
 import { Icon } from "../common/icons";
 import { showToast } from "../common/ToastHost";
 import { confirmDialog } from "../Dialogs/confirm";
-import { TECHNIQUES } from "../../techniques/catalog";
+import { usePopoutWindow } from "../common/usePopoutWindow";
+import { TECHNIQUES, techniqueIcon } from "../../techniques/catalog";
 import { allAudioClips, allMidiClips, beatsPerBarOf, bpmOf, isMixerTrack } from "../../techniques/ops";
 import {
   CATEGORY_LABELS,
@@ -484,15 +487,34 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
     );
   }, [cat, query]);
   return (
-    <div className="tech-browser">
-      <div className="tech-cats">
+    <div className="tech-browse-wrap">
+      <div className="tech-search-row">
+        <Icon name="search" size={15} />
         <input
           className="tech-search"
-          placeholder="Search techniques…"
+          placeholder="Search all 55 techniques — name, sound, or what it does…"
           value={query}
           data-autofocus
           onChange={(e) => setQuery(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            // Esc clears the query first; a second Esc reaches the modal and closes.
+            if (e.key === "Escape" && query !== "") {
+              e.stopPropagation();
+              setQuery("");
+            }
+          }}
         />
+        {query !== "" && (
+          <>
+            <span className="tech-search-count">
+              {list.length} match{list.length === 1 ? "" : "es"}
+            </span>
+            <IconButton icon="x" size={18} tooltip="Clear search" onClick={() => setQuery("")} />
+          </>
+        )}
+      </div>
+      <div className="tech-browser">
+        <div className="tech-cats">
         <button
           type="button"
           className="tech-cat-btn"
@@ -514,21 +536,107 @@ function Browser({ onPick }: { onPick: (t: TechniqueDef) => void }) {
           </button>
         ))}
       </div>
-      <div className="tech-cards">
-        {list.length === 0 && (
-          <div className="tech-empty">Nothing matches “{query}” — try the category rail.</div>
-        )}
-        {list.map((t) => (
-          <button key={t.id} type="button" className="tech-card" data-cat={t.category} onClick={() => onPick(t)}>
-            <div className="tech-card-title">{t.title}</div>
-            <div className="tech-card-tag">{t.tagline}</div>
-            <div className="tech-card-meta">
-              {CATEGORY_LABELS[t.category]} · {t.stages.length} stages
-            </div>
-          </button>
-        ))}
+        <div className="tech-cards">
+          {list.length === 0 && (
+            <div className="tech-empty">Nothing matches “{query}” — try the category rail.</div>
+          )}
+          {list.map((t) => (
+            <TechCard key={t.id} t={t} onPick={onPick} />
+          ))}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Card + its rich hover tooltip: after a short intent delay, a panel with the full
+ * description and every stage (title, optional tag, one-line summary). Positioned
+ * beside the card, clamped to the card's own window — works in the pop-out too.
+ */
+function TechCard({ t, onPick }: { t: TechniqueDef; onPick: (t: TechniqueDef) => void }) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const timer = useRef(0);
+  const [hover, setHover] = useState<{ left: number; top: number; flip: boolean } | null>(null);
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const win = el.ownerDocument.defaultView ?? window;
+    const r = el.getBoundingClientRect();
+    const panelW = 340;
+    const flip = r.right + 12 + panelW > win.innerWidth;
+    setHover({
+      left: flip ? Math.max(8, r.left - 12 - panelW) : r.right + 12,
+      top: Math.min(Math.max(8, r.top - 8), Math.max(8, win.innerHeight - 380)),
+      flip,
+    });
+  };
+  const onEnter = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(show, 260);
+  };
+  const onLeave = () => {
+    window.clearTimeout(timer.current);
+    setHover(null);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="tech-card"
+        data-cat={t.category}
+        onClick={() => {
+          onLeave();
+          onPick(t);
+        }}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+      >
+        <span className="tech-card-icon">
+          <Icon name={techniqueIcon(t)} size={20} />
+        </span>
+        <span className="tech-card-text">
+          <span className="tech-card-title">{t.title}</span>
+          <span className="tech-card-tag">{t.tagline}</span>
+          <span className="tech-card-meta">
+            {CATEGORY_LABELS[t.category]} · {t.stages.length} stages
+          </span>
+        </span>
+      </button>
+      {hover !== null &&
+        ref.current !== null &&
+        createPortal(
+          <div
+            className="tech-hover"
+            data-cat={t.category}
+            style={{ left: hover.left, top: hover.top }}
+          >
+            <div className="tech-hover-head">
+              <Icon name={techniqueIcon(t)} size={17} />
+              <span className="tech-hover-title">{t.title}</span>
+              <span className="tech-hover-cat">{CATEGORY_LABELS[t.category]}</span>
+            </div>
+            <div className="tech-hover-desc">{t.description}</div>
+            <div className="tech-hover-steps-label">Steps</div>
+            <ol className="tech-hover-steps">
+              {t.stages.map((st) => (
+                <li key={st.id}>
+                  <span className="tech-hover-step-title">
+                    {st.title}
+                    {st.optional ? <em> · optional</em> : null}
+                  </span>
+                  <span className="tech-hover-step-sum">{st.summary}</span>
+                </li>
+              ))}
+            </ol>
+          </div>,
+          ref.current.ownerDocument.body,
+        )}
+    </>
   );
 }
 
@@ -536,31 +644,95 @@ export default function TechniquesDialog() {
   const open = useStore((s) => s.dialogs.techniques);
   const setDialogs = useStore((s) => s.setDialogs);
   const [picked, setPicked] = useState<TechniqueDef | null>(null);
+  const [popped, setPopped] = useState(false);
+  const pop = usePopoutWindow({
+    name: "MyDAW-techniques",
+    title: "MyDAW — Production Techniques",
+    width: 1020,
+    height: 780,
+    onClosed: () => setPopped(false),
+  });
 
-  if (!open) return null;
+  // Alt+T / menu while detached: raise the window instead of double-hosting.
+  useEffect(() => {
+    if (open && popped) {
+      pop.focus();
+      setDialogs({ techniques: false });
+    }
+  }, [open, popped, pop, setDialogs]);
+
+  const detach = () => {
+    if (pop.open()) {
+      setPopped(true);
+      setDialogs({ techniques: false });
+    } else {
+      showToast(
+        "Pop-out was blocked by the browser — allow popups for this site, then try again.",
+        "error",
+      );
+    }
+  };
+
+  // Wizard/browse state lives HERE (always mounted via DialogsHost), so attach ↔
+  // detach keeps the picked technique and its stage session intact.
+  const body =
+    picked === null ? (
+      <Browser onPick={setPicked} />
+    ) : (
+      <Wizard technique={picked} onBack={() => setPicked(null)} />
+    );
+
   return (
-    <Modal
-      open
-      onClose={() => {
-        setPicked(null);
-        setDialogs({ techniques: false });
-      }}
-      title={
-        <span className="row gap1">
-          <Icon name="sparkles" size={15} /> Production Techniques
-        </span>
-      }
-      width={720}
-      transportKeys
-      closeOnOverlay={false}
-      draggable
-      className="tech-modal"
-    >
-      {picked === null ? (
-        <Browser onPick={setPicked} />
-      ) : (
-        <Wizard technique={picked} onBack={() => setPicked(null)} />
+    <>
+      {popped &&
+        pop.container !== null &&
+        createPortal(
+          <div className="tech-popout">
+            <div className="tech-popout-head">
+              <Icon name="sparkles" size={15} />
+              <span className="grow">Production Techniques</span>
+              <IconButton
+                icon="import"
+                size={20}
+                tooltip="Dock back into the app"
+                onClick={() => {
+                  pop.close();
+                  setDialogs({ techniques: true });
+                }}
+              />
+            </div>
+            <div className="tech-popout-body">{body}</div>
+          </div>,
+          pop.container,
+          "popout-techniques",
+        )}
+      {!popped && open && (
+        <Modal
+          open
+          onClose={() => {
+            setPicked(null);
+            setDialogs({ techniques: false });
+          }}
+          title={
+            <span className="row gap1">
+              <Icon name="sparkles" size={15} /> Production Techniques
+              <IconButton
+                icon="export"
+                size={18}
+                tooltip="Pop out into a separate window"
+                onClick={detach}
+              />
+            </span>
+          }
+          width={960}
+          transportKeys
+          closeOnOverlay={false}
+          draggable
+          className="tech-modal"
+        >
+          {body}
+        </Modal>
       )}
-    </Modal>
+    </>
   );
 }

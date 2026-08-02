@@ -52,7 +52,15 @@ new non-RT sender thread fed by a lock-free ring.)
 
 ## QUEUED
 
-(empty — promote from ONGOING or the technique backlog's gaps table as needed)
+### 1. `stock-sampler` flakes under gate load (2× on 2026-08-02)
+
+Fails only INSIDE full gate runs (2 of ~6 that day, incl. one 233 s run under heavy
+I/O), passes 5/5 standalone every time — the same cry-wolf class as the fixed
+track-types estimator, but load-correlated rather than estimator-correlated, so the
+suspects are timeouts/timing in the harness (upload → render → peak read) rather
+than measurement. Next occurrence has full logs (gate runs now tee to a file when
+investigating). Diagnose from a captured failure; do NOT just lengthen timeouts
+blindly.
 
 ---
 

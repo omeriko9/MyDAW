@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TECHNIQUES, techniqueById } from "./catalog";
+import { TECHNIQUES, TECHNIQUE_ICONS, techniqueById } from "./catalog";
 import { CATEGORY_ORDER } from "./types";
 import type { TechniqueCtx } from "./types";
 import { BUILTIN_PARAM_SPECS, linNorm, logNorm, normFor } from "./norm";
@@ -68,6 +68,14 @@ describe("technique catalog integrity", () => {
         expect(s.manual.length, `${t.id}/${s.id} manual`).toBeGreaterThan(20);
       }
     }
+  });
+
+  it("every technique has an explicit card icon, and no icon entry is an orphan", () => {
+    const ids = new Set(TECHNIQUES.map((t) => t.id));
+    for (const t of TECHNIQUES)
+      expect(TECHNIQUE_ICONS[t.id], `${t.id} needs an icon in TECHNIQUE_ICONS`).toBeTruthy();
+    for (const key of Object.keys(TECHNIQUE_ICONS))
+      expect(ids.has(key), `orphan icon entry: ${key}`).toBe(true);
   });
 
   it("requirements and param defaults evaluate against a bare project", () => {
