@@ -29,10 +29,11 @@ import {
   eqLowCut,
   focusMidiClip,
   isMixerTrack,
+  landingBar,
+  leadInRange,
   msToBeats,
   newMidiClip,
   newTrack,
-  nextBarBeat,
   paramIdByName,
   pluginParamRef,
   ramp,
@@ -40,6 +41,7 @@ import {
   resolveMidiClip,
   sendTo,
   setEqBands,
+  trimNote,
 } from "../ops";
 import { normFor } from "../norm";
 import { createSamplerTrack, editNotes } from "../../store/actions";
@@ -56,17 +58,16 @@ const defaultSelectedTrack = (ctx: TechniqueCtx, filter: (t: Track) => boolean) 
 const byName = (ctx: TechniqueCtx, re: RegExp, filter: (t: Track) => boolean = feedable) =>
   ctx.project.tracks.find((t) => filter(t) && re.test(t.name));
 
-const barToBeat = (ctx: TechniqueCtx, bar: number) => (bar - 1) * ctx.beatsPerBar;
-
-const dropBarParam = (minLead: number): ParamDef => ({
+/** The drop lands on the bar the playhead is heading into. It is NEVER pushed later to
+ *  make the 8-bar build fit — a short project trims the build (see `leadInRange`). */
+const dropBarParam = (): ParamDef => ({
   key: "dropBar",
   label: "Drop at bar",
   kind: "number",
   min: 2,
   max: 999,
   step: 1,
-  default: (ctx) =>
-    Math.max(Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1, minLead + 1),
+  default: landingBar,
 });
 
 /* ============================================================================
@@ -94,11 +95,10 @@ const theDrop: TechniqueDef = {
       manual:
         "Instrument track + PolySynth: Noise ~85%, Cutoff low, full sustain; one note ending " +
         "exactly on the drop bar (8 bars is classic).",
-      params: [dropBarParam(8)],
+      params: [dropBarParam()],
       run: async (ctx, params, state) => {
         const tx = new Tx();
-        const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, params.dropBar as number));
-        const start = Math.max(0, end - 8 * ctx.beatsPerBar);
+        const { start, end, bars } = leadInRange(ctx, params.dropBar as number, 8);
         const track = await newTrack(tx, "instrument", "Riser");
         const synth = await addInsert(tx, track.id, "builtin:polysynth", {
           Noise: 0.85, "Osc Mix": 0, Sub: 0, Cutoff: 220, Resonance: 0.35,
@@ -111,7 +111,10 @@ const theDrop: TechniqueDef = {
         state.riserTrackId = track.id;
         state.riserInstanceId = synth.instanceId;
         state.macroTracks = [track.id];
-        return { commands: tx.count, note: `Riser holds from beat ${start} into bar ${params.dropBar}.` };
+        return {
+          commands: tx.count,
+          note: `Riser holds from beat ${start} into bar ${params.dropBar}.` + trimNote(bars, 8),
+        };
       },
     },
     {

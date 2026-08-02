@@ -23,20 +23,23 @@ import {
   addInsert,
   addNotes,
   allAudioClips,
+  barToBeat,
   chordAt,
   chordPitches,
   dbToLin,
   eqLowCut,
   focusMidiClip,
+  landingBar,
+  leadInRange,
   newMidiClip,
   newTrack,
-  nextBarBeat,
   paramIdByName,
   pluginParamRef,
   ramp,
   resolveAudioClip,
   sendTo,
   setEqBands,
+  trimNote,
 } from "../ops";
 import { normFor } from "../norm";
 import type { ParamDef, TechniqueCtx, TechniqueDef } from "../types";
@@ -54,17 +57,13 @@ const resolveAudioClipT = resolveAudioClip;
  * Build-Up Riser
  * ========================================================================= */
 
-/** Bar number shown to the user is 1-based; beat = (bar-1) * beatsPerBar. */
-const barToBeat = (ctx: TechniqueCtx, bar: number) => (bar - 1) * ctx.beatsPerBar;
-/** Next bar line after the playhead — but never so early that `lengthBars` of
- *  build-up can't fit before it (riserRange would silently clamp it short). */
-const defaultDropBar = (ctx: TechniqueCtx, lengthBars = 8) =>
-  Math.max(Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1, lengthBars + 1);
+/** The drop lands where the user is heading — never moved to make a build-up fit
+ *  (that bug put an 8-bar riser at bar 9 for a playhead at bar 6). Short room trims
+ *  the build instead, and the stage says so. */
+const defaultDropBar = (ctx: TechniqueCtx) => landingBar(ctx);
 
 function riserRange(ctx: TechniqueCtx, params: { dropBar: number; lengthBars: number }) {
-  const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, params.dropBar));
-  const start = Math.max(0, end - params.lengthBars * ctx.beatsPerBar);
-  return { start, end };
+  return leadInRange(ctx, params.dropBar, params.lengthBars);
 }
 
 /** Stage-2/3 fallback when stage 1 was done by hand: the named riser track. */
@@ -126,7 +125,8 @@ const riser: TechniqueDef = {
       ],
       run: async (ctx, params, state) => {
         const tx = new Tx();
-        const { start, end } = riserRange(ctx, params as { dropBar: number; lengthBars: number });
+        const p = params as { dropBar: number; lengthBars: number };
+        const { start, end, bars } = riserRange(ctx, p);
         const track = await newTrack(tx, "instrument", "Riser");
         const synth = await addInsert(tx, track.id, "builtin:polysynth", {
           Noise: 0.85,
@@ -150,7 +150,9 @@ const riser: TechniqueDef = {
         state.riserEnd = end;
         return {
           commands: tx.count,
-          note: `Riser track ready — held note from beat ${start} to the drop at bar ${(params as { dropBar: number }).dropBar}.`,
+          note:
+            `Riser track ready — held note from beat ${start} to the drop at bar ${p.dropBar}.` +
+            trimNote(bars, p.lengthBars),
         };
       },
     },
@@ -373,7 +375,7 @@ const snareRoll: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => defaultDropBar(ctx, 2),
+          default: defaultDropBar,
         },
         {
           key: "lengthBars",
@@ -399,7 +401,7 @@ const snareRoll: TechniqueDef = {
         const trackId = params.trackId as number;
         if (!ctx.project.tracks.some((t) => t.id === trackId && rollTrackFilter(t)))
           throw new Error("Pick an instrument or MIDI track to play the roll on.");
-        const { start, end } = riserRange(ctx, params as { dropBar: number; lengthBars: number });
+        const { start, end, bars } = riserRange(ctx, params as { dropBar: number; lengthBars: number });
         const len = end - start;
         const pitch = params.pitch as number;
         const notes: NoteInput[] = [];
@@ -425,7 +427,12 @@ const snareRoll: TechniqueDef = {
         state.rollTrackId = trackId;
         state.rollStart = start;
         state.rollEnd = end;
-        return { commands: tx.count, note: `${notes.length} accelerating hits written into bar ${(params as { dropBar: number }).dropBar}.` };
+        return {
+          commands: tx.count,
+          note:
+            `${notes.length} accelerating hits written into bar ${(params as { dropBar: number }).dropBar}.` +
+            trimNote(bars, params.lengthBars as number),
+        };
       },
     },
     {
@@ -624,7 +631,7 @@ const downlifter: TechniqueDef = {
           min: 1,
           max: 999,
           step: 1,
-          default: (ctx) => Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1,
+          default: landingBar,
         },
         {
           key: "lengthBars",
@@ -724,7 +731,7 @@ const noiseSweep: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => Math.max(Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1, 3),
+          default: landingBar,
         },
         {
           key: "lengthBars",
@@ -738,8 +745,8 @@ const noiseSweep: TechniqueDef = {
       ],
       run: async (ctx, params, state) => {
         const tx = new Tx();
-        const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, params.endBar as number));
-        const start = Math.max(0, end - (params.lengthBars as number) * ctx.beatsPerBar);
+        const { start, end, bars } = leadInRange(
+          ctx, params.endBar as number, params.lengthBars as number);
         const track = await newTrack(tx, "instrument", "Sweep");
         const synth = await addInsert(tx, track.id, "builtin:polysynth", {
           Noise: 1,
@@ -757,7 +764,11 @@ const noiseSweep: TechniqueDef = {
         state.sweepInstanceId = synth.instanceId;
         state.sweepStart = start;
         state.sweepEnd = end;
-        return { commands: tx.count, note: "Noise source in place — it lands on the bar." };
+        return {
+          commands: tx.count,
+          note: "Noise source in place — it lands on the bar." +
+            trimNote(bars, params.lengthBars as number),
+        };
       },
     },
     {
@@ -832,7 +843,7 @@ const preDropSilence: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1,
+          default: landingBar,
         },
         {
           key: "gap",
@@ -895,7 +906,7 @@ const preDropSilence: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1,
+          default: landingBar,
         },
       ],
       run: async (ctx, params) => {
@@ -940,7 +951,7 @@ const impactRumble: TechniqueDef = {
           min: 1,
           max: 999,
           step: 1,
-          default: (ctx) => Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1,
+          default: landingBar,
         },
       ],
       run: async (ctx, params, state) => {
@@ -1176,7 +1187,7 @@ const chordSwell: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => Math.max(Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1, 3),
+          default: landingBar,
         },
         {
           key: "lengthBars",
@@ -1190,8 +1201,8 @@ const chordSwell: TechniqueDef = {
       ],
       run: async (ctx, params, state) => {
         const tx = new Tx();
-        const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, params.atBar as number));
-        const start = Math.max(0, end - (params.lengthBars as number) * ctx.beatsPerBar);
+        const { start, end, bars } = leadInRange(
+          ctx, params.atBar as number, params.lengthBars as number);
         const chord = chordAt(ctx.project, end) ?? chordAt(ctx.project, start);
         if (!chord) throw new Error("No chord on the chord track — add one first (see requirements).");
         const track = await newTrack(tx, "instrument", "Swell");
@@ -1225,7 +1236,8 @@ const chordSwell: TechniqueDef = {
         state.swellEnd = end;
         return {
           commands: tx.count,
-          note: `Pad holds the ${chord.quality} chord into bar ${params.atBar}.`,
+          note: `Pad holds the ${chord.quality} chord into bar ${params.atBar}.` +
+            trimNote(bars, params.lengthBars as number),
         };
       },
     },

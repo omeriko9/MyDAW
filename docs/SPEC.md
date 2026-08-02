@@ -736,6 +736,15 @@ flagged `missing`.
   state. TempoMap converts beats↔samples (piecewise-constant bpm). Blocks split at loop wrap.
   Record: capture ring from driver input → worker drains to WavWriter; MIDI recorder timestamps
   against transport.
+- **Chasing** (play start, locate, loop wrap — `TrackNode::scheduleMidiRt`): the position moves
+  discontinuously, so the schedule re-states what the position implies. Held clip notes are
+  released first; then CC/bend/aftertouch chase (latest baked point strictly before the position,
+  per controller; bend re-centers when the track has bend but no earlier point); then NOTE chase —
+  every note whose note-on lies before the position and note-off at/after it is re-triggered at
+  offset 0 with the velocity that left it open, and tracked in the clip ledger so its real
+  (future) note-off releases it normally. Without the note half, starting playback inside a held
+  note played silence for the rest of it. Chased notes re-attack — that is what re-triggering
+  means, and it matches Cubase's chase.
 - **Tracks render**: per track: sum clip audio (with clip gain/fades; midi clips → schedule events
   into instrument insert) → insert chain (PluginProxyNode honoring bypass/wetDry) → volume/pan →
   meters tap → route to outputTarget bus/master accumulate buffer; sends tap pre/post fader into

@@ -25,7 +25,9 @@ import {
   allAudioClips,
   chordAt,
   chordPitches,
+  barToBeat,
   focusMidiClip,
+  landingBar,
   msToBeats,
   newMidiClip,
   paramIdByName,
@@ -772,7 +774,7 @@ const pitchChopRiser: TechniqueDef = {
           min: 2,
           max: 999,
           step: 1,
-          default: (ctx) => Math.max(Math.round((ctx.playheadBeat / ctx.beatsPerBar + 1)) + 1, 3),
+          default: landingBar, // the bar the playhead is heading into, never later
         },
         {
           key: "root",
@@ -879,7 +881,7 @@ const arpBuilder: TechniqueDef = {
             ctx.project.tracks.find((t) => t.kind === "instrument" || t.kind === "midi")?.id ?? 0,
         },
         {
-          key: "atBar",
+          key: "fromBar", // starts HERE (not a landing) — see placement.test.ts
           label: "From bar",
           kind: "number",
           min: 1,
@@ -912,7 +914,7 @@ const arpBuilder: TechniqueDef = {
         const trackId = params.trackId as number;
         if (!ctx.project.tracks.some((t) => t.id === trackId))
           throw new Error("Pick the track to play the arp.");
-        const start = ((params.atBar as number) - 1) * ctx.beatsPerBar;
+        const start = barToBeat(ctx, params.fromBar as number);
         const len = (params.bars as number) * ctx.beatsPerBar;
         const step = Number(params.rate);
         const notes: NoteInput[] = [];

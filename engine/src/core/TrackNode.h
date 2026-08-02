@@ -8,7 +8,8 @@
 //     + live capture monitoring (armed/monitoring audio tracks; bypasses PDC)
 //     + MIDI schedule (clip notes + CC/pitch-bend/aftertouch baked to absolute samples,
 //       note-off chasing on stop/locate/loop-wrap, CC chase — latest point at-or-before
-//       the position per controller — on play start/locate/loop-wrap)
+//       the position per controller — and NOTE chase — re-trigger notes already sounding
+//       at the position — on play start/locate/loop-wrap)
 //     + live MIDI merge (armed/monitoring midi+instrument tracks)
 //     + injected live MIDI (midi/preview; plays regardless of arm/monitor, also stopped)
 //     + feeder MIDI merge (events delivered by MIDI tracks routed here via midiTarget)
@@ -271,6 +272,10 @@ private:
     void renderClipsRt(const ProcessContext& ctx, float* wl, float* wr) noexcept;
     void scheduleMidiRt(const ProcessContext& ctx) noexcept;
     void scheduleCcChaseRt(int64_t s0) noexcept;
+    /// Re-trigger notes already sounding AT the start position (note-on before it,
+    /// note-off after it) on play start / locate / loop-wrap — otherwise starting
+    /// inside a held note plays silence for the rest of it. See the .cpp comment.
+    void scheduleNoteChaseRt(int64_t s0) noexcept;
     /// Release every tracked CLIP note as a plain note-off (tails-safe). Buffer-full
     /// keeps the remainder tracked so the next block retries; totals recomputed.
     void flushClipNotesRt(int sampleOffset) noexcept;

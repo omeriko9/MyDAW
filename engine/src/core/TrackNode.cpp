@@ -276,6 +276,65 @@ void TrackNode::scheduleCcChaseRt(int64_t s0) noexcept {
         midiScratch_.add(MidiEvent::pitchBend(outChannelRt(0), 0, 0)); // re-center before first point
 }
 
+// Note chase (play start / locate / loop-wrap): a note whose note-on is strictly BEFORE
+// s0 and whose note-off is at or after it is still sounding at the start position. The
+// in-block scheduler only sees events at/after s0, so without this, starting playback
+// (or looping, or rendering a range) inside a held note gives silence for its whole
+// remaining length — the 8-bar riser pad heard as nothing from bar 5. Cubase calls this
+// chasing note events; the CC chase above is its controller half.
+//
+// Each still-open note is re-triggered at offset 0 with the velocity of the note-on that
+// left it open (the latest one, when same-pitch notes overlap) and tracked in the clip
+// ledger, so its real baked note-off — which lies in the future by construction —
+// releases it exactly like an unchased note. Bounded scan over the immutable baked
+// array; the ledger lives on the RT stack. No allocation, no locks.
+void TrackNode::scheduleNoteChaseRt(int64_t s0) noexcept {
+    const auto& ev = cfg_.noteEvents;
+    if (ev.empty() || s0 <= 0)
+        return;
+    // First event at/after s0 (sorted by sample) — the chase reads only what precedes it.
+    size_t lo = 0;
+    size_t hi = ev.size();
+    while (lo < hi) {
+        const size_t mid = (lo + hi) / 2;
+        if (ev[mid].sample < s0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == 0)
+        return; // nothing started before the position
+
+    uint8_t open[128][16] = {}; // note-ons not yet closed at s0
+    uint8_t vel[128][16] = {};  // velocity of the latest on per pitch/channel
+    for (size_t i = 0; i < lo; ++i) {
+        const NoteEvent& e = ev[i];
+        const int p = e.pitch & 0x7F;
+        const int c = e.channel & 0x0F;
+        if (e.on) {
+            if (open[p][c] < 255)
+                ++open[p][c];
+            vel[p][c] = e.velocity;
+        } else if (open[p][c] > 0) {
+            --open[p][c];
+        }
+    }
+
+    for (int p = 0; p < 128; ++p) {
+        for (int c = 0; c < 16; ++c) {
+            const int ch = outChannelRt(c);
+            for (int k = 0; k < open[p][c]; ++k) {
+                // Counted per on, exactly like the in-block loop: the same number of
+                // note-offs is still ahead of us, so overlaps release cleanly.
+                if (midiScratch_.add(MidiEvent::noteOn(ch, p, vel[p][c], 0)))
+                    clipNotes_.noteOn(p, ch);
+                else
+                    return; // buffer full — the rest stays silent rather than stuck
+            }
+        }
+    }
+}
+
 void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
     if (cfg_.noteEvents.empty() && cfg_.ccEvents.empty() && clipNotes_.total == 0)
         return;
@@ -331,6 +390,11 @@ void TrackNode::scheduleMidiRt(const ProcessContext& ctx) noexcept {
             midiScratch_.add(m);
         }
     }
+
+    // Note chase, AFTER the in-block CCs so a CC landing exactly on s0 still reaches
+    // the instrument ahead of the re-triggered note-ons (all at offset 0, stable sort).
+    if (chase)
+        scheduleNoteChaseRt(s0);
 
     const auto& ev = cfg_.noteEvents;
 

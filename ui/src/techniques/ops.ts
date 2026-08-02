@@ -76,6 +76,36 @@ export function nextBarBeat(ctx: TechniqueCtx, beat = ctx.playheadBeat): number 
   return Math.ceil(beat / bar - 1e-9) * bar;
 }
 
+/** Bar numbers are 1-based everywhere the user sees them; beat = (bar-1) * beatsPerBar. */
+export const barToBeat = (ctx: TechniqueCtx, bar: number) => (bar - 1) * ctx.beatsPerBar;
+
+/**
+ * The bar the playhead is heading into — the default landing/drop bar for anything
+ * that builds INTO a moment.
+ *
+ * Deliberately NOT nudged to make a fixed lead-in length fit (it once was, and a riser
+ * asked for at bar 6 silently appeared at bar 9). The user's position wins; a lead-in
+ * that doesn't fit is trimmed by `leadInRange` and says so.
+ */
+export const landingBar = (ctx: TechniqueCtx) =>
+  Math.max(2, Math.round(nextBarBeat(ctx) / ctx.beatsPerBar) + 1);
+
+/**
+ * The span of `lengthBars` ending on `endBar` — clamped at the project start rather
+ * than moved. `bars` is what actually fits; compare it with the request via `trimNote`.
+ */
+export function leadInRange(ctx: TechniqueCtx, endBar: number, lengthBars: number) {
+  const end = Math.max(ctx.beatsPerBar, barToBeat(ctx, endBar));
+  const start = Math.max(0, end - lengthBars * ctx.beatsPerBar);
+  return { start, end, bars: (end - start) / ctx.beatsPerBar };
+}
+
+/** Sentence for a stage note when the lead-in had to be trimmed (empty when it fit). */
+export const trimNote = (got: number, wanted: number) =>
+  got < wanted - 1e-9
+    ? ` Trimmed to ${+got.toFixed(2)} bar${got === 1 ? "" : "s"} — the project starts before a full ${wanted}.`
+    : "";
+
 /* ============================================================================
  * Tracks / buses / inserts
  * ========================================================================= */

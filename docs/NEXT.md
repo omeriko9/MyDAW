@@ -4,7 +4,16 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-02 — three in one day: (1) the flaky `track-types` frequency
+Last updated: 2026-08-02 (later) — **MIDI note chase SHIPPED** (`TrackNode::scheduleNoteChaseRt`,
+gate suite `midi-chase`, SPEC §7 "Chasing"). Found from a real user project: a Build-Up Riser
+was inaudible because the whole technique is ONE held note and the in-block scheduler only ever
+saw events at/after the playhead — so any playback start, locate or loop wrap inside a held note
+played silence for its remaining length. The engine already chased CC state on exactly those
+discontinuities; notes were the missing half. Same pass: technique landing bars (drop/land/at)
+now follow the playhead and TRIM a lead-in that doesn't fit instead of silently moving the drop
+later (`ops.landingBar`/`leadInRange`/`trimNote`, `placement.test.ts` pins every catalog default).
+
+Earlier the same day — three in one: (1) the flaky `track-types` frequency
 assertion (former QUEUED #1) FIXED — `freqOf` counted zero-crossings and read harmonics
 as extra crossings; replaced with autocorrelation, ratio now exactly 2.000 across 7 runs,
 windows tightened to 1.9–2.1; (2) **v1.1.0 RELEASED** to GitHub (shells + 55 techniques +

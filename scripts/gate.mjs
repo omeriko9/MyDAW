@@ -76,6 +76,8 @@ const SUITES = [
   { id: "midi-out-channel", tier: "fast", script: "midi-out-channel-test.mjs", requires: needsEngine },
   { id: "midi-out", tier: "fast", script: "midi-out-test.mjs", requires: needsEngine,
     note: "SPEC §5.5 hardware MIDI out: delivery counter, note hygiene, persistence; SKIPs with zero devices" },
+  { id: "midi-chase", tier: "fast", script: "midi-chase-test.mjs", requires: needsEngine,
+    note: "starting playback INSIDE a held note must sound it (note chase), and only it" },
   { id: "smf-logic", tier: "fast", script: "smf-logic-test.mjs", requires: needsEngine },
   { id: "media-import", tier: "fast", script: "media-import-test.mjs", requires: needsEngine,
     note: "SPEC §5.5: import = ONE undo entry; media/probe + adoptTempo fold tempo in" },
