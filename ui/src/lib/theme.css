@@ -447,7 +447,30 @@
 :root[data-theme="prism"] .tlh-row {
   background: #eef4fd;
 }
-/* the scoped base rule above outranks the component's state variants — restate them */
+/* the scoped base rule above outranks the component's state variants — restate them.
+   That includes the per-KIND header fills (timeline.css): without these, prism was
+   the one theme where every track type read as the same pale blue (Omer, 2026-08-02). */
+:root[data-theme="prism"] .tlh-row[data-kind="audio"] {
+  background: color-mix(in srgb, #5b9bd5 20%, #eef4fd);
+}
+:root[data-theme="prism"] .tlh-row[data-kind="midi"] {
+  background: color-mix(in srgb, #6dbb8a 20%, #eef4fd);
+}
+:root[data-theme="prism"] .tlh-row[data-kind="instrument"] {
+  background: color-mix(in srgb, #9d7bd8 20%, #eef4fd);
+}
+:root[data-theme="prism"] .tlh-row[data-kind="bus"] {
+  background: color-mix(in srgb, #d5a25b 20%, #eef4fd);
+}
+:root[data-theme="prism"] .tlh-row[data-kind="folder"] {
+  background: color-mix(in srgb, #45526b 12%, #eef4fd);
+}
+:root[data-theme="prism"] .tlh-row[data-kind="marker"],
+:root[data-theme="prism"] .tlh-row[data-kind="arranger"],
+:root[data-theme="prism"] .tlh-row[data-kind="chord"],
+:root[data-theme="prism"] .tlh-row[data-kind="transpose"] {
+  background: color-mix(in srgb, #d57ba6 14%, #eef4fd);
+}
 :root[data-theme="prism"] .tlh-row[data-selected="true"],
 :root[data-theme="prism"] .tlh-row[data-droppable="true"] {
   background: var(--accent-soft);
