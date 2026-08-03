@@ -3,10 +3,10 @@
 **A free, open-source DAW for Windows.** Native C++ audio engine, browser-based UI,
 real VST plugin support — including 32-bit plugins and your old Cubase projects.
 
-![MyDAW — arrangement, mixer routing, live sheet-music engraving and the in-app AI agent, all on one project](docs/screenshot.jpg)
+![MyDAW — arrangement view with grouped tracks and the in-app AI agent](docs/screenshot.png)
 
-*One project, three views: the arrangement with VST instrument routing, the same MIDI
-engraved as sheet music below it, and the AI assistant analyzing the harmony on the right.*
+*A full arrangement with grouped instrument sections, MIDI and audio clips, project
+overview, and the AI assistant working directly alongside the session.*
 
 The browser is only the control surface: all audio, MIDI, and plugin processing runs in
 native processes. Every plugin lives in its own sandboxed process, so a crashing plugin
