@@ -25,6 +25,7 @@
 
 #include "App.h"
 #include "agent/AgentQuery.h"
+#include "core/Metronome.h"
 #include "export/CprWriter.h"
 #include "export/TrackArchiveWriter.h"
 #include "import/ImportProvider.h"
@@ -636,7 +637,9 @@ json Api::sessionHello() {
                 {"audioDevices", app_.devicesJson()},
                 {"midiInputs", std::move(midiInputs)},
                 {"metronome", json{{"enabled", app_.transport.metronomeEnabled()},
-                                   {"countInBars", app_.transport.countInBars()}}},
+                                   {"countInBars", app_.transport.countInBars()},
+                                   {"firstBeatVolume", app_.metronome->firstBeatVolume()},
+                                   {"otherBeatVolume", app_.metronome->otherBeatVolume()}}},
                 {"automationWrite", app_.transport.automationWrite()},
                 // The UI's dirty flag is client-side, so a reload or a second tab used to
                 // come up believing a project with unsaved engine-side edits was clean —
@@ -1078,6 +1081,12 @@ json Api::handleTransport(const std::string& type, const json& p, std::string& e
         app_.transport.setMetronomeEnabled(getOr<bool>(p, "enabled", true));
         if (hasKey(p, "countInBars"))
             app_.transport.setCountInBars(std::clamp(getOr<int>(p, "countInBars", 0), 0, 2));
+        if (hasKey(p, "firstBeatVolume"))
+            app_.metronome->setFirstBeatVolume(
+                static_cast<float>(getOr<double>(p, "firstBeatVolume", 1.0)));
+        if (hasKey(p, "otherBeatVolume"))
+            app_.metronome->setOtherBeatVolume(
+                static_cast<float>(getOr<double>(p, "otherBeatVolume", 1.0)));
     } else if (type == "transport/setAutomationWrite") {
         app_.transport.setAutomationWrite(getOr<bool>(p, "enabled", false));
     } else {
@@ -1351,8 +1360,15 @@ json Api::handleDialog(const std::string& type, std::string& ec, std::string& em
     }
     if (type == "dialog/saveProject") {
         std::string path;
+        const std::string suggested = app_.projectIO.hasPath()
+                                          ? app_.projectIO.projectDir()
+                                          : app_.projectIO.defaultSaveAsDir(
+                                                app_.model.project.name);
+        const std::string initialFolder = parentDir(suggested);
+        ensureDir(initialFolder);
         const bool ok = Dialogs::saveFile("Save Project", {{"MyDAW Project", "*.mydaw"}},
-                                          "mydaw", app_.model.project.name, path);
+                                          "mydaw", app_.model.project.name, path,
+                                          initialFolder);
         return json{{"path", ok ? json(path) : json()}};
     }
     if (type == "dialog/importProject") {

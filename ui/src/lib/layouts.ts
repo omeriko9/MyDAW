@@ -67,6 +67,7 @@ export function getLayoutSlots(): Slots {
 
 const TAB_LABEL: Record<Exclude<BottomTab, null>, string> = {
   mixer: "Mixer",
+  instrumentRack: "Instrument Rack",
   pianoRoll: "Piano Roll",
   clipEditor: "Clip Editor",
   sheetMusic: "Sheet Music",

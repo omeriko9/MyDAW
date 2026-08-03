@@ -122,7 +122,7 @@ export type Tool = "select" | "draw" | "erase" | "split";
  *  the dragged edge, or the content time-stretches to the new duration. */
 export type SizingMode = "normal" | "moveContents" | "timeStretch";
 
-export type BottomTab = "mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer" | null;
+export type BottomTab = "mixer" | "instrumentRack" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer" | null;
 
 /** Pane focus for keyboard routing — set by pointerdown (capture) on each pane root. */
 export type FocusedPane = "timeline" | "pianoRoll" | "clipEditor" | "sheetMusic" | "mixer";
@@ -134,6 +134,8 @@ export interface Selection {
   trackIds: number[];
   clipIds: number[];
   noteIds: number[];
+  /** Which entity initiated the selection when tracks and their clips are both selected. */
+  scope?: "none" | "tracks" | "clips" | "notes";
 }
 
 export interface Viewport {
@@ -234,7 +236,12 @@ export interface DawState {
      reconciled from every event/transport + transport/* reply that carries the optional
      "metronome" field (reconcileMetronome below). User toggles (transport bar / "C" key)
      update this optimistically and send transport/setMetronome. */
-  metronome: { enabled: boolean; countIn: 0 | 1 | 2 };
+  metronome: {
+    enabled: boolean;
+    countIn: 0 | 1 | 2;
+    firstBeatVolume: number;
+    otherBeatVolume: number;
+  };
 
   /* automationWrite — UI mirror of the engine arm (same seeding/reconcile path as metronome):
      while ON and playing, fader/knob drags record automation points at the playhead. */
@@ -302,7 +309,14 @@ export interface DawState {
   setActiveMidiClipId(id: number | null): void;
   setActiveAudioClipId(id: number | null): void;
   setDialogs(patch: Partial<DialogsState>): void;
-  setMetronome(patch: Partial<{ enabled: boolean; countIn: 0 | 1 | 2 }>): void;
+  setMetronome(
+    patch: Partial<{
+      enabled: boolean;
+      countIn: 0 | 1 | 2;
+      firstBeatVolume: number;
+      otherBeatVolume: number;
+    }>,
+  ): void;
   setAutomationWrite(on: boolean): void;
   /** Open a generic plugin editor window (raises it to the front if already open). */
   openPluginEditorWindow(instanceId: number): void;
@@ -417,13 +431,13 @@ const prefPanels: PanelsState = {
   bottomTab2: loadPref<BottomTab>(
     "ui.panels.bottomTab2",
     null,
-    oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
+    oneOf<BottomTab>("mixer", "instrumentRack", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
   ),
   // slot-1 tab to restore on dock reopen — likewise a later, separately-stored field
   bottomTabPrev: loadPref<PoppedOutTab>(
     "ui.panels.bottomTabPrev",
     "mixer",
-    oneOf<PoppedOutTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"),
+    oneOf<PoppedOutTab>("mixer", "instrumentRack", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"),
   ),
   ...loadPref<
     Omit<
@@ -437,7 +451,7 @@ const prefPanels: PanelsState = {
       browser: isBool,
       browserTab: oneOf<BrowserTab>("plugins", "files", "inspector"),
       inspector: isBool,
-      bottomTab: oneOf<BottomTab>("mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
+      bottomTab: oneOf<BottomTab>("mixer", "instrumentRack", "pianoRoll", "clipEditor", "sheetMusic", "visualizer", null),
     }),
   ),
   poppedOut: {},
@@ -489,7 +503,7 @@ export const useStore = create<DawState>((set) => ({
   midiInputs: [],
 
   transport: initialTransport,
-  metronome: { enabled: false, countIn: 0 },
+  metronome: { enabled: false, countIn: 0, firstBeatVolume: 1, otherBeatVolume: 1 },
   automationWrite: false,
   midiMaps: [],
   midiLearnArm: null,
@@ -501,7 +515,7 @@ export const useStore = create<DawState>((set) => ({
   dopJob: null,
   logLines: [],
 
-  selection: { trackIds: [], clipIds: [], noteIds: [] },
+  selection: { trackIds: [], clipIds: [], noteIds: [], scope: "none" },
   tool: prefTool,
   sizingMode: prefSizingMode,
   viewport: prefViewport,
@@ -520,8 +534,18 @@ export const useStore = create<DawState>((set) => ({
   setRegistry: (registry) => set({ registry }),
   setMidiInputs: (midiInputs) => set({ midiInputs }),
   setAudioDevices: (audioDevices) => set({ audioDevices }),
-  setSelection: (patch) => set((s) => ({ selection: { ...s.selection, ...patch } })),
-  clearSelection: () => set({ selection: { trackIds: [], clipIds: [], noteIds: [] } }),
+  setSelection: (patch) =>
+    set((s) => {
+      const next = { ...s.selection, ...patch };
+      const scope = patch.scope ?? (
+        next.noteIds.length > 0 ? "notes" :
+        next.clipIds.length > 0 ? "clips" :
+        next.trackIds.length > 0 ? "tracks" : "none"
+      );
+      return { selection: { ...next, scope } };
+    }),
+  clearSelection: () =>
+    set({ selection: { trackIds: [], clipIds: [], noteIds: [], scope: "none" } }),
   setTool: (tool) => set({ tool }),
   setSizingMode: (sizingMode) => set({ sizingMode }),
   setViewport: (patch) => set((s) => ({ viewport: { ...s.viewport, ...patch } })),
@@ -649,8 +673,18 @@ export function reconcileMetronome(m: MetronomeState | undefined): void {
   if (!m) return;
   const countIn: 0 | 1 | 2 = m.countInBars >= 2 ? 2 : m.countInBars === 1 ? 1 : 0;
   const cur = useStore.getState().metronome;
-  if (cur.enabled === m.enabled && cur.countIn === countIn) return;
-  useStore.setState({ metronome: { enabled: m.enabled, countIn } });
+  const firstBeatVolume = Math.max(0, Math.min(1, m.firstBeatVolume ?? cur.firstBeatVolume));
+  const otherBeatVolume = Math.max(0, Math.min(1, m.otherBeatVolume ?? cur.otherBeatVolume));
+  if (
+    cur.enabled === m.enabled &&
+    cur.countIn === countIn &&
+    cur.firstBeatVolume === firstBeatVolume &&
+    cur.otherBeatVolume === otherBeatVolume
+  )
+    return;
+  useStore.setState({
+    metronome: { enabled: m.enabled, countIn, firstBeatVolume, otherBeatVolume },
+  });
 }
 
 /** Adopt the engine-reported automation-write arm (optional wire field; old engines omit it). */

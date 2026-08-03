@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "daf3e2cca6b776fd469a1e9726327280547b4c905cd0a45b909fa1886b953384";
+export const AGENT_CATALOG_SHA256 = "12c28d012b2aae135a8410a97ced4097ef2fe7c51b10a5dfd2cfa6c406cf2f90";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -2191,6 +2191,18 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "description": "Normalized first-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "description": "Normalized other-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -3643,6 +3655,16 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -4527,6 +4549,7 @@ export const AGENT_CATALOG: AgentCatalog = {
               "type": "string",
               "enum": [
                 "mixer",
+                "instrumentRack",
                 "pianoRoll",
                 "clipEditor",
                 "sheetMusic",
@@ -9723,7 +9746,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "transport/setMetronome",
       "category": "transport",
-      "description": "Enable or disable the metronome and set count-in bars.",
+      "description": "Enable or disable the metronome, set count-in bars, and control first/other beat click levels.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -10141,6 +10164,7 @@ export const AGENT_CATALOG: AgentCatalog = {
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",
@@ -10158,6 +10182,7 @@ export const AGENT_CATALOG: AgentCatalog = {
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",
@@ -11783,7 +11808,7 @@ export interface UiOperationMap {
   "ui/entity.reveal": { req: { "kind": "track" | "clip" | "note" | "marker" | "plugin"; "id": number; "select"?: boolean; "focus"?: boolean; }; reply: { "revealed": boolean; "pane"?: "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/focus.set": { req: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; }; reply: { "pane": "timeline" | "pianoRoll" | "clipEditor" | "mixer"; } };
   "ui/follow.set": { req: { "enabled": boolean; }; reply: { "enabled": boolean; } };
-  "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); "bottomTab2"?: ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); } };
+  "ui/layout.set": { req: { "browser"?: boolean; "inspector"?: boolean; "minimap"?: boolean; "agent"?: boolean; "bottomTab"?: ("mixer" | "instrumentRack" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); "bottomTab2"?: ("mixer" | "instrumentRack" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); }; reply: { "browser": boolean; "inspector": boolean; "minimap": boolean; "agent": boolean; "bottomTab": ("mixer" | "instrumentRack" | "pianoRoll" | "clipEditor" | "sheetMusic" | "visualizer") | (null); } };
   "ui/midi.logicalEditor": { req: { "clipId"?: number; "noteIds"?: Array<number>; "program": { "mode": "transform" | "delete" | "select"; "filters": Array<{ "prop": "pitch" | "velocity" | "startBeat" | "lengthBeats" | "channel" | "pitchClass" | "index"; "cond": "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "inRange" | "outsideRange" | "even" | "odd" | "modEq"; "value"?: number; "value2"?: number; }>; "actions"?: Array<{ "prop": "pitch" | "velocity" | "startBeat" | "lengthBeats" | "channel"; "op": "set" | "add" | "mul" | "random"; "value": number; "value2"?: number; }>; }; }; reply: { "clipId": number; "notes": number; "matched": number; "selected"?: number; "updated"?: number; "removed"?: number; } };
   "ui/midi.transform": { req: { "clipId"?: number; "noteIds"?: Array<number>; "transform": "transpose" | "fixedLength" | "legato" | "humanizeTiming" | "humanizeVelocity" | "scaleVelocity" | "reverse" | "deleteDoubles" | "deleteOverlapsMono" | "deleteOverlapsPoly" | "fixedVelocity" | "limitVelocity" | "compressVelocity" | "deleteNotes" | "mirror" | "restrictPolyphony" | "rampVelocity" | "smoothVelocity"; "options"?: { "semitones"?: number; "lengthBeats"?: number; "maxBeats"?: number; "amount"?: number; "multiplier"?: number; "add"?: number; "overlapBeats"?: number; "velocity"?: number; "min"?: number; "max"?: number; "ratio"?: number; "center"?: number; "minLengthBeats"?: number; "minVelocity"?: number; "axisPitch"?: number; "maxVoices"?: number; "from"?: number; "to"?: number; }; }; reply: { "changedNoteIds": Array<number>; "removedNoteIds": Array<number>; } };
   "ui/pluginEditor.set": { req: { "instanceId": number; "open": boolean; }; reply: { "instanceId": number; "open": boolean; } };

@@ -14,6 +14,11 @@
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
 }
+.plugin-load-overlay .plo-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
 
 /* ============================================================================
  * Dialogs (U5): export / relink / recovery / confirm. Uses theme.css tokens only.

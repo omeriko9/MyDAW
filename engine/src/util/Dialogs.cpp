@@ -11,6 +11,7 @@
 
 #include <windows.h>
 
+#include <shlobj.h>
 #include <shobjidl.h>
 
 #include <thread>
@@ -26,7 +27,8 @@ namespace {
 // Runs on the per-call STA thread.
 bool runDialog(bool save, bool multi, const std::string& title,
                const std::vector<FileDialogFilter>& filters, const std::string& defaultExt,
-               const std::string& defaultName, std::vector<std::string>& outPaths) {
+               const std::string& defaultName, const std::string& initialFolder,
+               std::vector<std::string>& outPaths) {
     const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     const bool coInit = SUCCEEDED(coHr);
     bool ok = false;
@@ -58,6 +60,24 @@ bool runDialog(bool save, bool multi, const std::string& title,
                 dlg->SetDefaultExtension(utf8ToWide(defaultExt).c_str());
             if (!defaultName.empty())
                 dlg->SetFileName(utf8ToWide(defaultName).c_str());
+
+            // IFileDialog otherwise shares the shell's last-used directory across project
+            // saves, media exports, and imports. That made a new project open inside the
+            // never-saved recording scratch dir (%APPDATA%/MyDAW/media/audio), and because
+            // .mydaw packages are directories a second save could nest one package in the
+            // previous package. Project saves provide an explicit parent folder here.
+            if (!initialFolder.empty() && dirExists(initialFolder)) {
+                IShellItem* folder = nullptr;
+                const HRESULT folderHr = SHCreateItemFromParsingName(
+                    utf8ToWide(initialFolder).c_str(), nullptr, IID_PPV_ARGS(&folder));
+                if (SUCCEEDED(folderHr) && folder) {
+                    dlg->SetFolder(folder);
+                    folder->Release();
+                } else {
+                    Log::warn("Dialogs: cannot set initial folder '%s' (0x%08lX)",
+                              initialFolder.c_str(), static_cast<unsigned long>(folderHr));
+                }
+            }
 
             DWORD opts = 0;
             if (SUCCEEDED(dlg->GetOptions(&opts))) {
@@ -124,10 +144,12 @@ bool runDialog(bool save, bool multi, const std::string& title,
 bool runOnStaThread(bool save, bool multi, const std::string& title,
                     const std::vector<FileDialogFilter>& filters,
                     const std::string& defaultExt, const std::string& defaultName,
+                    const std::string& initialFolder,
                     std::vector<std::string>& outPaths) {
     bool result = false;
     std::thread t([&] {
-        result = runDialog(save, multi, title, filters, defaultExt, defaultName, outPaths);
+        result = runDialog(save, multi, title, filters, defaultExt, defaultName,
+                           initialFolder, outPaths);
     });
     t.join();
     return result;
@@ -138,7 +160,7 @@ bool runOnStaThread(bool save, bool multi, const std::string& title,
 bool Dialogs::openFile(const std::string& title, const std::vector<FileDialogFilter>& filters,
                        std::string& outPath) {
     std::vector<std::string> paths;
-    if (!runOnStaThread(false, false, title, filters, "", "", paths) || paths.empty())
+    if (!runOnStaThread(false, false, title, filters, "", "", "", paths) || paths.empty())
         return false;
     outPath = paths.front();
     return true;
@@ -147,15 +169,16 @@ bool Dialogs::openFile(const std::string& title, const std::vector<FileDialogFil
 bool Dialogs::openFiles(const std::string& title, const std::vector<FileDialogFilter>& filters,
                         std::vector<std::string>& outPaths) {
     outPaths.clear();
-    return runOnStaThread(false, true, title, filters, "", "", outPaths) && !outPaths.empty();
+    return runOnStaThread(false, true, title, filters, "", "", "", outPaths) &&
+           !outPaths.empty();
 }
 
 bool Dialogs::saveFile(const std::string& title, const std::vector<FileDialogFilter>& filters,
                        const std::string& defaultExt, const std::string& defaultName,
-                       std::string& outPath) {
+                       std::string& outPath, const std::string& initialFolder) {
     std::vector<std::string> paths;
-    if (!runOnStaThread(true, false, title, filters, defaultExt, defaultName, paths) ||
-        paths.empty())
+    if (!runOnStaThread(true, false, title, filters, defaultExt, defaultName,
+                        initialFolder, paths) || paths.empty())
         return false;
     outPath = paths.front();
     return true;

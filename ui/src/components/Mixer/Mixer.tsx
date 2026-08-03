@@ -259,7 +259,14 @@ export default function Mixer() {
               strips
                 .slice(first, last + 1)
                 .map((t) => (
-                  <ChannelStrip key={t.id} track={t} buses={buses} wide={wide} faderH={faderH} />
+                  <ChannelStrip
+                    key={t.id}
+                    track={t}
+                    buses={buses}
+                    wide={wide}
+                    faderH={faderH}
+                    selectionOrder={strips.map((x) => x.id)}
+                  />
                 ))
             )}
           </div>

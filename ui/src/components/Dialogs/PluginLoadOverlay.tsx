@@ -2,7 +2,9 @@
  * PluginLoadOverlay — Cubase-style modal progress while hosted plugins load
  * (project load, import auto-recreate, Recreate Plugins). Driven entirely by
  * event/pluginLoadProgress: shows "Loading plugins…", the current plugin name and a
- * determinate bar. Hides on {done:true} (short linger so one-plugin loads don't
+ * determinate bar. Project-load runs also offer Cancel; the engine finishes the
+ * currently initializing host, then leaves the remaining inserts unloaded so they can
+ * be recreated later. Hides on {done:true} (short linger so one-plugin loads don't
  * flash), on engine disconnect, and after a 60 s stall (a plugin host that died
  * mid-load never sends done — the overlay must not wedge the UI forever).
  */
@@ -18,7 +20,13 @@ const STALL_MS = 60_000;
 
 export default function PluginLoadOverlay() {
   const connected = useStore((s) => s.connected);
-  const [st, setSt] = useState<{ current: number; total: number; name: string } | null>(null);
+  const [st, setSt] = useState<{
+    current: number;
+    total: number;
+    name: string;
+    cancelable: boolean;
+    cancelling: boolean;
+  } | null>(null);
   const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stallRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -33,6 +41,10 @@ export default function PluginLoadOverlay() {
       clear(stallRef);
       if (ev.done) {
         clear(lingerRef);
+        if (ev.cancelled) {
+          setSt(null);
+          return;
+        }
         lingerRef.current = setTimeout(() => {
           lingerRef.current = null;
           setSt(null);
@@ -41,7 +53,13 @@ export default function PluginLoadOverlay() {
         return;
       }
       clear(lingerRef);
-      setSt({ current: ev.current, total: ev.total, name: ev.name });
+      setSt({
+        current: ev.current,
+        total: ev.total,
+        name: ev.name,
+        cancelable: ev.cancelable === true,
+        cancelling: false,
+      });
       stallRef.current = setTimeout(() => {
         stallRef.current = null;
         setSt(null);
@@ -60,6 +78,12 @@ export default function PluginLoadOverlay() {
 
   if (!st) return null;
   const pct = st.total > 0 ? Math.min(100, (st.current / st.total) * 100) : 0;
+  const cancel = () => {
+    setSt((prev) => (prev ? { ...prev, cancelling: true } : prev));
+    void ws.requestRaw("plugins/cancelLoad", {}).catch(() => {
+      setSt((prev) => (prev ? { ...prev, cancelling: false } : prev));
+    });
+  };
   return createPortal(
     <div className="modal-overlay plugin-load-overlay">
       <div className="modal" style={{ width: 420 }} role="dialog" aria-modal="true" aria-label="Loading plugins">
@@ -75,6 +99,13 @@ export default function PluginLoadOverlay() {
           <div className="plo-count">
             {Math.min(st.current, st.total)} / {st.total}
           </div>
+          {st.cancelable && (
+            <div className="plo-actions">
+              <button type="button" className="btn" disabled={st.cancelling} onClick={cancel}>
+                {st.cancelling ? "Cancelling…" : "Cancel"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>,

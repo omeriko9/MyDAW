@@ -9,6 +9,7 @@
 import React from "react";
 import Timeline from "../components/Timeline/Timeline";
 import Mixer from "../components/Mixer/Mixer";
+import InstrumentRack from "../components/InstrumentRack/InstrumentRack";
 import PianoRoll from "../components/PianoRoll/PianoRoll";
 import ClipEditor from "../components/ClipEditor/ClipEditor";
 import SheetMusic from "../components/SheetMusic/SheetMusic";
@@ -22,6 +23,7 @@ export { PANE_LABELS };
 export const PANE_ICONS: Record<PaneId, IconName> = {
   timeline: "layers",
   mixer: "mixer",
+  instrumentRack: "piano",
   pianoRoll: "piano",
   clipEditor: "audioWave",
   sheetMusic: "staff",
@@ -31,6 +33,7 @@ export const PANE_ICONS: Record<PaneId, IconName> = {
 /** Dock-capable panes in their canonical (classic dock tab) order. */
 export const DOCK_PANES: DockPaneId[] = [
   "mixer",
+  "instrumentRack",
   "pianoRoll",
   "clipEditor",
   "sheetMusic",
@@ -43,6 +46,8 @@ export function renderPane(id: PaneId): React.ReactNode {
       return <Timeline />;
     case "mixer":
       return <Mixer />;
+    case "instrumentRack":
+      return <InstrumentRack />;
     case "pianoRoll":
       return <PianoRoll />;
     case "clipEditor":

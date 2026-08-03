@@ -10,7 +10,7 @@
  *   Numpad . / .          jump to project start
  *   Numpad Enter          start playback
  *   Numpad 0              stop
- *   Numpad *              arm the selected track(s), then record
+ *   Numpad *              exclusively arm the selected track(s), then record
  *   Numpad /              loop / cycle toggle
  *   Numpad 1 / 2          locate to loop start / end
  *   Ctrl+Z                undo
@@ -20,6 +20,8 @@
  *   Delete / Backspace    delete selection (per focus context: notes or clips)
  *   Ctrl+S                save (no_path → native Save As flow)
  *   Ctrl+Shift+S          save as (always the native Save As flow)
+ *   F3                    toggle Mixer (optionally Shift+F3 in Settings)
+ *   F11                   open Instrument Rack (optionally Shift+F11 in Settings)
  *   Ctrl+I                import project (.cpr / MIDI — paste-path dialog)
  *   B                     split selected clips at playhead
  *   Q                     quantize to grid — selected notes when the piano roll is
@@ -27,7 +29,8 @@
  *   P                     loop/locators to selection (selected clips' bounds)
  *   F                     zoom to fit — selection if any, else all content (per pane)
  *   Arrows                edit the selection: timeline ←/→ nudge clips by a grid step
- *                         (Shift = bar); piano roll ←/→ move notes (Shift = fine ¼),
+ *                         (Shift = bar), ↑/↓ select tracks (Shift = extend range);
+ *                         piano roll ←/→ move notes (Shift = fine ¼),
  *                         ↑/↓ transpose semitone (Shift = octave)
  *   M                     mute — selected TRACKS when only tracks are selected (group
  *                         toggle), else mute/unmute selected clips
@@ -65,6 +68,7 @@
  */
 
 import { useStore, transportBus } from "../store/store";
+import { confirmRemoveTracks } from "./trackActions";
 import type { FocusedPane, PanelsState, PoppedOutTab } from "../store/store";
 import {
   deleteClips,
@@ -101,7 +105,9 @@ import {
 } from "../components/Timeline/layout";
 import { beatsToSeconds, gridStepBeats, secondsToBeats } from "./time";
 import type { Project, Track } from "../protocol/types";
-import { isMidiClip } from "../protocol/types";
+import { isMidiClip, isViewRowKind } from "../protocol/types";
+import { ws } from "../protocol/ws";
+import { functionKeyMode, matchesDawFunctionKey } from "./functionKeys";
 
 /* ============================================================================
  * Focus-context registry
@@ -331,17 +337,43 @@ function isTransportKey(e: KeyboardEvent): boolean {
  * Default behaviours
  * ========================================================================= */
 
-/** Numpad *: arm the selected armable track(s) that aren't armed yet before recording. */
-function armSelectedTracks(): void {
+/** Numpad *: make record-arm exactly match the selected armable tracks, then record. */
+async function recordSelectedTracksExclusive(): Promise<void> {
   const s = useStore.getState();
   const p = s.project;
   if (!p) return;
-  for (const id of s.selection.trackIds) {
-    const t = p.tracks.find((tr) => tr.id === id);
-    if (!t) continue;
-    if (t.kind !== "audio" && t.kind !== "midi" && t.kind !== "instrument") continue;
-    if (!t.recordArm) fire(setTrack(t.id, { recordArm: true }));
+  // Record is start-only in the current transport contract. Never rewrite the armed
+  // set underneath an in-flight take if * is pressed a second time.
+  if (s.transport.state === "recording") return;
+  const armable = (t: Track) =>
+    t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
+  const selected = new Set(
+    p.tracks
+      .filter((t) => armable(t) && s.selection.trackIds.includes(t.id))
+      .map((t) => t.id),
+  );
+  if (selected.size === 0) {
+    showToast("Select at least one Audio, MIDI, or Instrument track to record.", "info");
+    return;
   }
+  const changes = p.tracks.filter(
+    (t) => armable(t) && t.recordArm !== selected.has(t.id),
+  );
+  if (changes.length > 0 && changes.length <= 64) {
+    await ws.requestRaw("agent/batch", {
+      expectedRevision: s.revision,
+      label: "Arm Selected Tracks",
+      operations: changes.map((t) => ({
+        type: "cmd/track.set",
+        payload: { trackId: t.id, patch: { recordArm: selected.has(t.id) } },
+      })),
+    });
+  } else {
+    // The engine caps atomic batches at 64 operations. Preserve exact semantics for
+    // unusually large projects, still awaiting every arm change before Record.
+    for (const t of changes) await setTrack(t.id, { recordArm: selected.has(t.id) });
+  }
+  await record();
 }
 
 const fire = (p: Promise<unknown>): void => {
@@ -395,7 +427,11 @@ export function loopToSelection(): void {
 
 function defaultDelete(): void {
   const { selection } = useStore.getState();
-  if (selection.clipIds.length > 0) fire(deleteClips(selection.clipIds));
+  if (selection.scope === "tracks" && selection.trackIds.length > 0)
+    void confirmRemoveTracks(selection.trackIds).catch((e) =>
+      console.warn("[keyboard] track delete failed:", e),
+    );
+  else if (selection.clipIds.length > 0) fire(deleteClips(selection.clipIds));
 }
 
 function defaultSelectAll(): void {
@@ -430,7 +466,7 @@ function selectedTracks(): Track[] {
   const s = useStore.getState();
   if (!s.project || s.selection.trackIds.length === 0) return [];
   const sel = new Set(s.selection.trackIds);
-  return s.project.tracks.filter((t) => sel.has(t.id));
+  return s.project.tracks.filter((t) => sel.has(t.id) && !isViewRowKind(t.kind));
 }
 
 /** "S": group toggle — if ANY selected track is unsoloed, solo all; else unsolo all. */
@@ -556,6 +592,20 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault();
     e.stopPropagation();
   };
+
+  const fKeyMode = functionKeyMode();
+  if (matchesDawFunctionKey(e, "F3", fKeyMode)) {
+    consume();
+    if (!e.repeat)
+      void import("../shell/reveal").then(({ toggleMixerPane }) => toggleMixerPane());
+    return;
+  }
+  if (matchesDawFunctionKey(e, "F11", fKeyMode)) {
+    consume();
+    if (!e.repeat)
+      void import("../shell/reveal").then(({ revealPane }) => revealPane("instrumentRack"));
+    return;
+  }
 
   // Layout presets (lib/layouts, UI_IMPROVE.md §6.3): Ctrl+Alt+1..4 apply,
   // Ctrl+Alt+Shift+1..4 save the current workspace into the slot.
@@ -706,11 +756,13 @@ function onKeyDown(e: KeyboardEvent): void {
       consume();
       if (!e.repeat) fire(stop());
       return;
-    case "NumpadMultiply": // record — first arm the selected track(s), Cubase-style
+    case "NumpadMultiply": // record selected track(s) exclusively
       consume();
       if (!e.repeat) {
-        armSelectedTracks();
-        fire(record());
+        void recordSelectedTracksExclusive().catch((e) => {
+          console.warn("[keyboard] record-selected failed:", e);
+          showToast(e instanceof Error ? e.message : "Could not start recording", "error");
+        });
       }
       return;
     case "NumpadDivide": // loop / cycle toggle
@@ -819,7 +871,7 @@ function onKeyDown(e: KeyboardEvent): void {
       if (e.repeat) return;
       // tracks selected and no clips → mute the TRACKS (group toggle); else clip mute
       const sel = useStore.getState().selection;
-      if (sel.trackIds.length > 0 && sel.clipIds.length === 0) {
+      if (sel.scope === "tracks" && sel.trackIds.length > 0) {
         const tracks = selectedTracks();
         if (tracks.length > 0) muteSelectedTracks(tracks);
       } else {

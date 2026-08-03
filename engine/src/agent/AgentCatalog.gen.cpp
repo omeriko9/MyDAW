@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "daf3e2cca6b776fd469a1e9726327280547b4c905cd0a45b909fa1886b953384";
+const char kAgentCatalogSha256[] = "12c28d012b2aae135a8410a97ced4097ef2fe7c51b10a5dfd2cfa6c406cf2f90";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2171,6 +2171,18 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "description": "Normalized first-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "description": "Normalized other-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -3623,6 +3635,16 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -4507,6 +4529,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
               "type": "string",
               "enum": [
                 "mixer",
+                "instrumentRack",
                 "pianoRoll",
                 "clipEditor",
                 "sheetMusic",
@@ -9703,7 +9726,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     {
       "name": "transport/setMetronome",
       "category": "transport",
-      "description": "Enable or disable the metronome and set count-in bars.",
+      "description": "Enable or disable the metronome, set count-in bars, and control first/other beat click levels.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -10121,6 +10144,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",
@@ -10138,6 +10162,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",

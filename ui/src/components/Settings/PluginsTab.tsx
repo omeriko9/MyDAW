@@ -48,7 +48,7 @@ function FolderList({
           {paths.map((p, i) => (
             <div className="sett-item" key={`${p}-${i}`}>
               <Icon name="folder" size={13} />
-              <span className="name mono" title={p} style={{ fontSize: 11 }}>
+              <span className="name mono sett-selectable-path" title={p} style={{ fontSize: 11 }}>
                 {p}
               </span>
               <IconButton icon="trash" size={20} danger tooltip="Remove folder" onClick={() => onRemove(i)} />
@@ -207,7 +207,7 @@ export function PluginsTab() {
             <span className="dim">
               {scanProgress.current}/{scanProgress.total}
             </span>
-            <span className="grow ellipsis mono dim" title={scanProgress.path}>
+            <span className="grow ellipsis mono dim sett-selectable-path" title={scanProgress.path}>
               {scanProgress.path}
             </span>
             <span className="dim">{scanProgress.found} found</span>

@@ -54,9 +54,9 @@ interface Command {
   run: () => void;
 }
 
-/** Separators AND icon rows — anything that isn't a plain, palettable item. */
-function isNonItem(e: MenuEntry): e is Exclude<MenuEntry, MenuItemDef> {
-  return typeof e === "string" || (typeof e === "object" && "type" in e);
+/** Plain clickable rows are the only context-menu entries exposed in the palette. */
+function isMenuItem(e: MenuEntry): e is MenuItemDef {
+  return typeof e === "object" && !("type" in e);
 }
 
 function flattenMenus(): Command[] {
@@ -64,7 +64,7 @@ function flattenMenus(): Command[] {
   for (const m of MENUS) {
     const walk = (entries: MenuEntry[], path: string[]): void => {
       for (const e of entries) {
-        if (isNonItem(e)) continue;
+        if (!isMenuItem(e)) continue;
         if (e.submenu && e.submenu.length > 0) {
           walk(e.submenu, [...path, e.label]);
           continue;

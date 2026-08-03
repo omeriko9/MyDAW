@@ -66,7 +66,9 @@ const fire = (p: Promise<unknown>): void => {
 function MetronomeControl() {
   // Mirror of the engine metronome state (seeded from session/hello, reconciled from
   // transport events/replies) — keeps the keyboard "C" shortcut and this control in sync.
-  const { enabled, countIn } = useStore((s) => s.metronome);
+  const { enabled, countIn, firstBeatVolume, otherBeatVolume } = useStore(
+    (s) => s.metronome,
+  );
 
   const apply = (en: boolean, ci: 0 | 1 | 2) => applyMetronome(en, ci);
 
@@ -76,6 +78,23 @@ function MetronomeControl() {
       checked: countIn === n,
       onClick: () => apply(enabled, n),
     }));
+    items.push(
+      "separator",
+      {
+        type: "slider",
+        label: "First beat",
+        value: firstBeatVolume,
+        formatValue: (v) => `${Math.round(v * 100)}%`,
+        onChange: (v) => applyMetronome(enabled, countIn, { firstBeatVolume: v }),
+      },
+      {
+        type: "slider",
+        label: "Other beats",
+        value: otherBeatVolume,
+        formatValue: (v) => `${Math.round(v * 100)}%`,
+        onChange: (v) => applyMetronome(enabled, countIn, { otherBeatVolume: v }),
+      },
+    );
     openContextMenu(x, y, items);
   };
 
@@ -535,6 +554,11 @@ export default function TransportBar() {
   const punch = project?.punch ?? transport.punch ?? { startBeat: 0, endBeat: 0, enabled: false };
   const xruns = status?.xruns ?? 0;
   const cpu = Math.round(status?.cpuPercent ?? 0);
+  const projectFileName = project
+    ? /\.mydaw$/i.test(project.name)
+      ? project.name
+      : `${project.name}.mydaw`
+    : "No project";
 
   return (
     <div className="transport-bar">
@@ -645,6 +669,12 @@ export default function TransportBar() {
           </span>
         )}
         <span
+          className="tb-project-name"
+          title={project ? `${projectFileName}${dirty ? " — unsaved changes" : ""}` : "No project loaded"}
+        >
+          {projectFileName}
+        </span>
+        <span
           className={"tb-chip mono" + (xruns > 0 || cpu >= 90 ? " warn" : "")}
           title="Engine DSP load · audio dropouts (highlighted when the engine is close to dropping out)"
         >
@@ -657,7 +687,6 @@ export default function TransportBar() {
             height={12}
             getLevels={() => metersBus.last?.master ?? null}
           />
-          <span className="tb-master-label">Master</span>
         </div>
         <IconButton
           icon="import"

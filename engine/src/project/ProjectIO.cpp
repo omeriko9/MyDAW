@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <utility>
 
@@ -74,6 +75,18 @@ std::string tempDir() {
 
 bool isTempProject(const std::string& path) {
     return pathStartsWithDir(path, tempDir());
+}
+
+// Recent entries are either foreign-project files (.cpr/.mid) or MyDAW directory
+// packages. The old regular-file-only check hid every .mydaw project.
+bool recentPathExists(const std::string& path) {
+    if (dirExists(path))
+        return fileExists(pathJoin(path, "project.json"));
+    return fileExists(path);
+}
+
+bool isMydawPackagePath(const std::string& path) {
+    return iendsWith(fileName(path), ".mydaw");
 }
 
 bool readTextFile(const std::string& path, std::string& out) {
@@ -172,6 +185,7 @@ ProjectIO::ProjectIO() {
         Log::info("ProjectIO: stale session.lock found (project: '%s') — recovery offered",
                   startupLockProjectPath_.c_str());
     }
+    migrateLegacyScratchProjects();
 }
 
 std::string ProjectIO::sessionLockPath() const {
@@ -283,6 +297,21 @@ bool ProjectIO::saveAs(Model& model, const std::string& dir, std::string& err) {
     std::string target = dir;
     if (!iendsWith(target, ".mydaw"))
         target += ".mydaw";
+
+    // A .mydaw project is itself a directory. Native file dialogs allow navigating into
+    // it, which previously produced Foo.mydaw/Foo.mydaw. Never let a project package be
+    // created anywhere below another package; the user must select its parent instead.
+    for (std::string p = parentDir(target); !p.empty();) {
+        if (isMydawPackagePath(p)) {
+            err = "cannot save a .mydaw project inside another .mydaw project folder; "
+                  "choose the parent folder instead";
+            return false;
+        }
+        const std::string next = parentDir(p);
+        if (next.empty() || iequals(next, p))
+            break;
+        p = next;
+    }
 
     const std::string oldDir = projectDir_;
     projectDir_ = target;
@@ -682,7 +711,7 @@ json ProjectIO::recentProjects() const {
         const std::string path = getOr(e, "path", "");
         // Hide entries that no longer exist on disk or live in the OS temp dir (test /
         // throwaway projects that should never have been remembered).
-        if (path.empty() || isTempProject(path) || !fileExists(path))
+        if (path.empty() || isTempProject(path) || !recentPathExists(path))
             continue;
         out.push_back(
             json{{"path", path}, {"name", getOr(e, "name", "")}, {"mtime", getOr<int64_t>(e, "mtime", 0)}});
@@ -690,6 +719,104 @@ json ProjectIO::recentProjects() const {
             break;
     }
     return out;
+}
+
+void ProjectIO::migrateLegacyScratchProjects() {
+    const std::string marker = pathJoin(appDataDir(), "recent-project-dirs-v1.migrated");
+    if (fileExists(marker))
+        return;
+
+    // Affected Save dialogs commonly stranded projects here. Scan only this narrow legacy
+    // scratch tree (not the user's profile), including the accidental one-level nesting.
+    const std::string root = pathJoin(pathJoin(appDataDir(), "media"), "audio");
+    struct Found {
+        std::string path;
+        std::string name;
+        int64_t mtime = 0;
+    };
+    std::vector<Found> found;
+    std::function<void(const std::string&, int)> scan = [&](const std::string& dir, int depth) {
+        if (depth > 4 || !dirExists(dir))
+            return;
+        const std::wstring pattern = utf8ToWide(pathJoin(dir, "*"));
+        WIN32_FIND_DATAW fd{};
+        HANDLE h = FindFirstFileW(pattern.c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE)
+            return;
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                continue;
+            const std::wstring wname(fd.cFileName);
+            if (wname == L"." || wname == L"..")
+                continue;
+            const std::string child = pathJoin(dir, wideToUtf8(wname));
+            const std::string projectJson = pathJoin(child, "project.json");
+            if (isMydawPackagePath(child) && fileExists(projectJson))
+                found.push_back(Found{child, projectNameFromDir(child),
+                                      fileMTimeSeconds(projectJson)});
+            scan(child, depth + 1);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    };
+    scan(root, 0);
+
+    std::string text;
+    json existing = json::array();
+    if (readTextFile(recentJsonPath(), text)) {
+        json parsed = parseJson(text);
+        if (parsed.is_array())
+            existing = std::move(parsed);
+    }
+
+    for (const Found& f : found) {
+        bool present = false;
+        for (const json& e : existing) {
+            if (e.is_object() &&
+                iequals(normPath(getOr(e, "path", "")), normPath(f.path))) {
+                present = true;
+                break;
+            }
+        }
+        if (!present)
+            existing.push_back(json{{"path", f.path}, {"name", f.name}, {"mtime", f.mtime}});
+    }
+
+    std::vector<json> rows;
+    for (const json& e : existing)
+        if (e.is_object())
+            rows.push_back(e);
+    std::stable_sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
+        return getOr<int64_t>(a, "mtime", 0) > getOr<int64_t>(b, "mtime", 0);
+    });
+    json repaired = json::array();
+    for (const json& e : rows) {
+        const std::string path = getOr(e, "path", "");
+        bool duplicate = false;
+        for (const json& kept : repaired)
+            if (iequals(normPath(getOr(kept, "path", "")), normPath(path))) {
+                duplicate = true;
+                break;
+            }
+        if (!duplicate && !path.empty())
+            repaired.push_back(e);
+        if (repaired.size() >= kMaxRecent)
+            break;
+    }
+
+    std::string err;
+    const bool wrote = writeTextFileAtomic(
+        recentJsonPath(), repaired.dump(2, ' ', false, json::error_handler_t::replace), err);
+    if (!wrote)
+        Log::warn("ProjectIO: cannot migrate legacy project recents (%s)", err.c_str());
+    else
+        Log::info("ProjectIO: migrated %zu legacy scratch project(s) into Open Recent",
+                  found.size());
+    if (wrote) {
+        // Marker creation is best-effort. If it fails, repeating the idempotent merge is safe.
+        std::string markerErr;
+        (void)writeTextFileAtomic(marker, "ok\n", markerErr);
+    }
 }
 
 void ProjectIO::addRecent(const std::string& path, const std::string& name) {

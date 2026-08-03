@@ -564,6 +564,10 @@ export type TransportState = "stopped" | "playing" | "recording";
 export interface MetronomeState {
   enabled: boolean;
   countInBars: number;
+  /** Normalized click gain, 0..1. Optional for compatibility with older engines. */
+  firstBeatVolume?: number;
+  /** Normalized click gain, 0..1. Optional for compatibility with older engines. */
+  otherBeatVolume?: number;
 }
 
 /* ============================================================================
@@ -1325,6 +1329,8 @@ export interface TransportLocateRequest {
 export interface SetMetronomeRequest {
   enabled: boolean;
   countInBars?: 0 | 1 | 2;
+  firstBeatVolume?: number;
+  otherBeatVolume?: number;
 }
 
 /** Every transport/* reply echoes the authoritative metronome + automation-write state. */
@@ -1896,6 +1902,10 @@ export interface PluginLoadProgressEvent {
   /** plugin display name currently being created ("" on the done event) */
   name: string;
   done: boolean;
+  /** True for project-load recreation, which can stop before the next hosted insert. */
+  cancelable?: boolean;
+  /** Present on the terminal event when the user stopped the remaining load attempts. */
+  cancelled?: boolean;
 }
 
 /** UI must surface a clear error indicator on the insert slot (SPEC §5.6). */

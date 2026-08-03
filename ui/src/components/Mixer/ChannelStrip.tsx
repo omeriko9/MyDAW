@@ -19,7 +19,6 @@ import { metersBus, useStore } from "../../store/store";
 import * as actions from "../../store/actions";
 import { hasInsertDrag, hasPluginDrag, insertDropEffectFor, readPluginDrag } from "../../lib/dnd";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
-import { confirmDialog } from "../Dialogs/confirm";
 import type { IconName } from "../common/icons";
 import { Icon } from "../common/icons";
 import { Fader, gainToDbText } from "../common/Fader";
@@ -34,6 +33,8 @@ import { InsertSlots, applyInsertAreaDrop } from "./InsertSlots";
 import { SendsBlock } from "./SendsBlock";
 import { ColorPopup } from "./popups";
 import { useGestureValue } from "./useGestureValue";
+import { selectTrack } from "../../lib/trackSelection";
+import { confirmRemoveTracks } from "../../lib/trackActions";
 
 export const KIND_ICONS: Record<TrackKind, IconName> = {
   audio: "audioWave",
@@ -151,6 +152,17 @@ function OutputSelect({ track, buses }: { track: Track; buses: Track[] }) {
 
 function StripButtons({ track }: { track: Track }) {
   const canArm = track.kind === "audio" || track.kind === "midi" || track.kind === "instrument";
+  const project = useStore((s) => s.project);
+  const selectedIds = useStore((s) => s.selection.trackIds);
+  const selected = selectedIds.includes(track.id);
+  const actionTracks = selected && selectedIds.length > 1
+    ? (project?.tracks.filter((t) => selectedIds.includes(t.id)) ?? [track])
+    : [track];
+  const toggle = (key: "mute" | "solo" | "recordArm" | "monitor", tracks: Track[]) => {
+    const next = tracks.some((t) => !Boolean(t[key]));
+    for (const t of tracks)
+      if (Boolean(t[key]) !== next) void actions.setTrack(t.id, { [key]: next });
+  };
   return (
     <div className="mxstrip-btns">
       <button
@@ -159,7 +171,7 @@ function StripButtons({ track }: { track: Track }) {
         data-on={track.mute ? "true" : undefined}
         data-variant="danger"
         title="Mute (M)"
-        onClick={() => void actions.setTrack(track.id, { mute: !track.mute })}
+        onClick={() => toggle("mute", actionTracks)}
       >
         M
       </button>
@@ -169,7 +181,7 @@ function StripButtons({ track }: { track: Track }) {
         data-on={track.solo ? "true" : undefined}
         data-variant="warn"
         title="Solo (S)"
-        onClick={() => void actions.setTrack(track.id, { solo: !track.solo })}
+        onClick={() => toggle("solo", actionTracks)}
       >
         S
       </button>
@@ -180,7 +192,14 @@ function StripButtons({ track }: { track: Track }) {
           data-on={track.recordArm ? "true" : undefined}
           data-variant="danger"
           title="Record arm"
-          onClick={() => void actions.setTrack(track.id, { recordArm: !track.recordArm })}
+          onClick={() =>
+            toggle(
+              "recordArm",
+              actionTracks.filter(
+                (t) => t.kind === "audio" || t.kind === "midi" || t.kind === "instrument",
+              ),
+            )
+          }
         >
           <Icon name="record" size={9} />
         </button>
@@ -192,7 +211,14 @@ function StripButtons({ track }: { track: Track }) {
           data-on={track.monitor ? "true" : undefined}
           data-variant="ok"
           title="Input monitor"
-          onClick={() => void actions.setTrack(track.id, { monitor: !track.monitor })}
+          onClick={() =>
+            toggle(
+              "monitor",
+              actionTracks.filter(
+                (t) => t.kind === "audio" || t.kind === "midi" || t.kind === "instrument",
+              ),
+            )
+          }
         >
           <Icon name="headphones" size={10} />
         </button>
@@ -213,6 +239,8 @@ export interface ChannelStripProps {
   /** Fader (and meter) height, sized by Mixer from the rail it has to fit in. */
   faderH: number;
   isMaster?: boolean;
+  /** Visible strip order, used for Shift range-selection. */
+  selectionOrder?: number[];
 }
 
 export const ChannelStrip = React.memo(function ChannelStrip({
@@ -221,9 +249,11 @@ export const ChannelStrip = React.memo(function ChannelStrip({
   wide,
   faderH,
   isMaster,
+  selectionOrder,
 }: ChannelStripProps) {
-  const selected = useStore((s) => s.selection.trackIds.includes(track.id));
-  const setSelection = useStore((s) => s.setSelection);
+  const project = useStore((s) => s.project);
+  const selectedIds = useStore((s) => s.selection.trackIds);
+  const selected = selectedIds.includes(track.id);
   const engineStatus = useStore((s) => s.engineStatus);
   const engineInfo = useStore((s) => s.engineInfo);
   const [colorPop, setColorPop] = useState<{ x: number; y: number } | null>(null);
@@ -299,11 +329,22 @@ export const ChannelStrip = React.memo(function ChannelStrip({
   const onStripContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!selected) setSelection({ trackIds: [track.id] });
+    if (!selected) selectTrack(track.id, selectionOrder ?? [track.id]);
     const x = e.clientX;
     const y = e.clientY;
     const set = (patch: Parameters<typeof actions.setTrack>[1]) =>
       void actions.setTrack(track.id, patch);
+    const group = selected && selectedIds.length > 1
+      ? (project?.tracks.filter((t) => selectedIds.includes(t.id)) ?? [track])
+      : [track];
+    const setGroup = (key: "mute" | "solo" | "recordArm" | "monitor") => {
+      const compatible = key === "recordArm" || key === "monitor"
+        ? group.filter((t) => t.kind === "audio" || t.kind === "midi" || t.kind === "instrument")
+        : group;
+      const next = compatible.some((t) => !Boolean(t[key]));
+      for (const t of compatible)
+        if (Boolean(t[key]) !== next) void actions.setTrack(t.id, { [key]: next });
+    };
     const items: MenuEntry[] = [];
     if (!isMaster) {
       items.push(
@@ -318,13 +359,13 @@ export const ChannelStrip = React.memo(function ChannelStrip({
         },
         { label: "Color…", onClick: () => setColorPop({ x, y }) },
         "separator",
-        { label: "Mute", shortcut: "M", checked: !!track.mute, onClick: () => set({ mute: !track.mute }) },
-        { label: "Solo", shortcut: "S", checked: !!track.solo, onClick: () => set({ solo: !track.solo }) },
+        { label: group.length > 1 ? `Mute Selected (${group.length})` : "Mute", shortcut: "M", checked: !!track.mute, onClick: () => setGroup("mute") },
+        { label: group.length > 1 ? `Solo Selected (${group.length})` : "Solo", shortcut: "S", checked: !!track.solo, onClick: () => setGroup("solo") },
       );
       if (canArm) {
         items.push(
-          { label: "Record Arm", checked: !!track.recordArm, onClick: () => set({ recordArm: !track.recordArm }) },
-          { label: "Input Monitor", checked: !!track.monitor, onClick: () => set({ monitor: !track.monitor }) },
+          { label: group.length > 1 ? "Record Arm Selected" : "Record Arm", checked: !!track.recordArm, onClick: () => setGroup("recordArm") },
+          { label: group.length > 1 ? "Monitor Selected" : "Input Monitor", checked: !!track.monitor, onClick: () => setGroup("monitor") },
         );
       }
     }
@@ -354,21 +395,14 @@ export const ChannelStrip = React.memo(function ChannelStrip({
       }
       items.push(
         "separator",
-        { label: "Duplicate Track", icon: "plus", onClick: () => void actions.duplicateTrack(track.id) },
+        { label: group.length > 1 ? `Duplicate ${group.length} Selected Tracks` : "Duplicate Track", icon: "plus", onClick: () => {
+          for (const t of group) void actions.duplicateTrack(t.id);
+        } },
         {
-          label: "Delete Track",
+          label: group.length > 1 ? `Delete ${group.length} Selected Tracks` : "Delete Track",
           icon: "trash",
           danger: true,
-          onClick: () => {
-            void confirmDialog({
-              title: "Delete track",
-              message: `Delete "${track.name}"${track.clips.length > 0 ? ` and its ${track.clips.length} clip${track.clips.length === 1 ? "" : "s"}` : ""}? This can be undone.`,
-              confirmLabel: "Delete",
-              danger: true,
-            }).then((ok) => {
-              if (ok) void actions.removeTrack(track.id);
-            });
-          },
+          onClick: () => void confirmRemoveTracks(group.map((t) => t.id)),
         },
       );
     } else {
@@ -392,8 +426,14 @@ export const ChannelStrip = React.memo(function ChannelStrip({
         (dropActive ? " drop-active" : "")
       }
       style={{ width }}
-      onPointerDown={() => {
-        if (!selected) setSelection({ trackIds: [track.id] });
+      onPointerDown={(e) => {
+        if (isMaster || (e.target as HTMLElement).closest("button, input, select")) return;
+        const toggle = e.ctrlKey || e.metaKey;
+        selectTrack(track.id, selectionOrder ?? [track.id], {
+          toggle: toggle && !e.shiftKey,
+          range: e.shiftKey,
+          additiveRange: toggle && e.shiftKey,
+        });
       }}
       onContextMenu={onStripContextMenu}
       onDragEnter={onDragEnter}

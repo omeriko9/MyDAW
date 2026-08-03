@@ -54,7 +54,24 @@ export interface MenuIconRow {
   buttons: MenuIconDef[];
 }
 
-export type MenuEntry = MenuItemDef | { type: "separator" } | "separator" | MenuIconRow;
+/** Inline range control that stays open while it is adjusted. */
+export interface MenuSliderDef {
+  type: "slider";
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  formatValue?: (value: number) => string;
+  onChange: (value: number) => void;
+}
+
+export type MenuEntry =
+  | MenuItemDef
+  | { type: "separator" }
+  | "separator"
+  | MenuIconRow
+  | MenuSliderDef;
 
 function isSep(e: MenuEntry): e is "separator" | { type: "separator" } {
   return e === "separator" || (typeof e === "object" && "type" in e && e.type === "separator");
@@ -62,6 +79,10 @@ function isSep(e: MenuEntry): e is "separator" | { type: "separator" } {
 
 function isIcons(e: MenuEntry): e is MenuIconRow {
   return typeof e === "object" && "type" in e && e.type === "icons";
+}
+
+function isSlider(e: MenuEntry): e is MenuSliderDef {
+  return typeof e === "object" && "type" in e && e.type === "slider";
 }
 
 /** Regular activatable/highlightable entry (not a separator or icon row). */
@@ -390,6 +411,7 @@ function MenuList({
             </div>
           );
         }
+        if (isSlider(it)) return <MenuSlider key={i} item={it} />;
         const hi = i === level.hi;
         const cls =
           "ctx-item" +
@@ -426,5 +448,35 @@ function MenuList({
         );
       })}
     </div>
+  );
+}
+
+function MenuSlider({ item }: { item: MenuSliderDef }) {
+  const min = item.min ?? 0;
+  const max = item.max ?? 1;
+  const step = item.step ?? 0.01;
+  const [value, setValue] = useState(item.value);
+  const shown = item.formatValue?.(value) ?? String(value);
+  return (
+    <label className="ctx-slider" onKeyDown={(e) => e.stopPropagation()}>
+      <span className="ctx-slider-head">
+        <span>{item.label}</span>
+        <span className="ctx-slider-value">{shown}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={item.label}
+        aria-valuetext={shown}
+        onChange={(e) => {
+          const next = Number(e.currentTarget.value);
+          setValue(next);
+          item.onChange(next);
+        }}
+      />
+    </label>
   );
 }

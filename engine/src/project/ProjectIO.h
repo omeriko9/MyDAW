@@ -111,6 +111,9 @@ public:
     std::string resolveAssetPath(const Asset& a) const;
 
 private:
+    // One-time repair for builds that wrote valid .mydaw directory entries and then
+    // discarded them as "missing" because recentProjects used a regular-file check.
+    void migrateLegacyScratchProjects();
     bool saveInternal(Model& model, const std::string& assetSourceDir, std::string& err);
     // Writes each insert's state chunk to <targetDir>/plugin-states/<id>.bin. A live host's
     // getState wins; otherwise the in-RAM orphan bytes are written (the orphan entry is KEPT

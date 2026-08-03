@@ -1,0 +1,23 @@
+.ir-root { display:flex; flex-direction:column; height:100%; min-height:0; color:var(--text); background:var(--panel); }
+.ir-toolbar { min-height:36px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 8px; border-bottom:1px solid var(--border); }
+.ir-title { display:flex; align-items:center; gap:7px; font-weight:600; }
+.ir-count { min-width:20px; padding:1px 6px; border-radius:9px; text-align:center; font-size:11px; color:var(--text-dim); background:var(--surface-2); }
+.ir-add { display:flex; align-items:center; gap:5px; }
+.ir-head, .ir-row { display:grid; grid-template-columns:minmax(220px, 2fr) minmax(90px, .7fr) minmax(80px, .7fr) minmax(150px, 1fr) 100px; gap:10px; align-items:center; }
+.ir-head { padding:5px 12px; color:var(--text-dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
+.ir-list { min-height:0; overflow:auto; }
+.ir-row { min-height:54px; padding:6px 12px; border-bottom:1px solid var(--border-subtle, var(--border)); cursor:default; }
+.ir-row:hover { background:var(--surface-hover); }
+.ir-row.selected { background:color-mix(in srgb, var(--accent) 13%, transparent); }
+.ir-host { min-width:0; display:flex; align-items:center; gap:8px; }
+.ir-color { width:3px; height:32px; border-radius:2px; flex:0 0 auto; }
+.ir-host-text { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ir-host-text strong, .ir-host-text small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ir-host-text small, .ir-feeders, .ir-channels { color:var(--text-dim); }
+.ir-badge { margin-left:auto; padding:2px 5px; border:1px solid var(--border); border-radius:3px; color:var(--text-dim); font-size:10px; }
+.ir-open { white-space:nowrap; }
+.ir-empty { flex:1; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--text-dim); text-align:center; }
+@media (max-width: 720px) {
+  .ir-head, .ir-row { grid-template-columns:minmax(180px, 2fr) 80px minmax(120px, 1fr) 92px; }
+  .ir-head > :nth-child(3), .ir-row > :nth-child(3) { display:none; }
+}

@@ -374,13 +374,13 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
 
       {isMidi && (
         <div className="insp-row">
-          <span className="insp-label">MIDI Out</span>
+          <span className="insp-label">Instrument</span>
           <Select
             className="grow"
             value={midiOutValue}
             options={midiOutOptions}
             onChange={(v) => void setTrack(id, { midiTarget: Number(v) })}
-            title="Route this track's MIDI into a shared instrument track"
+            title="Internal instrument destination — several MIDI tracks may share one instance"
           />
         </div>
       )}
@@ -400,7 +400,7 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
 
       {(isMidi || isInstrument) && (
         <div className="insp-row">
-          <span className="insp-label">MIDI Out</span>
+          <span className="insp-label">MIDI Device</span>
           <Select
             className="grow"
             value={track.midiOutDevice ?? ""}

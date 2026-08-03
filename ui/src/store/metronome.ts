@@ -8,9 +8,13 @@
 import { reconcileMetronome, useStore } from "./store";
 import { setMetronome as wsSetMetronome } from "./actions";
 
-export function applyMetronome(enabled: boolean, countIn: 0 | 1 | 2): void {
-  useStore.getState().setMetronome({ enabled, countIn }); // optimistic
-  wsSetMetronome(enabled, countIn)
+export function applyMetronome(
+  enabled: boolean,
+  countIn: 0 | 1 | 2,
+  volumes: { firstBeatVolume?: number; otherBeatVolume?: number } = {},
+): void {
+  useStore.getState().setMetronome({ enabled, countIn, ...volumes }); // optimistic
+  wsSetMetronome(enabled, countIn, volumes)
     .then((r) => reconcileMetronome(r.metronome))
     .catch((e) => console.warn("[metronome] failed:", e));
 }

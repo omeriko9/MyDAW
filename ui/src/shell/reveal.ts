@@ -79,3 +79,53 @@ export function revealPane(pane: PaneId): void {
   };
   useStore.getState().setWorkspaces({ ...w, list: [...w.list, ws], activeId: ws.id });
 }
+
+/** F3 semantics: toggle the Mixer dock in Classic; switch to/from it in other shells. */
+export function toggleMixerPane(): void {
+  const s = useStore.getState();
+  if (s.shellMode === "classic") {
+    const p = s.panels;
+    if (p.bottomTab === "mixer") {
+      if (p.bottomTab2 !== null)
+        s.setPanels({ bottomTab: p.bottomTab2, bottomTab2: null });
+      else s.setPanels({ bottomTab: null });
+    } else if (p.bottomTab2 === "mixer") {
+      s.setPanels({ bottomTab2: null });
+    } else {
+      s.setPanels({ bottomTab: "mixer" });
+    }
+    return;
+  }
+
+  if (s.shellMode === "ribbon") {
+    const r = s.ribbon;
+    if (r.primary === "mixer") {
+      if (r.secondary !== null) {
+        const next = r.secondary;
+        s.setRibbon({
+          category: RIBBON_PANE_CATEGORY[next] ?? "view",
+          primary: next,
+          secondary: null,
+        });
+      } else {
+        s.setRibbon({ category: "arrange", primary: "timeline", secondary: null });
+      }
+    } else if (r.secondary === "mixer") {
+      s.setRibbon({ secondary: null });
+    } else {
+      revealPane("mixer");
+    }
+    return;
+  }
+
+  const w = s.workspaces;
+  const active = w.list.find((x) => x.id === w.activeId);
+  if (active && tileLeaves(active.root).includes("mixer")) {
+    const fallback =
+      w.list.find((x) => x.id !== active.id && tileLeaves(x.root).includes("timeline")) ??
+      w.list.find((x) => x.id !== active.id && !tileLeaves(x.root).includes("mixer"));
+    if (fallback) s.setWorkspaces({ ...w, activeId: fallback.id });
+  } else {
+    revealPane("mixer");
+  }
+}

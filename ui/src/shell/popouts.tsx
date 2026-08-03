@@ -21,6 +21,7 @@ export const POPOUT_DEFS: Record<
   { label: string; title: string; width: number; height: number }
 > = {
   mixer: { label: "Mixer", title: "MyDAW — Mixer", width: 1100, height: 420 },
+  instrumentRack: { label: "Instrument Rack", title: "MyDAW — Instrument Rack", width: 1000, height: 480 },
   pianoRoll: { label: "Piano Roll", title: "MyDAW — Piano Roll", width: 1100, height: 560 },
   clipEditor: { label: "Clip Editor", title: "MyDAW — Clip Editor", width: 1100, height: 420 },
   sheetMusic: { label: "Sheet Music", title: "MyDAW — Sheet Music", width: 1000, height: 700 },
@@ -91,6 +92,11 @@ export function PopoutProvider({ children }: { children: React.ReactNode }) {
       name: "MyDAW-mixer",
       ...POPOUT_DEFS.mixer,
       onClosed: () => setPoppedOut("mixer", false),
+    }),
+    instrumentRack: usePopoutWindow({
+      name: "MyDAW-instrumentRack",
+      ...POPOUT_DEFS.instrumentRack,
+      onClosed: () => setPoppedOut("instrumentRack", false),
     }),
     pianoRoll: usePopoutWindow({
       name: "MyDAW-pianoRoll",

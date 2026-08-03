@@ -30,11 +30,12 @@ public:
                           std::vector<std::string>& outPaths);
 
     // Save dialog. defaultExt without dot ("wav", "mydaw"); defaultName pre-fills the
-    // file-name box ("" = none). False on cancel/failure.
+    // file-name box ("" = none). initialFolder, when non-empty and present, overrides
+    // Windows' cross-dialog remembered location. False on cancel/failure.
     static bool saveFile(const std::string& title,
                          const std::vector<FileDialogFilter>& filters,
                          const std::string& defaultExt, const std::string& defaultName,
-                         std::string& outPath);
+                         std::string& outPath, const std::string& initialFolder = "");
 };
 
 } // namespace mydaw

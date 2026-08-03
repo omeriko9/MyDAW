@@ -127,6 +127,14 @@
   white-space: nowrap;
 }
 
+/* The app shell disables selection globally. Paths are useful outside MyDAW, so
+   allow selecting them for the browser's native Ctrl+C behavior. */
+.sett-selectable-path {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
 .sett-subhead {
   color: var(--text-dim);
   font-size: 10px;

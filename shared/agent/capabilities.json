@@ -2163,6 +2163,18 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "description": "Normalized first-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "description": "Normalized other-beat click gain, 0..1.",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -3615,6 +3627,16 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "firstBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        "otherBeatVolume": {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
         }
       },
       "required": [
@@ -4499,6 +4521,7 @@
               "type": "string",
               "enum": [
                 "mixer",
+                "instrumentRack",
                 "pianoRoll",
                 "clipEditor",
                 "sheetMusic",
@@ -9695,7 +9718,7 @@
     {
       "name": "transport/setMetronome",
       "category": "transport",
-      "description": "Enable or disable the metronome and set count-in bars.",
+      "description": "Enable or disable the metronome, set count-in bars, and control first/other beat click levels.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -10113,6 +10136,7 @@
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",
@@ -10130,6 +10154,7 @@
                 "type": "string",
                 "enum": [
                   "mixer",
+                  "instrumentRack",
                   "pianoRoll",
                   "clipEditor",
                   "sheetMusic",

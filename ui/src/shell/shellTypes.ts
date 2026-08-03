@@ -25,6 +25,7 @@ export const SHELL_MODES: Array<{ value: ShellMode; label: string }> = [
 export type PaneId =
   | "timeline"
   | "mixer"
+  | "instrumentRack"
   | "pianoRoll"
   | "clipEditor"
   | "sheetMusic"
@@ -37,6 +38,7 @@ export type DockPaneId = Exclude<PaneId, "timeline">;
 export const PANE_IDS: PaneId[] = [
   "timeline",
   "mixer",
+  "instrumentRack",
   "pianoRoll",
   "clipEditor",
   "sheetMusic",
@@ -46,6 +48,7 @@ export const PANE_IDS: PaneId[] = [
 export const PANE_LABELS: Record<PaneId, string> = {
   timeline: "Arrangement",
   mixer: "Mixer",
+  instrumentRack: "Instrument Rack",
   pianoRoll: "Piano Roll",
   clipEditor: "Clip Editor",
   sheetMusic: "Sheet Music",
@@ -84,6 +87,7 @@ export const RIBBON_PANE_CATEGORY: Partial<Record<PaneId, RibbonCategory>> = {
   timeline: "arrange",
   pianoRoll: "edit",
   mixer: "mix",
+  instrumentRack: "mix",
   sheetMusic: "score",
   visualizer: "visualize",
 };

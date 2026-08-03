@@ -5,7 +5,6 @@
  * Semantics (mirrors Cubase's mental model):
  *  - instrument track: replace its instrument insert in place (add at the same
  *    index, then remove the old instance — the SPEC §5.6 no-replace-command idiom);
- *  - routed MIDI track: the instrument lives on the HOST — replace it there;
  *  - unrouted MIDI track: create an Instrument track named after the plugin,
  *    load it, and point the feeder's midiTarget at it.
  *
@@ -15,7 +14,8 @@
 
 import { useStore } from "../../store/store";
 import { addPlugin, addTrack, removePlugin, setTrack } from "../../store/actions";
-import type { PluginInfo, Track } from "../../protocol/types";
+import type { PluginInfo, Project, Track } from "../../protocol/types";
+import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 
 function liveTrack(trackId: number): Track | undefined {
   return useStore.getState().project?.tracks.find((t) => t.id === trackId);
@@ -38,6 +38,26 @@ export function instrumentInsertOfTrack(t: Track) {
   return undefined;
 }
 
+/** MIDI feeders currently sharing an instrument host. */
+export function instrumentFeeders(project: Project, hostId: number): Track[] {
+  return project.tracks.filter((t) => t.kind === "midi" && t.midiTarget === hostId);
+}
+
+/** Route a MIDI track to an existing host (0 disconnects it). */
+export function routeMidiToInstrument(feederId: number, hostId: number): void {
+  void setTrack(feederId, { midiTarget: hostId }).catch((e) =>
+    console.warn("[timeline] instrument routing failed:", e),
+  );
+}
+
+/** Create one instrument host and return it after the plug-in has been loaded. */
+export async function createInstrumentHost(p: PluginInfo): Promise<Track> {
+  const { track: inst } = await addTrack("instrument");
+  await setTrack(inst.id, { name: p.name });
+  await addPlugin(inst.id, p.uid);
+  return liveTrack(inst.id) ?? { ...inst, name: p.name };
+}
+
 /** Replace (or set) the instrument ON `trackId` (an instrument track). */
 export function replaceInstrumentOn(trackId: number, p: PluginInfo): void {
   const live = liveTrack(trackId);
@@ -54,32 +74,62 @@ export function replaceInstrumentOn(trackId: number, p: PluginInfo): void {
 /** Unrouted MIDI track: create an Instrument track hosting `p` and route into it. */
 export function assignInstrumentToFeeder(feederId: number, p: PluginInfo): void {
   void (async () => {
-    const { track: inst } = await addTrack("instrument");
-    await setTrack(inst.id, { name: p.name });
-    await addPlugin(inst.id, p.uid);
+    const inst = await createInstrumentHost(p);
     await setTrack(feederId, { midiTarget: inst.id });
   })().catch((e) => console.warn("[timeline] assign instrument failed:", e));
 }
 
 /**
- * Give an INSTRUMENT plugin to any track that can take one. Returns false when the
- * combination makes no sense (effect plugin, or a frozen target) so callers can
- * fall back to their default behavior / explain via toast.
+ * Safe Browser-drop chooser for a MIDI track. Reusing an already-loaded matching
+ * instance is first-class; creating a private instance is the non-destructive choice.
+ * Replacing a shared host remains available, but explicitly names its blast radius.
  */
-export function assignInstrumentToTrack(t: Track, p: PluginInfo): boolean {
+export function openInstrumentDropChoices(
+  feederId: number,
+  p: PluginInfo,
+  x: number,
+  y: number,
+): boolean {
   if (!p.isInstrument) return false;
-  if (t.kind === "instrument") {
-    if (t.frozen) return false;
-    replaceInstrumentOn(t.id, p);
-    return true;
+  const project = useStore.getState().project;
+  const feeder = project?.tracks.find((t) => t.id === feederId);
+  if (!project || !feeder || feeder.kind !== "midi") return false;
+  const current = feeder.midiTarget
+    ? project.tracks.find((t) => t.id === feeder.midiTarget && t.kind === "instrument")
+    : undefined;
+  const matching = project.tracks.filter(
+    (t) => t.kind === "instrument" && instrumentInsertOfTrack(t)?.uid === p.uid,
+  );
+  const items: MenuEntry[] = [
+    { label: `Use ${p.name}`, disabled: true },
+    ...matching.map((host): MenuEntry => ({
+      label: `${host.name} · existing instance`,
+      icon: "link",
+      checked: current?.id === host.id,
+      onClick: () => routeMidiToInstrument(feeder.id, host.id),
+    })),
+    ...(matching.length > 0 ? (["separator"] as MenuEntry[]) : []),
+    {
+      label: "Create new instance for this track",
+      icon: "plus",
+      onClick: () => assignInstrumentToFeeder(feeder.id, p),
+    },
+  ];
+  const currentInsert = current ? instrumentInsertOfTrack(current) : undefined;
+  if (current && currentInsert?.uid !== p.uid) {
+    const count = instrumentFeeders(project, current.id).length;
+    items.push(
+      "separator",
+      {
+        label: `Replace ${current.name} for ${count} MIDI track${count === 1 ? "" : "s"}`,
+        icon: "warning",
+        danger: true,
+        disabled: !!current.frozen,
+        title: current.frozen ? "Unfreeze the instrument host first" : undefined,
+        onClick: () => replaceInstrumentOn(current.id, p),
+      },
+    );
   }
-  if (t.kind !== "midi") return false;
-  const host = t.midiTarget ? liveTrack(t.midiTarget) : undefined;
-  if (host) {
-    if (host.frozen) return false;
-    replaceInstrumentOn(host.id, p);
-  } else {
-    assignInstrumentToFeeder(t.id, p);
-  }
+  openContextMenu(x, y, items);
   return true;
 }

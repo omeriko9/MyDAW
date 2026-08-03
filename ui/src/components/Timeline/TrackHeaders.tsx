@@ -25,7 +25,6 @@ import {
   deleteTrackVersion,
   duplicateTrack,
   removePlugin,
-  removeTrack,
   renameTrackVersion,
   reorderTrack,
   setAutomation,
@@ -37,8 +36,10 @@ import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isPluginFavorite, loadPluginFavorites, pluginKey } from "../../lib/ids";
 import {
   assignInstrumentToFeeder,
-  assignInstrumentToTrack,
+  instrumentFeeders,
+  openInstrumentDropChoices,
   replaceInstrumentOn,
+  routeMidiToInstrument,
 } from "./instrumentAssign";
 import {
   hasAssetDrag,
@@ -49,6 +50,8 @@ import {
 } from "../../lib/dnd";
 import { extensionOf, projectOnlyExtensions } from "../Transport/projectFlows";
 import { loadPref, numberIn, usePrefState } from "../../lib/prefs";
+import { selectTrack } from "../../lib/trackSelection";
+import { confirmRemoveTracks } from "../../lib/trackActions";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
@@ -62,6 +65,7 @@ import { Toggle } from "../common/Toggle";
 import { IconButton } from "../common/IconButton";
 import { ColorPopover, FloatingInput } from "./bits";
 import {
+  DEFAULT_TRACK_H,
   MIN_TRACK_H,
   MAX_TRACK_H,
   RULER_H,
@@ -357,18 +361,17 @@ export default function TrackHeaders({
     if (!d || !project) return;
 
     if (!d.started) {
-      // plain click → select track (ctrl toggles)
+      // Plain click selects one; Ctrl/Cmd toggles; Shift selects the visible range
+      // from the stable anchor; Ctrl/Cmd+Shift adds that range.
       // setSelection MERGES: a surviving clip selection would send M/S-style keys down the
       // clip branch instead of the tracks just clicked, so BOTH branches replace the whole
       // selection — building a multi-track selection with ctrl is no different.
-      if (e.ctrlKey || e.metaKey) {
-        const ids = selection.trackIds.includes(row.track.id)
-          ? selection.trackIds.filter((id) => id !== row.track.id)
-          : [...selection.trackIds, row.track.id];
-        setSelection({ trackIds: ids, clipIds: [], noteIds: [] });
-      } else {
-        setSelection({ trackIds: [row.track.id], clipIds: [], noteIds: [] });
-      }
+      const toggle = e.ctrlKey || e.metaKey;
+      selectTrack(
+        row.track.id,
+        trackRows.map((r) => r.track.id),
+        { toggle: toggle && !e.shiftKey, range: e.shiftKey, additiveRange: toggle && e.shiftKey },
+      );
       return;
     }
 
@@ -475,11 +478,8 @@ export default function TrackHeaders({
       if (t.frozen) return;
       const info = registry.find((r) => r.uid === plug.uid);
       if (t.kind === "midi") {
-        // Same semantics as the header dropdown: an instrument dropped on a MIDI
-        // channel lands on its HOST (or creates + routes one when unrouted).
         if (info?.isInstrument) {
-          if (!assignInstrumentToTrack(t, info))
-            showToast("The target instrument track is frozen — unfreeze it first.", "info");
+          openInstrumentDropChoices(t.id, info, e.clientX, e.clientY);
         } else {
           showToast(
             "MIDI tracks can't host effect plugins — drop it on an instrument or audio track.",
@@ -785,7 +785,54 @@ export default function TrackHeaders({
    * this track's MIDI into it — "assign a VST to a midi channel" in one gesture.
    */
   const openFeederAssignPicker = (t: Track, x: number, y: number): void => {
-    openContextMenu(x, y, instrumentMenuItems(undefined, (p) => assignInstrumentToFeeder(t.id, p)));
+    const liveProject = useStore.getState().project;
+    if (!liveProject) return;
+    const hosts = liveProject.tracks.filter((x) => x.kind === "instrument");
+    const liveFeeder = liveProject.tracks.find((x) => x.id === t.id) ?? t;
+    const currentTarget = liveProject.tracks.find((x) => x.id === liveFeeder.midiTarget);
+    const existing: MenuEntry[] = hosts.map((host) => {
+      const ins = instrumentInsertOf(host);
+      const feeders = instrumentFeeders(liveProject, host.id).length;
+      return {
+        label: `${host.name}${ins ? ` · ${ins.name}` : " · no VST"} · ${feeders} track${feeders === 1 ? "" : "s"}`,
+        icon: "piano",
+        checked: currentTarget?.id === host.id,
+        onClick: () => routeMidiToInstrument(t.id, host.id),
+      };
+    });
+    openContextMenu(x, y, [
+      {
+        label: "None",
+        checked: !currentTarget,
+        onClick: () => routeMidiToInstrument(t.id, 0),
+      },
+      ...(existing.length > 0
+        ? (["separator", { label: "Existing Instruments", submenu: existing }] as MenuEntry[])
+        : []),
+      "separator",
+      {
+        label: "New Instrument…",
+        icon: "plus",
+        submenu: instrumentMenuItems(undefined, (p) => assignInstrumentToFeeder(t.id, p)),
+      },
+      "separator",
+      {
+        label: `MIDI Channel · ${liveFeeder.midiOutChannel ? liveFeeder.midiOutChannel : "Any"}`,
+        submenu: [
+          {
+            label: "Any (as played)",
+            checked: !liveFeeder.midiOutChannel,
+            onClick: () => void setTrack(t.id, { midiOutChannel: 0 }),
+          },
+          "separator",
+          ...Array.from({ length: 16 }, (_, i): MenuEntry => ({
+            label: `Channel ${i + 1}`,
+            checked: liveFeeder.midiOutChannel === i + 1,
+            onClick: () => void setTrack(t.id, { midiOutChannel: i + 1 }),
+          })),
+        ],
+      },
+    ]);
   };
 
   /* ------------------------------------------------------------ context menu */
@@ -806,17 +853,23 @@ export default function TrackHeaders({
     const y = e.clientY;
     const freezable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
     const viewRow = isViewRowKind(t.kind);
+    const group = selection.trackIds.includes(t.id) && selection.trackIds.length > 1
+      ? (project?.tracks.filter((x) => selection.trackIds.includes(x.id)) ?? [t])
+      : [t];
     const items: MenuEntry[] = [
       { label: "Add Track", icon: "plus", submenu: addTrackMenuItems(row.flatIndex + 1) },
       "separator",
       { label: "Rename…", icon: "pencil", onClick: () => openRename(t, x, y) },
       { label: "Color…", onClick: () => openColor(t, x, y) },
       {
-        label: "Duplicate Track",
+        label: group.length > 1 ? `Duplicate ${group.length} Selected Tracks` : "Duplicate Track",
         // one view row of each kind per project — the engine refuses a second one
         disabled: viewRow,
         title: viewRow ? "View-row tracks cannot be duplicated (max one per project)" : undefined,
-        onClick: () => fire(duplicateTrack(t.id)),
+        onClick: () => {
+          for (const track of group)
+            if (!isViewRowKind(track.kind)) fire(duplicateTrack(track.id));
+        },
       },
     ];
     if (versionable(t))
@@ -851,19 +904,10 @@ export default function TrackHeaders({
       });
     }
     items.push("separator", {
-      label: "Delete Track",
+      label: group.length > 1 ? `Delete ${group.length} Selected Tracks` : "Delete Track",
       icon: "trash",
       danger: true,
-      onClick: () => {
-        void confirmDialog({
-          title: "Delete track",
-          message: `Delete "${t.name}"${t.clips.length > 0 ? ` and its ${t.clips.length} clip${t.clips.length === 1 ? "" : "s"}` : ""}? This can be undone.`,
-          confirmLabel: "Delete",
-          danger: true,
-        }).then((ok) => {
-          if (ok) fire(removeTrack(t.id));
-        });
-      },
+      onClick: () => void confirmRemoveTracks(group.map((x) => x.id)),
     });
     openContextMenu(x, y, items);
   };
@@ -873,6 +917,17 @@ export default function TrackHeaders({
   const renderRow = (row: TrackRowL) => {
     const t = row.track;
     const selected = selection.trackIds.includes(t.id);
+    const actionTracks = selected && selection.trackIds.length > 1
+      ? (project?.tracks.filter((x) => selection.trackIds.includes(x.id)) ?? [t])
+      : [t];
+    const groupToggle = (key: "mute" | "solo" | "recordArm" | "monitor", tracks: Track[]) => {
+      const compatible = key === "mute" || key === "solo"
+        ? tracks.filter((x) => !isViewRowKind(x.kind))
+        : tracks;
+      const next = compatible.some((x) => !Boolean(x[key]));
+      for (const x of compatible)
+        if (Boolean(x[key]) !== next) fire(setTrack(x.id, { [key]: next }));
+    };
     const showControls = row.height >= 44;
     const indent = 6 + row.depth * 14;
     const armable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
@@ -978,7 +1033,7 @@ export default function TrackHeaders({
           <div className="tlh-row-controls" style={{ paddingLeft: indent }}>
             <Toggle
               on={t.mute}
-              onChange={(v) => fire(setTrack(t.id, { mute: v }))}
+              onChange={() => groupToggle("mute", actionTracks)}
               variant="danger"
               className="tlh-btn"
               tooltip="Mute (M)"
@@ -987,7 +1042,7 @@ export default function TrackHeaders({
             </Toggle>
             <Toggle
               on={t.solo}
-              onChange={(v) => fire(setTrack(t.id, { solo: v }))}
+              onChange={() => groupToggle("solo", actionTracks)}
               variant="warn"
               className="tlh-btn"
               tooltip="Solo (S)"
@@ -997,7 +1052,14 @@ export default function TrackHeaders({
             {armable && (
               <Toggle
                 on={t.recordArm}
-                onChange={(v) => fire(setTrack(t.id, { recordArm: v }))}
+                onChange={() =>
+                  groupToggle(
+                    "recordArm",
+                    actionTracks.filter(
+                      (x) => x.kind === "audio" || x.kind === "midi" || x.kind === "instrument",
+                    ),
+                  )
+                }
                 variant="danger"
                 className="tlh-btn"
                 tooltip="Record arm"
@@ -1008,7 +1070,7 @@ export default function TrackHeaders({
             {t.kind === "audio" && (
               <Toggle
                 on={t.monitor === true}
-                onChange={(v) => fire(setTrack(t.id, { monitor: v }))}
+                onChange={() => groupToggle("monitor", actionTracks.filter((x) => x.kind === "audio"))}
                 variant="ok"
                 className="tlh-btn"
                 icon="headphones"
@@ -1070,31 +1132,27 @@ export default function TrackHeaders({
               <button
                 type="button"
                 className="tlh-inst-btn"
-                disabled={!!midiHost.frozen}
                 title={
                   midiHost.frozen
-                    ? `Plays through "${midiHost.name}" (frozen — unfreeze to change)`
-                    : `Plays through "${midiHost.name}" — click to change its instrument, double-click to open its editor`
+                    ? `Plays through "${midiHost.name}" (frozen host)`
+                    : `Plays through "${midiHost.name}" — click to choose a destination, double-click to open its editor`
                 }
                 onClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  deferInstClick(() => openInstrumentPicker(midiHost, r.left, r.bottom + 2));
+                  deferInstClick(() => openFeederAssignPicker(t, r.left, r.bottom + 2));
                 }}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   openInstrumentEditor(midiHost, () =>
-                    openInstrumentPicker(midiHost, r.left, r.bottom + 2),
+                    openFeederAssignPicker(t, r.left, r.bottom + 2),
                   );
                 }}
               >
                 <Icon name="piano" size={11} />
                 <span className="tlh-inst-name">
-                  {`→ ${midiHost.name}${(() => {
-                    const ins = instrumentInsertOf(midiHost);
-                    return ins ? `: ${ins.name}` : "";
-                  })()}`}
+                  {`→ ${midiHost.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`}
                 </span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
@@ -1104,7 +1162,7 @@ export default function TrackHeaders({
               <button
                 type="button"
                 className="tlh-inst-btn"
-                title="This MIDI track has no instrument — pick one to create and route it"
+                title="Choose an existing instrument instance or create a new one"
                 onClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1112,7 +1170,7 @@ export default function TrackHeaders({
                 }}
               >
                 <Icon name="piano" size={11} />
-                <span className="tlh-inst-name">Assign instrument…</span>
+                <span className="tlh-inst-name">Instrument destination…</span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
             )}
@@ -1223,6 +1281,18 @@ export default function TrackHeaders({
           // no mixer strip and stay out of it. S doubles as the "clear all solos"
           // button — with solos active one click un-solos everything.
           const mixerTracks = (project?.tracks ?? []).filter((t) => !isViewRowKind(t.kind));
+          const selectedIds = new Set(selection.trackIds);
+          const heightTargets = selectedIds.size > 0
+            ? mixerTracks.filter((t) => selectedIds.has(t.id))
+            : mixerTracks;
+          const folderTargets = (project?.tracks ?? []).filter(
+            (t) => t.kind === "folder" && (selectedIds.size === 0 || selectedIds.has(t.id)),
+          );
+          const allFoldersCollapsed =
+            folderTargets.length > 0 && folderTargets.every((t) => collapsedFolders.has(t.id));
+          const allCompact =
+            heightTargets.length > 0 &&
+            heightTargets.every((t) => (t.height ?? DEFAULT_TRACK_H) <= MIN_TRACK_H);
           const anyUnmuted = mixerTracks.some((t) => !t.mute);
           const anySolo = mixerTracks.some((t) => t.solo);
           const muteAll = () => {
@@ -1234,8 +1304,50 @@ export default function TrackHeaders({
             for (const t of mixerTracks)
               if (t.solo !== solo) fire(setTrack(t.id, { solo }));
           };
+          const toggleCompact = () => {
+            const height = allCompact ? DEFAULT_TRACK_H : MIN_TRACK_H;
+            for (const t of heightTargets)
+              if ((t.height ?? DEFAULT_TRACK_H) !== height) fire(setTrack(t.id, { height }));
+          };
+          const toggleFolders = () => {
+            for (const t of folderTargets) {
+              if (collapsedFolders.has(t.id) === allFoldersCollapsed) onToggleFolder(t.id);
+            }
+          };
           return (
             <>
+              <IconButton
+                icon="folder"
+                size={20}
+                active={allFoldersCollapsed}
+                disabled={folderTargets.length === 0}
+                tooltip={
+                  selectedIds.size > 0
+                    ? allFoldersCollapsed
+                      ? "Expand selected group tracks"
+                      : "Collapse selected group tracks"
+                    : allFoldersCollapsed
+                      ? "Expand all group tracks"
+                      : "Collapse all group tracks"
+                }
+                onClick={toggleFolders}
+              />
+              <IconButton
+                icon={allCompact ? "chevronDown" : "chevronUp"}
+                size={20}
+                active={allCompact}
+                disabled={heightTargets.length === 0}
+                tooltip={
+                  selectedIds.size > 0
+                    ? allCompact
+                      ? "Restore selected tracks"
+                      : "Make selected tracks thin"
+                    : allCompact
+                      ? "Restore all tracks"
+                      : "Make all tracks thin"
+                }
+                onClick={toggleCompact}
+              />
               <Toggle
                 on={mixerTracks.length > 0 && !anyUnmuted}
                 onChange={muteAll}

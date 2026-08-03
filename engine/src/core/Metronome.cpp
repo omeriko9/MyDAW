@@ -24,6 +24,22 @@ void Metronome::prepare(int sampleRate) {
     env_ = 0.0;
 }
 
+void Metronome::setFirstBeatVolume(float volume) noexcept {
+    firstBeatVolume_.store(std::clamp(volume, 0.0f, 1.0f), std::memory_order_release);
+}
+
+void Metronome::setOtherBeatVolume(float volume) noexcept {
+    otherBeatVolume_.store(std::clamp(volume, 0.0f, 1.0f), std::memory_order_release);
+}
+
+float Metronome::firstBeatVolume() const noexcept {
+    return firstBeatVolume_.load(std::memory_order_acquire);
+}
+
+float Metronome::otherBeatVolume() const noexcept {
+    return otherBeatVolume_.load(std::memory_order_acquire);
+}
+
 void Metronome::scheduleClickRt(int offsetInBlock, bool accent) noexcept {
     if (offsetInBlock < 0 || numPending_ >= kMaxPendingClicks)
         return;
@@ -95,6 +111,8 @@ void Metronome::renderRt(float* outL, float* outR, int frames) noexcept {
         pending_[j + 1] = key;
     }
 
+    const float firstBeatVolume = firstBeatVolume_.load(std::memory_order_relaxed);
+    const float otherBeatVolume = otherBeatVolume_.load(std::memory_order_relaxed);
     int p = 0;
     for (int i = 0; i < frames; ++i) {
         while (p < numPending_ && pending_[p].offset <= i) {
@@ -103,7 +121,7 @@ void Metronome::renderRt(float* outL, float* outR, int frames) noexcept {
             voiceActive_ = true;
             phase_ = 0.0;
             phaseInc_ = kTwoPi * (accent ? kAccentFreq : kBeatFreq) / sampleRate_;
-            env_ = accent ? kAccentAmp : kBeatAmp;
+            env_ = accent ? kAccentAmp * firstBeatVolume : kBeatAmp * otherBeatVolume;
         }
         if (!voiceActive_)
             continue;

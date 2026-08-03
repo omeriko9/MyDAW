@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "core/TempoMap.h"
@@ -26,6 +27,13 @@ public:
 
     // Main thread (graph configure / sample-rate change).
     void prepare(int sampleRate);
+
+    // Main thread controls, read lock-free by the audio thread. Values are normalized
+    // gains (0 = silent, 1 = the click's original level).
+    void setFirstBeatVolume(float volume) noexcept;
+    void setOtherBeatVolume(float volume) noexcept;
+    float firstBeatVolume() const noexcept;
+    float otherBeatVolume() const noexcept;
 
     // ---- RT thread -----------------------------------------------------------
     // Queue a click starting at `offsetInBlock` (relative to the current device block).
@@ -61,6 +69,9 @@ private:
 
     int sampleRate_ = 48000;
     double envCoef_ = 0.999;
+
+    std::atomic<float> firstBeatVolume_{1.0f};
+    std::atomic<float> otherBeatVolume_{1.0f};
 
     Pending pending_[kMaxPendingClicks];
     int numPending_ = 0;

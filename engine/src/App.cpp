@@ -335,6 +335,20 @@ bool App::init(std::string& err) {
     registerAllImportProviders(); // project/importForeign provider registry (§5.1)
     api = std::make_unique<Api>(*this);
     server.setMessageHandler([this](json msg, HttpWsServer::RespondFn respond) {
+        // Project plugin recreation blocks the main thread while each host initializes,
+        // so a normal queued request could not cancel it. Handle this one thread-safe
+        // signal immediately on the server thread; the load loop observes the atomic flag
+        // between plug-ins and leaves the rest dormant/recreatable.
+        if (msg.is_object() && msg.value("type", "") == "plugins/cancelLoad") {
+            const int64_t id = msg.value("id", static_cast<int64_t>(-1));
+            const bool active = isPluginLoadActive();
+            if (active)
+                requestPluginLoadCancel();
+            respond(json{{"replyTo", id},
+                         {"ok", true},
+                         {"payload", json{{"cancelling", active}}}});
+            return;
+        }
         // server thread -> main-thread job queue
         post([this, m = std::move(msg), r = std::move(respond)]() mutable {
             api->handleMessage(m, std::move(r));
@@ -836,8 +850,15 @@ void App::recreatePluginInstances() {
             if (pi.format != "builtin" && !pi.path.empty())
                 ++total;
     int current = 0;
+    bool cancelled = false;
+    pluginLoadCancelRequested_.store(false, std::memory_order_release);
+    pluginLoadActive_.store(total > 0, std::memory_order_release);
     for (Track* t : model.allTracks(true)) {
         for (PluginInstance& pi : t->inserts) {
+            if (pluginLoadCancelRequested_.load(std::memory_order_acquire)) {
+                cancelled = true;
+                break;
+            }
             if (pi.format == "builtin") {
                 // In-engine stock effect: no host process, no state chunk — params are
                 // restored from pi.paramValues inside create().
@@ -857,7 +878,8 @@ void App::recreatePluginInstances() {
                            json{{"current", ++current},
                                 {"total", total},
                                 {"name", pi.name},
-                                {"done", false}});
+                                {"done", false},
+                                {"cancelable", true}});
             std::string cerr;
             if (!host->create(pi, currentSampleRate_, currentMaxBlock_, cerr)) {
                 Log::error("plugin '%s' failed to load: %s", pi.name.c_str(), cerr.c_str());
@@ -881,11 +903,20 @@ void App::recreatePluginInstances() {
             if (!bytes.empty())
                 host->setState(pi.instanceId, bytes);
         }
+        if (cancelled)
+            break;
     }
-    if (total > 0)
+    if (total > 0) {
         broadcastEvent("event/pluginLoadProgress",
-                       json{{"current", total}, {"total", total}, {"name", ""},
-                            {"done", true}});
+                       json{{"current", current},
+                            {"total", total},
+                            {"name", ""},
+                            {"done", true},
+                            {"cancelled", cancelled},
+                            {"cancelable", true}});
+    }
+    pluginLoadActive_.store(false, std::memory_order_release);
+    pluginLoadCancelRequested_.store(false, std::memory_order_release);
 }
 
 void App::afterModelReplaced() {
@@ -965,7 +996,9 @@ json App::transportJson() const {
                                {"endBeat", tempoMap.samplesToBeats(transport.punchEndSamples())},
                                {"enabled", transport.punchEnabled()}}},
                 {"metronome", json{{"enabled", transport.metronomeEnabled()},
-                                   {"countInBars", transport.countInBars()}}},
+                                   {"countInBars", transport.countInBars()},
+                                   {"firstBeatVolume", metronome->firstBeatVolume()},
+                                   {"otherBeatVolume", metronome->otherBeatVolume()}}},
                 {"automationWrite", transport.automationWrite()}};
 }
 

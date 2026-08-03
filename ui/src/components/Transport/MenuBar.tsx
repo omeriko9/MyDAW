@@ -22,7 +22,6 @@ import {
   joinClips,
   mergeMidiLoop,
   panic,
-  removeTrack,
   removeUnusedMedia,
 } from "../../store/actions";
 import { showToast } from "../common/ToastHost";
@@ -35,6 +34,7 @@ import {
   type LayoutSlotIndex,
 } from "../../lib/layouts";
 import { savePref } from "../../lib/prefs";
+import { confirmRemoveTracks } from "../../lib/trackActions";
 import { SHELL_MODES } from "../../shell/shellTypes";
 import { applyTheme, getTheme, THEMES } from "../../lib/theme";
 import { toggleMetronome } from "../../store/metronome";
@@ -57,6 +57,7 @@ import {
   saveProjectAsFlow,
   saveProjectFlow,
 } from "./projectFlows";
+import { exportSettingsFlow, importSettingsFlow } from "./settingsFlows";
 import "./menubar.css";
 
 const fire = (p: Promise<unknown>): void => {
@@ -218,9 +219,28 @@ function buildFileMenu(): MenuEntry[] {
     },
     "separator",
     {
-      label: "Settings…",
+      label: "Settings",
       icon: "settings",
-      onClick: () => useStore.getState().setDialogs({ settings: true }),
+      submenu: [
+        {
+          label: "Open Settings…",
+          icon: "settings",
+          onClick: () => useStore.getState().setDialogs({ settings: true }),
+        },
+        "separator",
+        {
+          label: "Export Settings…",
+          icon: "export",
+          title: "Save engine and interface preferences as JSON. Includes LLM/API credentials — keep the file private.",
+          onClick: () => fire(exportSettingsFlow()),
+        },
+        {
+          label: "Import Settings…",
+          icon: "import",
+          title: "Restore a MyDAW settings JSON backup",
+          onClick: () => fire(importSettingsFlow()),
+        },
+      ],
     },
     "separator",
     {
@@ -316,16 +336,9 @@ function buildEditMenu(): MenuEntry[] {
  * ========================================================================= */
 
 function removeSelectedTracksFlow(trackIds: number[]): void {
-  const n = trackIds.length;
-  void confirmDialog({
-    title: n === 1 ? "Remove track" : "Remove tracks",
-    message: `Remove ${n === 1 ? "the selected track" : `${n} selected tracks`} and ${n === 1 ? "its" : "their"} clips? This can be undone.`,
-    confirmLabel: "Remove",
-    danger: true,
-  }).then((ok) => {
-    if (!ok) return;
-    for (const id of trackIds) fire(removeTrack(id));
-  });
+  void confirmRemoveTracks(trackIds).catch((e) =>
+    showToast(e instanceof Error ? e.message : "Could not delete tracks", "error"),
+  );
 }
 
 function buildProjectMenu(): MenuEntry[] {
@@ -561,7 +574,7 @@ function buildViewMenu(): MenuEntry[] {
     {
       label: "Bottom Dock",
       checked: s.panels.bottomTab !== null,
-      title: "Mixer / Piano Roll / Clip Editor / Sheet Music / Visualizer dock",
+      title: "Mixer / Instrument Rack / Piano Roll / Clip Editor / Sheet Music / Visualizer dock",
       onClick: () =>
         s.setPanels({
           bottomTab: s.panels.bottomTab === null ? (s.panels.bottomTabPrev ?? "mixer") : null,

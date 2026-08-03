@@ -368,10 +368,15 @@ export const pause = () => ws.request("transport/pause", {});
 export const record = () => ws.request("transport/record", {});
 export const locate = (beat: number) => ws.request("transport/locate", { beat });
 
-export const setMetronome = (enabled: boolean, countInBars?: 0 | 1 | 2) =>
+export const setMetronome = (
+  enabled: boolean,
+  countInBars?: 0 | 1 | 2,
+  volumes?: { firstBeatVolume?: number; otherBeatVolume?: number },
+) =>
   ws.request("transport/setMetronome", {
     enabled,
     ...(countInBars !== undefined ? { countInBars } : {}),
+    ...volumes,
   });
 
 export const setAutomationWrite = (enabled: boolean) =>

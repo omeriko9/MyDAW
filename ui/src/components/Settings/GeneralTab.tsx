@@ -27,6 +27,12 @@ import {
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
 import { Toggle } from "../common/Toggle";
+import {
+  FUNCTION_KEY_MODE_DEFAULT,
+  FUNCTION_KEY_MODE_PREF,
+  isFunctionKeyMode,
+  type FunctionKeyMode,
+} from "../../lib/functionKeys";
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -90,6 +96,11 @@ export function GeneralTab() {
     RECOVERY_MODE_DEFAULT,
     isRecoveryMode,
   );
+  const [functionKeys, setFunctionKeys] = usePrefState<FunctionKeyMode>(
+    FUNCTION_KEY_MODE_PREF,
+    FUNCTION_KEY_MODE_DEFAULT,
+    isFunctionKeyMode,
+  );
 
   return (
     <div className="col gap2">
@@ -137,6 +148,21 @@ export function GeneralTab() {
               onClick={() => pickAccent(s.value)}
             />
           ))}
+        </div>
+        <span className="sett-label">Mixer/Rack shortcuts</span>
+        <div className="row gap1">
+          <Select
+            value={functionKeys}
+            options={[
+              { value: "direct", label: "F3 / F11" },
+              { value: "shifted", label: "Shift+F3 / Shift+F11" },
+            ]}
+            onChange={(v) => setFunctionKeys(v as FunctionKeyMode)}
+            width={190}
+          />
+          <span className="sett-note">
+            shifted mode preserves the browser's Find/Fullscreen function keys
+          </span>
         </div>
         <span className="sett-label">Interface motion</span>
         <div className="row gap1">

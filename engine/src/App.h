@@ -195,6 +195,17 @@ public:
     // them), emits full projectChanged, clears dirty, re-arms autosave.
     void afterModelReplaced();
 
+    // Hosted-plugin project-load cancellation. The WebSocket server thread sets the
+    // request flag directly because the main thread is blocked inside host creation;
+    // recreatePluginInstances observes it between inserts. The current host init is
+    // allowed to finish/timeout, then all remaining inserts stay unloaded.
+    void requestPluginLoadCancel() {
+        pluginLoadCancelRequested_.store(true, std::memory_order_release);
+    }
+    bool isPluginLoadActive() const {
+        return pluginLoadActive_.load(std::memory_order_acquire);
+    }
+
     // ----- export state ---------------------------------------------------------
     bool isExporting() const { return exporting_.load(std::memory_order_acquire); }
     void beginExport() { exportProgress_.store(0.0f); exporting_.store(true); }
@@ -317,6 +328,8 @@ private:
     std::atomic<bool> exporting_{false};
     std::atomic<float> exportProgress_{0.0f};
     std::atomic<bool> processing_{false}; // async DOP render in flight
+    std::atomic<bool> pluginLoadActive_{false};
+    std::atomic<bool> pluginLoadCancelRequested_{false};
 
     std::atomic<bool> pendingRebuild_{false};
 

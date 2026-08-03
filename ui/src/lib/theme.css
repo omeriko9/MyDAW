@@ -1045,6 +1045,31 @@ body {
   color: var(--accent);
 }
 
+.ctx-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 210px;
+  padding: 5px 8px 7px;
+  color: var(--text);
+  font-size: 12px;
+  user-select: none;
+}
+.ctx-slider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ctx-slider-value {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ctx-slider input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
 /* ============================================================================
  * PieMenu (PieMenu.tsx) — radial gesture menu on stationary middle-click
  * ==========================================================================*/

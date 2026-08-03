@@ -54,7 +54,7 @@ const THEMES = new Set<ThemeName>(["dark", "light", "slate", "sepia", "prism"]);
 const TOOLS = new Set<Tool>(["select", "draw", "erase", "split"]);
 const PANES = new Set<FocusedPane>(["timeline", "pianoRoll", "clipEditor", "sheetMusic", "mixer"]);
 const DIALOGS = new Set(["settings", "export", "shortcuts", "recreatePlugins"]);
-const BOTTOM_TABS = new Set(["mixer", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"]);
+const BOTTOM_TABS = new Set(["mixer", "instrumentRack", "pianoRoll", "clipEditor", "sheetMusic", "visualizer"]);
 
 function require<T>(value: T | undefined | null, code: string, message: string): T {
   if (value === undefined || value === null) throw new UiOpError(code, message);
@@ -93,7 +93,11 @@ export function executeUiOperation(operation: string, payloadRaw: unknown): unkn
 
   switch (operation) {
     case "ui/selection.get":
-      return store.selection;
+      return {
+        trackIds: store.selection.trackIds,
+        clipIds: store.selection.clipIds,
+        noteIds: store.selection.noteIds,
+      };
 
     case "ui/selection.set": {
       const sel = asObject(args.selection);

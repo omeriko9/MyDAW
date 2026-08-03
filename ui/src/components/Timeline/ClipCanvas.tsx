@@ -102,7 +102,9 @@ import { openFadeProcessDialog } from "./FadeProcessDialog";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
 import { addTrackMenuItems } from "./TrackHeaders";
-import { assignInstrumentToTrack } from "./instrumentAssign";
+import { openInstrumentDropChoices } from "./instrumentAssign";
+import { moveTrackSelection } from "../../lib/trackSelection";
+import { confirmRemoveTracks } from "../../lib/trackActions";
 import {
   drawAutomationLane,
   drawClip,
@@ -1501,9 +1503,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
     // empty area — left-drag rubber-band selects (plain replaces the selection; Shift/Ctrl
     // adds to it). Panning the grid is a right-button drag now (see onPointerDown). A plain
-    // left-click with no drag collapses to an empty marquee, which clears the selection.
+    // left-click with no drag collapses to an empty marquee, which clears tracks as well as
+    // clips. Clearing on press also gives a plain marquee true replace-selection semantics.
     const base = additive ? [...st.selection.clipIds] : [];
-    if (!additive) selectClips([]);
+    if (!additive)
+      setSelection({ trackIds: [], clipIds: [], noteIds: [], scope: "none" });
     marqueeIdsRef.current = base;
     dragRef.current = { kind: "marquee", b0: rawBeat, y0: cy, b1: rawBeat, y1: cy, base, additive };
     capture();
@@ -2964,8 +2968,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         // effects have nowhere to go (MIDI channels host no audio plugins).
         const info = useStore.getState().registry.find((p) => p.uid === plug.uid);
         if (info?.isInstrument) {
-          if (!assignInstrumentToTrack(track, info))
-            showToast("The target instrument track is frozen — unfreeze it first.", "info");
+          openInstrumentDropChoices(track.id, info, e.clientX, e.clientY);
         } else {
           showToast(
             "MIDI tracks can't host effect plugins — drop on an Instrument or Audio track, or on empty space to create one.",
@@ -3032,7 +3035,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       registerKeyContext("timeline", {
         deleteSelection: () => {
           const s = useStore.getState();
-          if (s.selection.clipIds.length > 0) fire(deleteClips(s.selection.clipIds));
+          if (s.selection.scope === "tracks" && s.selection.trackIds.length > 0)
+            void confirmRemoveTracks(s.selection.trackIds).catch((e) =>
+              showToast(e instanceof Error ? e.message : "Could not delete tracks", "error"),
+            );
+          else if (s.selection.clipIds.length > 0) fire(deleteClips(s.selection.clipIds));
         },
         selectAll: () => {
           const s = useStore.getState();
@@ -3052,10 +3059,40 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         },
         // ←/→ nudge the selected clips by one grid step (1 beat when snap is off);
         // Shift = one bar. Clamped so the earliest clip cannot cross beat 0.
-        nudge: (dx, _dy, big) => {
-          if (dx === 0) return false;
+        nudge: (dx, dy, big) => {
           const s = useStore.getState();
           const proj = s.project;
+          if (dy !== 0) {
+            // Track-only selection: Up/Down moves through visible arrangement rows;
+            // Shift extends/shrinks the contiguous range from its stable anchor.
+            if (
+              !proj ||
+              s.selection.noteIds.length > 0 ||
+              (s.selection.trackIds.length > 0 && s.selection.scope !== "tracks")
+            )
+              return false;
+            const visibleRows = stateRef.current.rows.filter(
+              (r): r is TrackRowL => r.kind === "track",
+            );
+            const targetId = moveTrackSelection(
+              visibleRows.map((r) => r.track.id),
+              dy < 0 ? -1 : 1,
+              big,
+            );
+            if (targetId === null) return false;
+            const target = visibleRows.find((r) => r.track.id === targetId);
+            if (target) {
+              const currentScrollY = stateRef.current.scrollY;
+              const viewH = Math.max(1, canvasRef.current?.clientHeight ?? 1);
+              let scrollY = currentScrollY;
+              if (target.top < scrollY) scrollY = target.top;
+              else if (target.top + target.height > scrollY + viewH)
+                scrollY = target.top + target.height - viewH;
+              if (scrollY !== currentScrollY) s.setViewport({ scrollY: Math.max(0, scrollY) });
+            }
+            return true;
+          }
+          if (dx === 0) return false;
           const ids = s.selection.clipIds;
           if (!proj || ids.length === 0) return false;
           let minStart = Infinity;
