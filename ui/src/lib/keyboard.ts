@@ -525,18 +525,20 @@ export function toggleLoop(): void {
 }
 
 /**
- * +/- : nudge the playhead by one grid step (1 beat when snap is off). Key-repeat is
- * allowed (hold to scrub); the engine echo (~20 Hz) can lag the repeat rate, so recent
- * nudges accumulate from the last locally requested beat instead of transportBus.last.
+ * +/- : nudge the playhead by one grid step (1 beat when snap is off); Shift = 3× the
+ * step (fast scrub — the repeat RATE is the OS typematic rate, so the step is the only
+ * controllable knob). Key-repeat is allowed (hold to scrub); the engine echo (~20 Hz)
+ * can lag the repeat rate, so recent nudges accumulate from the last locally requested
+ * beat instead of transportBus.last.
  */
 let nudgeBase: { beat: number; at: number } | null = null;
 
-function nudgePlayhead(dir: 1 | -1): void {
+function nudgePlayhead(dir: 1 | -1, mult = 1): void {
   const grid = useStore.getState().project?.grid;
   const step = grid && grid.snap && grid.division > 0 ? gridStepBeats(grid) : 1;
   const now = performance.now();
   const base = nudgeBase && now - nudgeBase.at < 250 ? nudgeBase.beat : playheadBeat();
-  const beat = Math.max(0, base + dir * step);
+  const beat = Math.max(0, base + dir * step * mult);
   nudgeBase = { beat, at: now };
   fire(locate(beat));
 }
@@ -577,6 +579,15 @@ function zoomV(factor: number): void {
 
 function onKeyDown(e: KeyboardEvent): void {
   if (e.defaultPrevented) return;
+  // Ctrl+S saves from ANYWHERE (Omer, 2026-08-07): typing in a rename field or having
+  // a dialog open must not turn the reflex into the browser's Save-Page dialog. Save
+  // is always safe (saveProjectFlow falls through to Save-As when pathless).
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat) void (e.shiftKey ? saveProjectAsFlow() : saveProjectFlow());
+    return;
+  }
   if (isEditableTarget(e.target)) return;
   // Menus/modals own the keyboard (incl. their Esc) — except transport keys inside
   // modals that opt in (Room View): play/stop/locate must work in every view.
@@ -685,10 +696,8 @@ function onKeyDown(e: KeyboardEvent): void {
         if (e.repeat) return;
         fire(redo());
         return;
-      case "s":
-        consume();
-        if (!e.repeat) void (e.shiftKey ? saveProjectAsFlow() : saveProjectFlow());
-        return;
+      // "s" is handled at the very top of onKeyDown (before the editable/modal
+      // guards) so Ctrl+S saves from anywhere.
       case "c":
         if (e.repeat) return;
         // If the user has highlighted real text (e.g. in the agent chat), let the browser
@@ -778,13 +787,13 @@ function onKeyDown(e: KeyboardEvent): void {
       locateTo(e.code === "Numpad1" ? loop.startBeat : loop.endBeat);
       return;
     }
-    case "NumpadAdd": // nudge playhead forward (repeat = scrub)
+    case "NumpadAdd": // nudge playhead forward (repeat = scrub; Shift = 3× step)
       consume();
-      nudgePlayhead(1);
+      nudgePlayhead(1, e.shiftKey ? 3 : 1);
       return;
-    case "NumpadSubtract": // nudge playhead back
+    case "NumpadSubtract": // nudge playhead back (Shift = 3× step)
       consume();
-      nudgePlayhead(-1);
+      nudgePlayhead(-1, e.shiftKey ? 3 : 1);
       return;
     default:
       break;
@@ -908,15 +917,23 @@ function onKeyDown(e: KeyboardEvent): void {
       return;
     }
     // Nudge the playhead by one grid step. Key repeat is allowed — hold to scrub.
-    case "+":
+    // Shift = 3× the step: on a US layout "+" IS Shift+"=" and "_" IS Shift+"-",
+    // so the shifted glyphs are the fast variants ("=" / "-" stay single-step).
     case "=":
       consume();
       nudgePlayhead(1);
       return;
+    case "+":
+      consume();
+      nudgePlayhead(1, e.shiftKey ? 3 : 1); // layouts with an unshifted "+" stay 1×
+      return;
     case "-":
+      consume();
+      nudgePlayhead(-1, e.shiftKey ? 3 : 1);
+      return;
     case "_":
       consume();
-      nudgePlayhead(-1);
+      nudgePlayhead(-1, 3);
       return;
     // Cubase-style zoom: G zooms out (more time fits), H zooms in. Shift+G/H = vertical
     // (track height). Key repeat is allowed deliberately — hold to keep zooming.

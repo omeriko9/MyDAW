@@ -83,7 +83,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["P"], what: "Set loop to the selected clips" },
       { keys: ["C"], what: "Metronome on/off" },
       { keys: ["J"], what: "Follow playhead (auto-scroll)" },
-      { keys: ["+", "−"], what: "Nudge playhead by one grid step (hold to scrub)" },
+      { keys: ["+", "−"], what: "Nudge playhead by one grid step (hold to scrub; Shift = 3× step)" },
       { keys: ["Home"], what: "Jump to project start" },
       { keys: ["End"], what: "Jump to project end" },
     ],

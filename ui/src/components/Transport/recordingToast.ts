@@ -41,6 +41,14 @@ function onRecordingStopped(idsAtStart: Set<number>): void {
       t.clips.filter((c) => !idsAtStart.has(c.id)).map((c) => ({ track: t, clip: c })),
     );
     if (fresh.length === 0) return; // armed but nothing landed — stay quiet
+    // Select the take (Omer, 2026-08-07): the first thing after a bad take is DELETE,
+    // so the fresh clips arrive selected — one keypress clears them. noteIds must be
+    // cleared explicitly (setSelection merges partials).
+    s.setSelection({
+      clipIds: fresh.map((x) => x.clip.id),
+      trackIds: [...new Set(fresh.map((x) => x.track.id))],
+      noteIds: [],
+    });
     const firstMidi = fresh.find((x) => x.clip.type === "midi");
     const actions: ToastAction[] = [
       { label: "Undo take", onClick: () => void undo().catch(() => {}) },

@@ -102,7 +102,7 @@ import { openFadeProcessDialog } from "./FadeProcessDialog";
 import { showToast } from "../common/ToastHost";
 import { ColorPopover, FloatingInput } from "./bits";
 import { addTrackMenuItems } from "./TrackHeaders";
-import { openInstrumentDropChoices } from "./instrumentAssign";
+import { openInstrumentDropChoices, replaceInstrumentOn } from "./instrumentAssign";
 import { moveTrackSelection } from "../../lib/trackSelection";
 import { confirmRemoveTracks } from "../../lib/trackActions";
 import {
@@ -277,6 +277,9 @@ type Drag =
       /** Audio: samples per beat at the clip, for the trim preview's srcOffset. */
       samplesPerBeat: number;
       moved: boolean;
+      /** Alt held (read live, like move's dup): right-edge drag REPEATS the clip —
+       *  whole-clip clones appended end-to-end (Cubase repeat) instead of resizing. */
+      dup: boolean;
     }
   | { kind: "fade"; clipId: number; which: "in" | "out"; sec: number; origSec: number; moved: boolean }
   | { kind: "draw"; trackId: number; anchor: number; start: number; end: number }
@@ -789,16 +792,22 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         let fadeInSec: number | undefined;
         let fadeOutSec: number | undefined;
         let srcOffsetOverride: number | undefined;
+        let repeatGhosts = 0;
         if (d && d.kind === "resize" && d.clipId === clip.id && d.moved) {
-          startBeat = d.start;
-          lenBeats = d.len;
-          // Left-edge trim preview: the waveform stays anchored on the timeline —
-          // sample the peaks from the offset the commit will produce, not the old one.
-          if (d.edge === "l" && clip.type === "audio")
-            srcOffsetOverride = Math.max(
-              0,
-              clip.srcOffsetSamples + (d.start - clip.startBeat) * d.samplesPerBeat,
-            );
+          if (d.dup && d.edge === "r") {
+            // Repeat preview: the original keeps its length; ghosts fill the dragged span.
+            repeatGhosts = d.origLen > 0 ? Math.floor(d.len / d.origLen) - 1 : 0;
+          } else {
+            startBeat = d.start;
+            lenBeats = d.len;
+            // Left-edge trim preview: the waveform stays anchored on the timeline —
+            // sample the peaks from the offset the commit will produce, not the old one.
+            if (d.edge === "l" && clip.type === "audio")
+              srcOffsetOverride = Math.max(
+                0,
+                clip.srcOffsetSamples + (d.start - clip.startBeat) * d.samplesPerBeat,
+              );
+          }
         }
         if (d && d.kind === "fade" && d.clipId === clip.id) {
           if (d.which === "in") fadeInSec = d.sec;
@@ -833,6 +842,26 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           colors,
           onPeaksArrive: schedule,
         });
+        // Alt+right-edge repeat preview: translucent whole-clip ghosts end-to-end.
+        for (let i = 1; i <= repeatGhosts; i++) {
+          const gx = beatToPx(startBeat + i * lenBeats, v);
+          if (gx > w + 2) break;
+          drawClip(ctx, {
+            clip,
+            x: gx,
+            y: ry,
+            w: cw,
+            h: row.height,
+            canvasW: w,
+            color: clip.color ?? track.color,
+            selected: false,
+            ghost: 0.7,
+            project: proj,
+            zoomX: v.zoomX,
+            colors,
+            onPeaksArrive: schedule,
+          });
+        }
         if (track.frozen) drawFrozenBadge(ctx, x, ry, cw, row.height, colors);
       }
 
@@ -1439,6 +1468,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           minStart,
           samplesPerBeat: spb,
           moved: false,
+          dup: e.altKey,
         };
         capture();
         return;
@@ -1641,20 +1671,26 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           d.start = d.origStart;
           d.len = ne - d.origStart;
         }
+        // Alt is read LIVE (like the move branch's dup) so it can be pressed mid-drag:
+        // right-edge + Alt = Cubase repeat — clones appended end-to-end, no resize.
+        d.dup = e.altKey && d.edge === "r";
         const sizing = useStore.getState().sizingMode;
+        const reps = d.dup && d.origLen > 0 ? Math.floor(d.len / d.origLen) - 1 : 0;
         showDragHud(
           e.clientX,
           e.clientY,
-          (d.edge === "l"
-            ? `from ${formatBarsBeatsShort(d.start, proj.timeSigMap)}`
-            : `to ${formatBarsBeatsShort(d.start + d.len, proj.timeSigMap)}`) +
-            ` · ${trimNum(d.len)}b` +
-            (sizing === "timeStretch" && d.origLen > 0
-              ? ` · stretch ${Math.round((d.len / d.origLen) * 100)}%`
-              : sizing === "moveContents"
-                ? " · contents follow"
-                : "") +
-            snapHint(e.shiftKey),
+          d.dup
+            ? `repeat ×${Math.max(0, reps)}` + snapHint(e.shiftKey)
+            : (d.edge === "l"
+                ? `from ${formatBarsBeatsShort(d.start, proj.timeSigMap)}`
+                : `to ${formatBarsBeatsShort(d.start + d.len, proj.timeSigMap)}`) +
+                ` · ${trimNum(d.len)}b` +
+                (sizing === "timeStretch" && d.origLen > 0
+                  ? ` · stretch ${Math.round((d.len / d.origLen) * 100)}%`
+                  : sizing === "moveContents"
+                    ? " · contents follow"
+                    : "") +
+                snapHint(e.shiftKey),
         );
         draw();
         return;
@@ -1930,6 +1966,26 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         break;
       }
       case "resize": {
+        if (d.moved && d.dup && d.edge === "r") {
+          // Alt+right-edge = Cubase repeat: N whole-clip clones appended end-to-end;
+          // the original keeps its length. Sequential duplicate→move per clone (the
+          // exact idiom of the Alt+move branch above), then everything selected so a
+          // regretted repeat is one Delete away.
+          const reps = Math.min(d.origLen > 0 ? Math.floor(d.len / d.origLen) - 1 : 0, 200);
+          if (reps > 0) {
+            void (async () => {
+              const created: number[] = [];
+              for (let i = 1; i <= reps; i++) {
+                const r = await duplicateClips([d.clipId], true);
+                const ids = r.clips.map((c) => c.id);
+                await moveClips(ids, i * d.origLen);
+                created.push(...ids);
+              }
+              selectClips([d.clipId, ...created]);
+            })().catch((err) => console.warn("[timeline] repeat-drag failed:", err));
+          }
+          break;
+        }
         if (d.moved) {
           const mode = useStore.getState().sizingMode;
           const opts = d.edge === "l" ? { newStartBeat: d.start } : { newLengthBeats: d.len };
@@ -2976,7 +3032,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           );
         }
       } else if (track) {
-        fire(addPlugin(track.id, plug.uid));
+        // An instrument dropped on an instrument track REPLACES the loaded instrument
+        // (a track has one sound source; stacking two VSTis was never meaningful).
+        const info = useStore.getState().registry.find((p) => p.uid === plug.uid);
+        if (info?.isInstrument && track.kind === "instrument") {
+          replaceInstrumentOn(track.id, info);
+        } else {
+          fire(addPlugin(track.id, plug.uid));
+        }
       } else {
         // empty area below the last track — create a track of the plugin's kind first
         const info = useStore.getState().registry.find((p) => p.uid === plug.uid);

@@ -34,6 +34,7 @@ import { SendsBlock } from "./SendsBlock";
 import { ColorPopup } from "./popups";
 import { useGestureValue } from "./useGestureValue";
 import { selectTrack } from "../../lib/trackSelection";
+import { replaceInstrumentOn } from "../Timeline/instrumentAssign";
 import { confirmRemoveTracks } from "../../lib/trackActions";
 
 export const KIND_ICONS: Record<TrackKind, IconName> = {
@@ -319,6 +320,12 @@ export const ChannelStrip = React.memo(function ChannelStrip({
     if (!data) return;
     e.preventDefault();
     e.stopPropagation();
+    // Instrument onto an instrument strip = REPLACE the loaded instrument, not stack.
+    const info = useStore.getState().registry.find((p) => p.uid === data.uid);
+    if (info?.isInstrument && track.kind === "instrument") {
+      replaceInstrumentOn(track.id, info);
+      return;
+    }
     void actions.addPlugin(track.id, data.uid);
   };
 

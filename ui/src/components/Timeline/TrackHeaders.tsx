@@ -18,6 +18,7 @@ import { transportBus, useStore } from "../../store/store";
 import {
   addAudioClip,
   addPlugin,
+  addSend,
   addTrack,
   addTrackVersion,
   bounceTrack,
@@ -117,7 +118,7 @@ export function addTrackMenuItems(index?: number): MenuEntry[] {
   // store, not a hook — the one-per-project kinds are greyed out instead of being
   // offered and then refused by the engine.
   const tracks = useStore.getState().project?.tracks ?? [];
-  return ADDABLE.map((a) => {
+  const items: MenuEntry[] = ADDABLE.map((a) => {
     const dupe = isViewRowKind(a.kind) && tracks.some((t) => t.kind === a.kind);
     return {
       label: `Add ${a.label}`,
@@ -131,6 +132,52 @@ export function addTrackMenuItems(index?: number): MenuEntry[] {
       onClick: () => fire(addTrack(a.kind, index !== undefined ? { index } : undefined)),
     };
   });
+  // FX track (Omer, 2026-08-07: "we don't have FX tracks") — a Cubase FX channel is a
+  // bus carrying an effect, fed by sends. This flow packages the existing primitives:
+  // pick the effect, get a bus named after it with the effect loaded, and a send from
+  // the selected track (if one is selected) already connected.
+  items.splice(4, 0, {
+    label: "Add FX Track (effect + send)…",
+    icon: "sliders",
+    submenu: fxTrackEffectItems(),
+  });
+  return items;
+}
+
+function fxTrackEffectItems(): MenuEntry[] {
+  const s = useStore.getState();
+  const effects = groupPluginVariants(
+    s.registry
+      .filter((p) => !p.isInstrument && !p.blacklisted)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  ).plugins;
+  if (effects.length === 0) return [{ label: "No scanned effect plugins", disabled: true }];
+  return effects.map((p) => ({
+    label: p.name,
+    onClick: () => {
+      void (async () => {
+        const src = s.project?.tracks.find(
+          (t) =>
+            s.selection.trackIds.includes(t.id) &&
+            (t.kind === "audio" || t.kind === "instrument" || t.kind === "bus"),
+        );
+        const { track: fx } = await addTrack("bus", { name: `FX: ${p.name}` });
+        await addPlugin(fx.id, p.uid);
+        if (src) {
+          await addSend(src.id, fx.id);
+          showToast(`FX track ready — “${src.name}” sends into ${p.name}`, "success");
+        } else {
+          showToast(
+            `FX track ready — add sends to it from any channel's Sends section`,
+            "success",
+          );
+        }
+      })().catch((e) =>
+        showToast(e instanceof Error ? e.message : "FX track creation failed", "error"),
+      );
+    },
+  }));
 }
 
 /* ============================================================================
@@ -486,6 +533,11 @@ export default function TrackHeaders({
             "info",
           );
         }
+        return;
+      }
+      // Instrument onto an instrument track = REPLACE the loaded instrument, not stack.
+      if (info?.isInstrument && t.kind === "instrument") {
+        replaceInstrumentOn(t.id, info);
         return;
       }
       fire(addPlugin(t.id, plug.uid));

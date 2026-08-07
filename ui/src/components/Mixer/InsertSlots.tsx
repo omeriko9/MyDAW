@@ -37,6 +37,7 @@ import { openContextMenu, MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/icons";
 import { Tooltip } from "../common/Tooltip";
 import { PluginPicker } from "./popups";
+import { replaceInstrumentOn } from "../Timeline/instrumentAssign";
 
 /**
  * Shared executor for a drop on a channel's insert area (used here and by the whole-strip
@@ -68,7 +69,16 @@ export async function applyInsertAreaDrop(
     return;
   }
   const fromBrowser = readPluginDrag(dt);
-  if (fromBrowser) await actions.addPlugin(track.id, fromBrowser.uid, before);
+  if (fromBrowser) {
+    // An instrument dropped on an instrument channel REPLACES the loaded instrument
+    // (one sound source per track — stacking a second VSTi was never meaningful).
+    const info = useStore.getState().registry.find((p) => p.uid === fromBrowser.uid);
+    if (info?.isInstrument && track.kind === "instrument") {
+      replaceInstrumentOn(track.id, info);
+      return;
+    }
+    await actions.addPlugin(track.id, fromBrowser.uid, before);
+  }
 }
 
 function StateBadge({ st }: { st: PluginStateEvent }) {
@@ -407,7 +417,12 @@ export function InsertSlots({ track }: { track: Track }) {
           x={picker.x}
           y={picker.y}
           onClose={() => setPicker(null)}
-          onPick={(p) => void actions.addPlugin(track.id, p.uid)}
+          onPick={(p) => {
+            // Same one-sound-source rule as the drop paths: picking a second
+            // instrument for an instrument channel replaces the current one.
+            if (p.isInstrument && track.kind === "instrument") replaceInstrumentOn(track.id, p);
+            else void actions.addPlugin(track.id, p.uid);
+          }}
         />
       )}
     </div>

@@ -259,9 +259,19 @@ export interface NotePreview {
   copy?: boolean;
   resizeIds?: Set<number>;
   dLen?: number;
+  /** left-edge resize: start moves by dStart, length shrinks by the same amount
+   *  (clamped per note so short notes stop at MIN_NOTE_LEN instead of flipping). */
+  dStart?: number;
   eraseIds?: Set<number>;
   velocity?: Map<number, number>;
   createNote?: { id: number; pitch: number; velocity: number; startBeat: number; lengthBeats: number };
+}
+
+/** Per-note clamp for a left-edge resize: the start may not cross 0 and the note
+ *  may not shrink under MIN_NOTE_LEN — each note stops at ITS limit while the rest
+ *  of the selection keeps following the drag (matches multi-clip resize feel). */
+export function clampDStart(dStart: number, startBeat: number, lengthBeats: number): number {
+  return Math.min(Math.max(dStart, -startBeat), lengthBeats - MIN_NOTE_LEN);
 }
 
 export function buildRenderNotes(
@@ -281,7 +291,13 @@ export function buildRenderNotes(
       startBeat = Math.max(0, startBeat + (p.dBeat ?? 0));
     }
     if (p?.resizeIds?.has(n.id)) {
-      lengthBeats = Math.max(MIN_NOTE_LEN, lengthBeats + (p.dLen ?? 0));
+      if (p.dStart !== undefined) {
+        const d = clampDStart(p.dStart, startBeat, lengthBeats);
+        startBeat += d;
+        lengthBeats -= d;
+      } else {
+        lengthBeats = Math.max(MIN_NOTE_LEN, lengthBeats + (p.dLen ?? 0));
+      }
     }
     const vOverride = p?.velocity?.get(n.id);
     if (vOverride !== undefined) velocity = vOverride;
@@ -403,11 +419,11 @@ export function hitTestCcPoint(
 
 export interface NoteHit {
   note: Note;
-  /** pointer is in the right-edge resize zone */
-  edge: boolean;
+  /** pointer is in a resize zone: "l" = left edge (moves the start), "r" = right edge. */
+  edge: "l" | "r" | null;
 }
 
-/** Topmost (= last in array) note under the pointer; edge = right-resize zone. */
+/** Topmost (= last in array) note under the pointer; edge = l/r resize zone. */
 export function hitTestNote(notes: Note[], x: number, y: number, v: PrView): NoteHit | null {
   const pitch = yToPitch(y, v);
   for (let i = notes.length - 1; i >= 0; i--) {
@@ -420,7 +436,8 @@ export function hitTestNote(notes: Note[], x: number, y: number, v: PrView): Not
     // No floor on the zone: a 3px minimum swallowed the whole body of a narrow note
     // (a 1-beat note is 4px at 15% zoom), so it could only ever be resized, not moved.
     const edgeZone = Math.min(EDGE_PX, w * 0.3);
-    return { note: n, edge: x >= x1 - edgeZone };
+    const edge = x >= x1 - edgeZone ? "r" : x <= x0 + edgeZone ? "l" : null;
+    return { note: n, edge };
   }
   return null;
 }

@@ -2,21 +2,58 @@
 
 import type React from "react";
 import { useStore } from "../../store/store";
-import { setTrack } from "../../store/actions";
+import { removePlugin, removeTrack, setTrack } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { openBestEditor } from "../PluginEditor/openEditor";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/icons";
 import { Select, type SelectOption } from "../common/Select";
 import { showToast } from "../common/ToastHost";
+import { confirmDialog } from "../Dialogs/confirm";
 import {
   createInstrumentHost,
   instrumentFeeders,
   instrumentInsertOfTrack,
 } from "../Timeline/instrumentAssign";
-import type { PluginInfo } from "../../protocol/types";
+import type { PluginInfo, PluginInstance, Track } from "../../protocol/types";
 import { selectTrack } from "../../lib/trackSelection";
 import "./instrumentRack.css";
+
+/**
+ * Remove semantics (Omer, 2026-08-07 — "the rack should also allow removing"):
+ * two distinct intents, both offered per row.
+ * - Remove instrument: unload the VSTi, KEEP the rack slot and its MIDI routings
+ *   (the row shows "No instrument loaded"; feeders stay pointed here).
+ * - Remove from rack: delete the host track entirely. Feeders' midiTarget is
+ *   cleared FIRST — the engine does not clean dangling targets on track.remove,
+ *   it degrades them with a warning.
+ */
+function removeInstrumentOnly(host: Track, ins: PluginInstance): void {
+  void removePlugin(host.id, ins.instanceId).catch((e) =>
+    showToast(e instanceof Error ? e.message : "Could not remove instrument", "error"),
+  );
+}
+
+function removeFromRack(host: Track, feederIds: number[]): void {
+  void confirmDialog({
+    title: "Remove from rack",
+    message:
+      `Remove “${host.name}” and its instrument entirely?` +
+      (feederIds.length > 0
+        ? ` ${feederIds.length} MIDI track${feederIds.length === 1 ? "" : "s"} routed here will be disconnected (they keep their clips).`
+        : ""),
+    confirmLabel: "Remove",
+    danger: true,
+  }).then(async (ok) => {
+    if (!ok) return;
+    try {
+      for (const id of feederIds) await setTrack(id, { midiTarget: 0 });
+      await removeTrack(host.id);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not remove rack slot", "error");
+    }
+  });
+}
 
 export default function InstrumentRack() {
   const project = useStore((s) => s.project);
@@ -95,10 +132,30 @@ export default function InstrumentRack() {
               ? "—"
               : channels.map((ch) => (ch === 0 ? "Any" : String(ch))).join(", ");
             const out = host.outputTarget;
+            const rowMenu = (): MenuEntry[] => [
+              {
+                label: "Remove instrument (keep rack slot)",
+                icon: "x",
+                disabled: !ins || !!host.frozen,
+                title: "Unload the VSTi; MIDI routings stay for the next instrument",
+                onClick: () => ins && removeInstrumentOnly(host, ins),
+              },
+              {
+                label: "Remove from rack…",
+                icon: "trash",
+                danger: true,
+                disabled: !!host.frozen,
+                onClick: () => removeFromRack(host, feeders.map((t) => t.id)),
+              },
+            ];
             return (
               <div
                 key={host.id}
                 className={`ir-row${selected.includes(host.id) ? " selected" : ""}`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openContextMenu(e.clientX, e.clientY, rowMenu());
+                }}
                 onPointerDown={(e) => {
                   if ((e.target as HTMLElement).closest("button, input, select")) return;
                   const toggle = e.ctrlKey || e.metaKey;
@@ -133,18 +190,32 @@ export default function InstrumentRack() {
                     })
                   }
                 />
-                <button
-                  type="button"
-                  className="btn ir-open"
-                  disabled={!ins}
-                  title={ins ? `Open ${ins.name}` : "No instrument to open"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (ins) void openBestEditor(ins);
-                  }}
-                >
-                  Open Editor
-                </button>
+                <div className="ir-actions">
+                  <button
+                    type="button"
+                    className="btn ir-open"
+                    disabled={!ins}
+                    title={ins ? `Open ${ins.name}` : "No instrument to open"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (ins) void openBestEditor(ins);
+                    }}
+                  >
+                    Open Editor
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ir-more"
+                    title="Remove instrument / remove from rack"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      openContextMenu(r.left, r.bottom + 2, rowMenu());
+                    }}
+                  >
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
               </div>
             );
           })

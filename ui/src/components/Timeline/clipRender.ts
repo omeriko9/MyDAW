@@ -256,7 +256,10 @@ function drawAudioContent(
   const midY = areaY + areaH / 2;
   const halfH = areaH / 2 - 1;
   const gainScale = clamp(clip.gain, 0, 2);
-  ctx.fillStyle = withAlpha(o.color, 0.85);
+  // Slightly translucent body + a strong outline along the silhouette (Omer,
+  // 2026-08-07): the outline is what keeps the wave readable on colored clips and
+  // across themes — same shade convention as the clip border (line ~201).
+  ctx.fillStyle = withAlpha(o.color, 0.7);
 
   if (!peaks || halfH <= 1) {
     ctx.fillRect(cx0, midY - 0.5, cx1 - cx0, 1);
@@ -307,6 +310,12 @@ function drawAudioContent(
   for (let i = n - 1; i >= 0; i--) ctx.lineTo(cx0 + i, bots[i]);
   ctx.closePath();
   ctx.fill();
+  // Same path, stroked: the ≥0.8px body floor above keeps near-silence a visible
+  // hairline instead of collapsing the outline into the fill.
+  ctx.lineWidth = 1;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = withAlpha(shade(o.color, -0.35), 0.9);
+  ctx.stroke();
 }
 
 function drawMidiContent(

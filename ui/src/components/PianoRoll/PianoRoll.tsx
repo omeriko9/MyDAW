@@ -118,7 +118,11 @@ interface ResizeGesture {
   anchorStart: number;
   anchorLen: number;
   startX: number;
+  /** which edge is being dragged: "r" adjusts length, "l" moves the start. */
+  edge: "l" | "r";
   dLen: number;
+  /** left-edge drag: signed start delta (dLen stays 0). */
+  dStart: number;
 }
 
 interface CreateGesture {
@@ -227,7 +231,9 @@ function gestureToPreview(g: Gesture | null): M.NotePreview | null {
     case "move":
       return { moveIds: g.idSet, dBeat: g.dBeat, dPitch: g.dPitch, copy: g.copy };
     case "resize":
-      return { resizeIds: g.idSet, dLen: g.dLen };
+      return g.edge === "l"
+        ? { resizeIds: g.idSet, dStart: g.dStart }
+        : { resizeIds: g.idSet, dLen: g.dLen };
     case "create":
       return { createNote: g.note };
     case "erase":
@@ -1386,7 +1392,9 @@ function Editor({ track, clip }: EditorProps) {
         anchorStart: hit.note.startBeat,
         anchorLen: hit.note.lengthBeats,
         startX: x,
+        edge: hit.edge,
         dLen: 0,
+        dStart: 0,
       };
       return;
     }
@@ -1601,6 +1609,18 @@ function Editor({ track, clip }: EditorProps) {
       case "resize": {
         const step = e.shiftKey ? 0 : stepRef.current;
         const rawD = (x - g.startX) / v.zoomX;
+        if (g.edge === "l") {
+          // Left edge: snap the anchor's START; length shrinks/grows by the same delta.
+          let dStart = M.snapRound(g.anchorStart + rawD, step) - g.anchorStart;
+          dStart = M.clampDStart(dStart, g.anchorStart, g.anchorLen);
+          g.dStart = dStart;
+          showDragHud(
+            e.clientX,
+            e.clientY,
+            M.lengthLabel(g.anchorLen - dStart) + snapHint(e.shiftKey),
+          );
+          break;
+        }
         const end0 = g.anchorStart + g.anchorLen;
         let dLen = M.snapRound(end0 + rawD, step) - end0;
         dLen = Math.max(dLen, M.MIN_NOTE_LEN - g.anchorLen);
@@ -1692,12 +1712,22 @@ function Editor({ track, clip }: EditorProps) {
         return;
       }
       case "resize": {
-        if (g.dLen === 0) return;
+        if (g.dLen === 0 && g.dStart === 0) return;
         const update: NoteUpdate[] = [];
         let anchorFinal = g.anchorLen;
         for (const id of g.ids) {
           const n = byId.get(id);
           if (!n) continue;
+          if (g.edge === "l") {
+            // Left edge: the start moves and the length shrinks by the same delta,
+            // clamped per note (short notes stop at MIN_NOTE_LEN, starts stop at 0).
+            const d = M.clampDStart(g.dStart, n.startBeat, n.lengthBeats);
+            if (d === 0) continue;
+            const len = n.lengthBeats - d;
+            if (id === g.anchorId) anchorFinal = len;
+            update.push({ noteId: id, patch: { startBeat: n.startBeat + d, lengthBeats: len } });
+            continue;
+          }
           const len = Math.max(M.MIN_NOTE_LEN, n.lengthBeats + g.dLen);
           if (id === g.anchorId) anchorFinal = len;
           if (len !== n.lengthBeats) update.push({ noteId: id, patch: { lengthBeats: len } });

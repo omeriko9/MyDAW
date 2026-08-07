@@ -109,6 +109,10 @@ export const checks = [
       // BEFORE the console is read: reload() returns as soon as the app mounts, and the
       // interesting logs come from the render that follows it (waveforms, meters, the
       // project arriving). Reading the buffer first only ever saw an empty page.
+      // Track headers render only after the hello project arrives — under load a bare
+      // eval here read an empty list (same race as automation-lanes, hit in gate runs).
+      await s.untilEval("the fixture's track headers render", () =>
+        document.querySelectorAll(".tlh-row").length >= 4);
       const dom = await s.eval(() => ({
         root: document.querySelector("#root")?.childElementCount ?? 0,
         headers: document.querySelectorAll(".tlh-row").length,

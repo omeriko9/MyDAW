@@ -21,3 +21,9 @@
   .ir-head, .ir-row { grid-template-columns:minmax(180px, 2fr) 80px minmax(120px, 1fr) 92px; }
   .ir-head > :nth-child(3), .ir-row > :nth-child(3) { display:none; }
 }
+
+.ir-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
