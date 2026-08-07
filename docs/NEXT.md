@@ -120,48 +120,26 @@ Vst2Host DLL-search fix). The queue below is what's left AFTER that list.
 
 ## QUEUED — next up
 
-Shipped the same day (commits `2c55809`, `7632ed9`): PR left-edge resize, Alt+edge
-repeat-clone, record-select, Shift-fast nudge, Ctrl+S-from-anywhere, waveform outline,
-instrument drop-replace, rack remove, Add FX Track, and the five host perf fixes
-(timeBeginPeriod, EcoQoS opt-out, message-only pump window, suspend-around-setState +
-120 s chunk capture, install.reg-only bundle discovery + warn default off). Remaining:
+### 1. Omer re-tests Kontakt 8 / Addictive Drums 2 on the perf fixes (`7632ed9`)
+Five root causes fixed (host `timeBeginPeriod`, Win11 EcoQoS opt-out, message-only pump
+window so control traffic survives plugin modal loops, suspend/resume around setState +
+120 s chunk capture, install.reg-only capture-bundle discovery + miss-diagnostics off).
+IF STILL SLOW: the engine log's per-instance `captureOverlay` line is the first check
+(`files:true` = a bundle is still arming for that plugin). Then: coalesce
+`event/pluginParams` (one WS frame per param change today) and move the periodic
+getState captures off the host GUI thread.
 
-### 1. Add Audio Track dialog: mono/stereo + input (device::channel) + Inspector edit
-Recon done (all five entry points funnel through `addTrackMenuItems`,
-TrackHeaders.tsx:115): store-driven dialog (DialogsState + DialogsHost), payload
-`{channels, inputDevice, inputChannel, index}` → `addTrack` then `setTrack`. Lift
-ChannelStrip's `InputSelect` option builder (running-driver-only, `dev.id::ch`
-encoding, pairs stride 2) into a shared lib helper and reuse it in the dialog AND in
-Inspector TrackSection (whose current pair-stride-1 options should be reconciled).
-NOTE: `channels` is add-time-only (TrackPatch has no channels field) — the dialog is
-the only place mono/stereo can be honest.
+### 2. Omer's reaction to the Production Guide's goals + relevance rules
+Which suggestions feel right on a real project drives round 2 of the rules, and the
+guide's goals name the outcome-level flows worth building (step 3 of the techniques
+redirect: outcome flows become the primary catalog, 2-steppers demote to building
+blocks inside them).
 
-### 2. Live waveform while recording
-Engine streams recorded-so-far peaks (AudioRecorder already owns the written frames;
-mirror event/recordingNotes' shape — ~15 Hz event/recordingPeaks with min/max buckets
-since the take start), ClipCanvas draws the growing take rectangle + wave on armed
-tracks between record start/stop. The recording frame + recordingNotes plumbing is the
-template.
-
-### 3. Eliminate "instrument track per MIDI track" — NEEDS OMER'S DIRECTION
-Recon (2026-08-07): the RT graph ALREADY renders instrument inserts on MIDI-kind
-tracks — only the command-layer guard (Commands.cpp `pluginAdd`: "MIDI tracks cannot
-host plugins"), the CPR importer's insert skip, and three UI mirrors enforce the
-split. Three candidate directions:
-  (a) Rack-first UX: keep the model; hide clip-less feeder-fed instrument hosts from
-      the ARRANGEMENT track list (they stay in mixer+rack); all create flows route
-      through the rack. Cheapest, no model change.
-  (b) Merge: allow instruments directly on MIDI tracks (drop the guard), making
-      Cubase-style "instrument track" the one concept; the rack then lists tracks
-      with instruments + shared hosts. Model-simplifying but touches import,
-      freeze, catalog techniques, SPEC §8.4 ("source is first isInstrument insert").
-  (c) First-class rack entity separate from tracks — deepest change, not recommended.
-
-### 4. VST perf follow-ups (after Omer re-tests Kontakt/AD2 on 7632ed9)
-If still slow: check the per-instance `captureOverlay` line in the engine log
-(files:true = a bundle is still arming for that plugin), then per-param broadcast
-coalescing (event/pluginParams is one WS frame per param change) and moving getState
-captures off the host GUI thread.
+### 3. Rack ⇄ Cubase-instrument-track follow-ups
+Now that MIDI tracks convert in place (`31ebfe5`), the Instrument Rack's remaining job
+is SHARED/multitimbral hosts. Worth doing when it bites: list converted instrument
+tracks in the rack too (read-only rows), and offer "extract to shared host" for a track
+several MIDI parts should drive.
 
 ---
 
