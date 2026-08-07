@@ -663,6 +663,8 @@ export interface HelloReply {
   midiMaps?: MidiMapsState;
   /** engine-side unsaved-changes flag — absent on older engines */
   dirty?: boolean;
+  /** single-capture-endpoint honesty (SPEC §5.5) — absent on older engines */
+  captureState?: CaptureStateEvent;
 }
 
 export interface ProjectLoadRequest {
@@ -1830,6 +1832,25 @@ export interface MidiActivityEvent {
   trackId?: number;
 }
 
+/** An armed/monitoring audio track whose chosen input the single capture endpoint
+ *  cannot honour — it records the OPEN device's signal instead (SPEC §5.5). */
+export interface CaptureConflict {
+  trackId: number;
+  /** The input device this track asked for. */
+  device: string;
+}
+
+/** event/captureState + session/hello `captureState` (SPEC §5.5 / §10 honesty):
+ *  v1 opens ONE capture endpoint — the first armed/monitoring audio track's input.
+ *  Any other armed/monitoring audio track naming a different device is a conflict. */
+export interface CaptureStateEvent {
+  /** The open capture endpoint ("default" = system default); "" = capture closed. */
+  deviceId: string;
+  conflicts: CaptureConflict[];
+  /** Capture failed to open — input recording/monitoring is silent. */
+  error?: string;
+}
+
 /** A note in an in-progress recording take (clip-relative beats; live-growing). */
 export interface RecordingNote {
   pitch: number;
@@ -2115,6 +2136,7 @@ export interface EventMap {
   "event/meters": MetersEvent;
   "event/midiActivity": MidiActivityEvent;
   "event/recordingNotes": RecordingNotesEvent;
+  "event/captureState": CaptureStateEvent;
   "event/importProgress": ImportProgressEvent;
   "event/exportProgress": ExportProgressEvent;
   "event/dopProgress": DopProgressEvent;
@@ -2301,6 +2323,7 @@ export const Ev = {
   meters: "event/meters",
   midiActivity: "event/midiActivity",
   recordingNotes: "event/recordingNotes",
+  captureState: "event/captureState",
   importProgress: "event/importProgress",
   exportProgress: "event/exportProgress",
   scanProgress: "event/scanProgress",

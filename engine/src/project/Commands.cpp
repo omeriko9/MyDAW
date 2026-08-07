@@ -702,12 +702,17 @@ void CommandProcessor::syncEngineFromModel() {
     const Project& p = ctx_.model->project;
     if (ctx_.tempoMap)
         ctx_.tempoMap->setMap(p.tempoMap, p.timeSigMap);
-    if (ctx_.transport)
+    if (ctx_.transport) {
         ctx_.transport->setLoopBeats(p.loop.startBeat, p.loop.endBeat, p.loop.enabled);
         ctx_.transport->setPunchBeats(p.punch.startBeat, p.punch.endBeat, p.punch.enabled);
+    }
     syncArrangerToTransport(); // jump table follows the restored model + tempo
     pushEffectiveMutes();
     rebuildGraph();
+    // Load/undo/redo can restore arm/monitor/inputDevice states wholesale; without this the
+    // capture stream (and event/captureState) kept serving the PREVIOUS project's choices.
+    if (captureReconcileHook)
+        captureReconcileHook();
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +759,13 @@ json CommandProcessor::execute(const std::string& type, const json& payload,
 
     if (r.structural)
         rebuildGraph();
+    // Central capture reconcile (SPEC §7: capture opens only while armed/monitoring; §5.5
+    // honesty): ANY mutating command can change which endpoint the model needs — arm/
+    // monitor/input patches, but equally removing or duplicating an armed track. A cheap
+    // no-op (two track walks) when nothing input-related changed. Before the transient
+    // early-return so a transient arm patch behaves like it always did.
+    if (r.mutated && captureReconcileHook)
+        captureReconcileHook();
     if (transient || !r.mutated)
         return reply;
 
@@ -1532,10 +1544,9 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         return json::object();
     }
     (void)transient; // transient handling (no undo/no events) is done by execute()
-    // Arming / monitoring / re-pointing an audio input reopens the capture stream so the
-    // microphone is actually captured (SPEC §7: capture opens only while armed/monitoring).
-    if (inputChanged && captureReconcileHook)
-        captureReconcileHook();
+    (void)inputChanged; // capture reconcile is central now: execute() runs it after every
+                        // mutating command (arm/monitor/input patches, but equally removing
+                        // or duplicating an armed track — the per-command call missed those)
     r.label = "Edit Track";
     r.scope = mixerOnly ? "mixer" : "track";
     r.eventTrackIds.push_back(id);

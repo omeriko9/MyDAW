@@ -38,6 +38,7 @@ import {
 import { applyMetronome } from "../../store/metronome";
 import { timeSigAtBeat } from "../../lib/time";
 import { quantizeSelection } from "../../lib/keyboard";
+import { describeCaptureState } from "../../lib/captureConflict";
 import type { Grid } from "../../protocol/types";
 import { Icon } from "../common/icons";
 import type { IconName } from "../common/icons";
@@ -539,6 +540,7 @@ export default function TransportBar() {
   const dirty = useStore((s) => s.dirty);
   const status = useStore((s) => s.engineStatus);
   const exportProgress = useStore((s) => s.exportProgress);
+  const captureState = useStore((s) => s.captureState);
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const sizingMode = useStore((s) => s.sizingMode);
@@ -559,6 +561,10 @@ export default function TransportBar() {
       ? project.name
       : `${project.name}.mydaw`
     : "No project";
+  // Capture honesty (SPEC §5.5/§10): a persistent chip while an armed track would record
+  // the wrong input (or no input at all) — a toast alone outlives its 10 s and the take
+  // being recorded wrong does not.
+  const captureWarning = describeCaptureState(captureState, project);
 
   return (
     <div className="transport-bar">
@@ -663,6 +669,11 @@ export default function TransportBar() {
       <div className="tb-side tb-side-right">
         {/* right cluster: chips, meter, panic, save, panel toggles — one wrap unit */}
         <div className="tb-group tb-right">
+        {captureWarning !== null && (
+          <span className="tb-chip warn tb-capture-warn" title={captureWarning.detail}>
+            <Icon name="warning" size={12} /> {captureWarning.chip}
+          </span>
+        )}
         {exportProgress !== null && (
           <span className="tb-chip accent" title="Export in progress">
             Export {Math.round(exportProgress)}%

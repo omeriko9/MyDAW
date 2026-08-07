@@ -25,7 +25,7 @@
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -121,6 +121,39 @@ const SUITES = [
     note: "needs a local model server — run it by hand" },
 ];
 
+/* ------------------------------------------------- Dropbox sync interference */
+
+// Three gate runs flaked on 2026-08-02 (stock-sampler ×2, track-types ×1) — all inside
+// runs that took 230 s+ instead of ~113 s, each coinciding with Dropbox re-syncing build
+// artifacts a concurrent working session had just written. Every suite passed 5/5
+// standalone: load-starved harness timing, not suite bugs. The artifacts Dropbox churns
+// on are all rebuildable AND gitignored (verified: `git ls-files` lists nothing under
+// any of these), so the fix is to tell Dropbox to skip them entirely via its documented
+// per-item ignore — on Windows an NTFS alternate stream, `<dir>:com.dropbox.ignored`=1.
+// Deliberately permanent, not scoped to the run: build outputs have no cross-machine
+// value (other machines rebuild), and the same churn also produced ui/dist emptyDir
+// failures and LNK1104s on the just-killed engine exe. Idempotent; one line when it
+// actually marks something, silent forever after.
+const DROPBOX_IGNORE_DIRS =
+  ["build", "build32", "out", path.join("ui", "dist"), path.join("ui", "node_modules")];
+
+function markDropboxIgnored() {
+  if (process.platform !== "win32" || !/dropbox/i.test(ROOT)) return;
+  const marked = [];
+  for (const rel of DROPBOX_IGNORE_DIRS) {
+    const dir = path.join(ROOT, rel);
+    if (!existsSync(dir)) continue;
+    const stream = dir + ":com.dropbox.ignored";
+    try {
+      if (readFileSync(stream, "utf8").trim() === "1") continue; // already marked
+    } catch { /* stream absent — mark it */ }
+    try { writeFileSync(stream, "1"); marked.push(rel); } catch { /* best effort */ }
+  }
+  if (marked.length)
+    console.log(`dropbox-ignore: marked ${marked.join(", ")} (rebuildable artifacts — ` +
+                "Dropbox re-syncing them mid-run starved harness timing)\n");
+}
+
 /* ---------------------------------------------------------------------- running */
 
 const run = (s) => new Promise((resolve) => {
@@ -168,6 +201,8 @@ async function main() {
     return 0;
   }
   if (picked.length === 0) { console.log("nothing selected"); return 1; }
+
+  markDropboxIgnored(); // stop Dropbox churn on build artifacts before timing anything
 
   console.log(`gate: ${picked.length} suite(s), ${full ? "full" : "fast"} tier\n`);
   const results = [];

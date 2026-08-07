@@ -443,6 +443,18 @@ the entire drag.
 ### 5.5 Recording & media
 - `cmd/track.set recordArm` + `transport/record` records armed audio tracks (WASAPI capture of
   selected input) to `audio/rec-<n>.wav` and armed MIDI tracks from enabled MIDI inputs.
+- **Single capture endpoint + honesty** (2026-08-07): v1 opens ONE capture device — the FIRST
+  armed/monitoring audio track's input (`App::desiredCaptureDeviceId`; "" model selection →
+  "default") — and every armed node is fed its buffer. A second armed/monitoring audio track
+  naming a different device would silently record the winner's signal, so the engine reports
+  `captureState {deviceId, conflicts:[{trackId, device}], error?}` — in `session/hello` and,
+  on every change, as `event/captureState` (§10: the UI shows a persistent TransportBar chip
+  + a one-shot toast; `error` = the capture stream failed to open, so input is silent).
+  Reconciled centrally after every mutating command (`CommandProcessor::execute`) and on
+  load/undo/redo (`syncEngineFromModel`), so removing/duplicating an armed track or undoing
+  an arm keeps both the stream and the report current. Device comparison is textual: "" vs
+  the default device's literal id counts as a conflict (over-warns, never under-warns).
+  Multi-endpoint capture is the real fix and stays deferred (STUBS.md).
 - **Input gain** (`Track.inputGainDb`, audio tracks only, −24..+24 dB, default 0, set via
   `cmd/track.set {inputGainDb}`): a pre-insert gain stage applied to everything entering the
   track's insert chain — live input and clip playback alike. **The recorded FILE is RAW**: the
@@ -1161,8 +1173,9 @@ VST3-off fallback mode, native-UI-streaming-to-browser (future design §11 of AR
 host-side capture via Windows.Graphics.Capture → WebRTC video track + input forwarding channel;
 NOT implemented; "Open native UI" opens a real local window instead — implemented), time-stretch
 (offline `cmd/clip.stretch` WSOLA + transpose is implemented; interactive *resize*-drag is still
-trim only), multichannel >2 (schema+graph ready, UI exposes mono/stereo, panner is stereo), MIDI
-hardware output, plugin preview/audition without track. STUBS.md explains exactly where each
+trim only), multichannel >2 (schema+graph ready, UI exposes mono/stereo, panner is stereo),
+multi-endpoint capture (§5.5: one device at a time, conflicts surfaced via `captureState`),
+plugin preview/audition without track. STUBS.md explains exactly where each
 interface is and what to implement.
 
 ## 11. Definition of done (v1 smoke)

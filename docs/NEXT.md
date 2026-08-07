@@ -4,7 +4,33 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-02 (later) — **MIDI note chase SHIPPED** (`TrackNode::scheduleNoteChaseRt`,
+Last updated: 2026-08-07 — **both open fix items SHIPPED**, clearing the deck for the
+Production Techniques arc (Omer: "first fix what needs fixin', then the prod techniques").
+
+1. **Capture honesty (the former NOW)**: the engine now reports
+   `captureState {deviceId, conflicts:[{trackId,device}], error?}` in `session/hello` and as
+   `event/captureState` on change (SPEC §5.5); the UI shows a persistent TransportBar chip +
+   one-shot toast when an armed track would record the WRONG input, or none at all
+   (`ui/src/lib/captureConflict.ts`). While in there, three engine gaps got real fixes:
+   capture reconcile is now CENTRAL (`CommandProcessor::execute` after every mutating
+   command + `syncEngineFromModel` for load/undo/redo) — before, removing/duplicating an
+   armed track or undoing an arm left the capture stream (and now the report) stale; a
+   capture-open FAILURE is surfaced (`error`) instead of being log-only; and a missing-brace
+   bug in `syncEngineFromModel` ran `setPunchBeats` outside its `if (ctx_.transport)` guard.
+   Tests: 4 new checks in `record-capture-test.mjs` (incl. the undo path), ui-smoke
+   `capture-conflict-chip`, vitest `captureConflict.test.ts`. Multi-endpoint capture stays
+   deferred (STUBS.md has the pickup plan).
+
+2. **Gate flake under I/O load (the former QUEUED #1)**: root cause was Dropbox re-syncing
+   rebuildable artifacts mid-run. The gate now marks `build/`, `build32/`, `out/`,
+   `ui/dist/`, `ui/node_modules/` with Dropbox's documented per-item ignore
+   (`<dir>:com.dropbox.ignored` NTFS stream — `markDropboxIgnored()` in `scripts/gate.mjs`;
+   idempotent, permanent by design, all five verified untracked). This also kills the
+   ui/dist emptyDir failures and the LNK1104-on-running-exe class. The "never write to the
+   repo while a gate runs" rule is RETIRED unless the flake reappears — if it does, capture
+   the slow-run log before touching timeouts.
+
+Earlier (2026-08-02): **MIDI note chase SHIPPED** (`TrackNode::scheduleNoteChaseRt`,
 gate suite `midi-chase`, SPEC §7 "Chasing"). Found from a real user project: a Build-Up Riser
 was inaudible because the whole technique is ONE held note and the in-block scheduler only ever
 saw events at/after the playhead — so any playback start, locate or loop wrap inside a held note
@@ -45,44 +71,21 @@ hit while *playing* — the flaky gate assertion, then MIDI hardware output, the
 scale/robustness items. The multi-input capture trap below becomes a blocker the moment
 someone else records with it — and "someone else" now has an exe they can download.
 
-## NOW — Single capture endpoint: fix or surface honestly
+## NOW — Production Techniques growth (Omer-paced)
 
-`App::desiredCaptureDeviceId()` (App.cpp:535) opens ONE endpoint — the first
-armed/monitoring audio track's — and hands the same buffer to every armed node. A second
-armed track with a different input silently records the first one's audio. Real fix =
-multi-endpoint capture (sizeable); honest v1 = warn in the UI when two armed tracks name
-different devices (SPEC §10). Must land before anyone else multi-tracks a live source —
-and v1.1.0 is on GitHub Releases, so "someone else" is one download away.
-
-(Promoted 2026-08-02: MIDI hardware output — the previous NOW — shipped; SPEC §5.5,
-STUBS. The model shape landed exactly as sketched here: `Track.midiOutDevice` mirroring
-`inputDevice`, tapped where `midiOutChannel` re-stamps what a track ORIGINATES, with a
-new non-RT sender thread fed by a lock-free ring.)
+Both fix items above are shipped; per Omer (2026-08-07) the focus is the techniques
+wizard. 55 techniques shipped (11 per category, Project ▸ Production Techniques… /
+Alt+T). The growth queue is docs/PRODUCTION_TECHNIQUES_BACKLOG.md — per-category
+queues plus the primitive-gaps table; the stock-saturator gap is CLOSED,
+M/S・de-esser・multiband lead the remainder.
 
 ## QUEUED
 
-### 1. Engine suites flake when the gate runs under I/O load (3× on 2026-08-02)
-
-Pattern nailed down over three occurrences: `stock-sampler` twice and `track-types`
-once (post-estimator-fix, so NOT measurement) failed ONLY inside gate runs that took
-230 s+ instead of the normal ~113 s — and each slow run coincided with concurrent
-repo writes (ui build → Dropbox sync churn) from the working session. Every suite
-passes 5/5 standalone. So: load-starved harness timing, not suite bugs.
-
-Working rule until fixed: never write to the repo while a gate runs. Real fix
-candidates: gate marks build/ AND the repo tmp paths Dropbox-ignored during runs,
-or per-suite retry-once-on-slow-run, or engine-boot/render timeout headroom scaled
-by a load probe. Diagnose from a captured slow-run log; don't lengthen timeouts
-blindly.
+(nothing — the gate flake and the capture item both shipped 2026-08-07, see above)
 
 ---
 
 ## ONGOING — not blocked, just not next
-
-- **Production Techniques**: 55 guided wizards shipped 2026-08-01/02 (11 per category —
-  Project ▸ Production Techniques… / Alt+T). Growing further is Omer-paced via
-  docs/PRODUCTION_TECHNIQUES_BACKLOG.md (per-category queues + the primitive-gaps table;
-  the stock-saturator gap is CLOSED, M/S・de-esser・multiband lead the remainder).
 
 - **Sample-accurate live MIDI** (ROADMAP Phase 4): live input lands at block offset 0
   (`MidiInput.cpp:277`, ≤1.3 ms jitter at 64 frames); the QPC timestamps needed to place it

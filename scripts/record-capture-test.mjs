@@ -84,10 +84,12 @@ if (!up) die(2, "engine failed to boot:\n" + elog.slice(-800));
 
 let nextId = 1;
 const pending = new Map();
+let lastCaptureState = null; // most recent event/captureState payload (SPEC §5.5 honesty)
 const sock = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error("ws")); });
 sock.onmessage = (m) => {
   const j = JSON.parse(m.data);
+  if (j.type === "event/captureState") lastCaptureState = j.payload;
   if (j.replyTo == null) return;
   const p = pending.get(j.replyTo);
   if (!p) return;
@@ -101,6 +103,15 @@ const req = (type, payload = {}, ms = 30000) => {
     pending.set(id, res);
     setTimeout(() => { if (pending.delete(id)) rej(new Error(type + ": timeout")); }, ms);
   });
+};
+/** Poll for the event/captureState we expect; returns the last one seen either way. */
+const untilCapture = async (pred, ms = 3000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (pred(lastCaptureState)) return lastCaptureState;
+    await sleep(50);
+  }
+  return lastCaptureState;
 };
 
 try {
@@ -173,6 +184,46 @@ try {
     report("channel 1 is the same ramp at half amplitude",
       Math.abs(c1 * 2 - c0) < 1e-3, `ch0=${c0.toFixed(5)} ch1=${c1.toFixed(5)}`);
   }
+
+  // ---- single-capture-endpoint honesty (SPEC §5.5 / §10) -----------------------------
+  // v1 opens ONE endpoint: the first armed/monitoring audio track wins, and every armed
+  // node is fed its buffer. A second armed track naming a DIFFERENT device would silently
+  // record the winner's signal — so the engine must SAY so (event/captureState + hello),
+  // which is what these pin down. Driver-independent: no reconfigure happens because the
+  // winner does not change.
+  report("hello carries captureState for the armed track",
+    hello.payload.captureState?.deviceId === "default" &&
+      hello.payload.captureState?.conflicts?.length === 0,
+    JSON.stringify(hello.payload.captureState));
+
+  const t2 = (await req("cmd/track.add", { kind: "audio", name: "Cap2" })).payload.track;
+  lastCaptureState = null;
+  await req("cmd/track.set",
+    { trackId: t2.id, patch: { inputDevice: "Imaginary Input", recordArm: true } });
+  const conflicted = await untilCapture((c) => c && c.conflicts.length > 0);
+  report("arming a second track on another device raises the conflict",
+    !!conflicted && conflicted.deviceId === "default" &&
+      conflicted.conflicts.length === 1 &&
+      conflicted.conflicts[0].trackId === t2.id &&
+      conflicted.conflicts[0].device === "Imaginary Input" &&
+      conflicted.error === undefined,
+    JSON.stringify(conflicted));
+
+  // Undo restores arm/input states WHOLESALE (syncEngineFromModel), which must reconcile
+  // capture too — this failed silently before the hook moved there.
+  lastCaptureState = null;
+  await req("edit/undo", {});
+  const cleared = await untilCapture((c) => c && c.conflicts.length === 0);
+  report("undoing the arm clears the conflict (undo/load path reconciles)",
+    !!cleared && cleared.deviceId === "default" && cleared.conflicts.length === 0,
+    JSON.stringify(cleared));
+
+  lastCaptureState = null;
+  await req("cmd/track.set", { trackId: track.id, patch: { recordArm: false } });
+  const closed = await untilCapture((c) => c && c.deviceId === "");
+  report("unarming the last track reports capture closed",
+    !!closed && closed.deviceId === "" && closed.conflicts.length === 0,
+    JSON.stringify(closed));
 } catch (e) {
   report("harness completed", false, e?.stack ?? String(e));
 }

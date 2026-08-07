@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "12c28d012b2aae135a8410a97ced4097ef2fe7c51b10a5dfd2cfa6c406cf2f90";
+export const AGENT_CATALOG_SHA256 = "aa2b843716717d23bdec65ec40b9e4de87ab1d437d760dcfd019178a9b523125";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -659,6 +659,49 @@ export const AGENT_CATALOG: AgentCatalog = {
         64
       ],
       "type": "number"
+    },
+    "CaptureConflict": {
+      "additionalProperties": false,
+      "description": "An armed/monitoring audio track whose chosen input the single capture endpoint cannot honour — it records the open device's signal instead.",
+      "properties": {
+        "device": {
+          "description": "the input device this track asked for",
+          "type": "string"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "device"
+      ],
+      "type": "object"
+    },
+    "CaptureState": {
+      "additionalProperties": false,
+      "description": "Single-capture-endpoint honesty (SPEC §5.5): the device the engine has open, tracks it cannot honour, and any capture-open failure. session/hello + event/captureState.",
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/schemas/CaptureConflict"
+          },
+          "type": "array"
+        },
+        "deviceId": {
+          "description": "open capture endpoint; \"\" = capture closed",
+          "type": "string"
+        },
+        "error": {
+          "description": "capture failed to open — input recording/monitoring is silent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "conflicts"
+      ],
+      "type": "object"
     },
     "CcEditRequest": {
       "additionalProperties": false,
@@ -1807,6 +1850,14 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "automationWrite": {
           "description": "automation-write arm — absent on older engines",
+          "type": "boolean"
+        },
+        "captureState": {
+          "$ref": "#/schemas/CaptureState",
+          "description": "single-capture-endpoint honesty — absent on older engines"
+        },
+        "dirty": {
+          "description": "engine-side unsaved-changes flag — absent on older engines",
           "type": "boolean"
         },
         "engine": {

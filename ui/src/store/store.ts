@@ -39,7 +39,9 @@ import {
   validWorkspaces,
 } from "../shell/shellTypes";
 import type { RibbonState, ShellMode, WorkspacesState } from "../shell/shellTypes";
+import { captureWarningKey, describeCaptureState } from "../lib/captureConflict";
 import type {
+  CaptureStateEvent,
   Clip,
   EngineStatus,
   GetDevicesReply,
@@ -254,6 +256,10 @@ export interface DawState {
 
   /* plugin runtime states: instanceId → last event/pluginState */
   pluginStates: Record<number, PluginStateEvent>;
+
+  /** Single-capture-endpoint honesty (SPEC §5.5): seeded from session/hello, kept
+   *  current by event/captureState. null = engine never reported (older engine). */
+  captureState: CaptureStateEvent | null;
 
   /* progress */
   scanProgress: ScanProgressEvent | null;
@@ -508,6 +514,7 @@ export const useStore = create<DawState>((set) => ({
   midiMaps: [],
   midiLearnArm: null,
   pluginStates: {},
+  captureState: null,
 
   scanProgress: null,
   importProgress: null,
@@ -736,6 +743,7 @@ async function sendHello(): Promise<void> {
       // Older engines omit the field; keep whatever we had rather than clearing it.
       ...(r.dirty !== undefined ? { dirty: r.dirty } : {}),
     });
+    adoptCaptureState(r.captureState); // seed the capture-honesty mirror (optional field)
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)
     reconcileAutomationWrite(r.automationWrite);
     reconcileMidiMaps(r.midiMaps);
@@ -815,6 +823,27 @@ ws.on("event/midiActivity", (ev) => {
 
 ws.on("event/recordingNotes", (ev) => {
   recordingBus.emit(ev);
+});
+
+/**
+ * Capture honesty (SPEC §5.5 / §10): mirror the state (TransportBar renders a persistent
+ * chip from it) and toast ONCE per distinct problem — arming a second track on a different
+ * input would otherwise silently record the wrong source. The key dedupes the ~identical
+ * event hello re-sends on reconnect.
+ */
+function adoptCaptureState(cs: CaptureStateEvent | undefined): void {
+  if (cs === undefined) return; // older engines: keep the local mirror
+  const s = useStore.getState();
+  const prevKey = captureWarningKey(s.captureState);
+  useStore.setState({ captureState: cs });
+  const key = captureWarningKey(cs);
+  if (key === "" || key === prevKey) return;
+  const warning = describeCaptureState(cs, useStore.getState().project);
+  if (warning) showToast(warning.detail, "error");
+}
+
+ws.on("event/captureState", (ev) => {
+  adoptCaptureState(ev);
 });
 
 ws.on("event/pluginState", (ev) => {

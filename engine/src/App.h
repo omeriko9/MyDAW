@@ -170,8 +170,14 @@ public:
     // armed / monitored audio track ("" model selection -> "default"), or "" when no audio
     // track wants input (capture stays closed). Main thread.
     std::string desiredCaptureDeviceId() const;
+    // {deviceId, conflicts:[{trackId, device}], error?} — the single capture endpoint plus
+    // every armed/monitoring audio track whose chosen input it can NOT honour (v1 opens ONE
+    // device; those tracks are fed the winner's signal). Carried by session/hello and, on
+    // change, by event/captureState (SPEC §5.5 / §10 honesty). Main thread.
+    json captureStateJson() const;
     // Open / close / repoint the WASAPI capture stream so it matches desiredCaptureDeviceId().
-    // No-op when it already matches. Reconfigures the driver otherwise. Main thread.
+    // No-op when it already matches. Reconfigures the driver otherwise. Broadcasts
+    // event/captureState when the honest picture (device/conflicts/error) changed. Main thread.
     void reconcileCaptureDevice();
 
     // Spawn a detached child engine (a "new project window") on a free loopback port,
@@ -318,6 +324,14 @@ private:
 
     // recording session
     bool recordingActive_ = false;
+
+    // Capture honesty (SPEC §5.5): last broadcast event/captureState payload (dedupe) and
+    // the last capture reconfigure failure ("" = none). reconcilingCapture_ breaks the
+    // re-entry loop reconcile -> reconfigureAudio -> prepareGraphFormat ->
+    // syncEngineFromModel -> captureReconcileHook. Main thread only.
+    json lastCaptureState_;
+    std::string captureError_;
+    bool reconcilingCapture_ = false;
 
     // Bumped by prepareForModelReplace (main thread): posted per-asset reconcile jobs
     // captured under an older epoch are dropped instead of mutating the NEW model

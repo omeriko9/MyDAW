@@ -561,23 +561,67 @@ std::string App::desiredCaptureDeviceId() const {
     return {};
 }
 
-void App::reconcileCaptureDevice() {
-    const std::string desired = desiredCaptureDeviceId();
-    if (desired == currentConfig_.captureDeviceId)
-        return; // capture stream already matches what the model needs
-    AudioConfig cfg = currentConfig_;
-    cfg.captureDeviceId = desired;
-    json actual;
-    std::string err;
-    if (!reconfigureAudio(cfg, actual, err)) {
-        Log::warn("capture reconcile failed (%s) — input recording/monitoring may be silent",
-                  err.c_str());
-        return;
+json App::captureStateJson() const {
+    // Winner + losers of the single-capture-endpoint rule: the first armed/monitored audio
+    // track picks the device every armed node hears (desiredCaptureDeviceId). Any OTHER
+    // armed/monitoring audio track naming a different device lands in `conflicts` — it will
+    // silently record the winner's signal, so the UI must say so (SPEC §10). Comparison is
+    // textual: "" (default) vs the default device's literal id counts as a conflict, which
+    // over-warns rather than under-warns.
+    std::string winner;
+    bool haveWinner = false;
+    json conflicts = json::array();
+    for (const Track& t : model.project.tracks) {
+        if (t.kind != TrackKind::Audio || !(t.recordArm || t.monitor))
+            continue;
+        const std::string dev = t.inputDevice.empty() ? std::string("default") : t.inputDevice;
+        if (!haveWinner) {
+            winner = dev;
+            haveWinner = true;
+            continue;
+        }
+        if (dev != winner)
+            conflicts.push_back(json{{"trackId", t.id}, {"device", dev}});
     }
-    if (desired.empty())
-        Log::info("capture closed (no audio track armed/monitoring)");
-    else
-        Log::info("capture opened on '%s'", desired.c_str());
+    json st{{"deviceId", haveWinner ? winner : std::string()},
+            {"conflicts", std::move(conflicts)}};
+    if (!captureError_.empty())
+        st["error"] = captureError_;
+    return st;
+}
+
+void App::reconcileCaptureDevice() {
+    if (reconcilingCapture_)
+        return; // reconfigureAudio -> prepareGraphFormat -> syncEngineFromModel re-enters
+    reconcilingCapture_ = true;
+    const std::string desired = desiredCaptureDeviceId();
+    if (desired != currentConfig_.captureDeviceId) {
+        AudioConfig cfg = currentConfig_;
+        cfg.captureDeviceId = desired;
+        json actual;
+        std::string err;
+        if (!reconfigureAudio(cfg, actual, err)) {
+            Log::warn("capture reconcile failed (%s) — input recording/monitoring may be silent",
+                      err.c_str());
+            captureError_ = err;
+        } else {
+            captureError_.clear();
+            if (desired.empty())
+                Log::info("capture closed (no audio track armed/monitoring)");
+            else
+                Log::info("capture opened on '%s'", desired.c_str());
+        }
+    } else if (desired.empty()) {
+        captureError_.clear(); // nothing wanted: a stale failure must not outlive its cause
+    }
+    reconcilingCapture_ = false;
+    // The honest picture can change while the winning device does not (arming a SECOND
+    // track with a different input), so the event fires on payload change, not device change.
+    json st = captureStateJson();
+    if (st != lastCaptureState_) {
+        lastCaptureState_ = st;
+        broadcastEvent("event/captureState", std::move(st));
+    }
 }
 
 json App::devicesJson() const { return driver->devicesJson(); }

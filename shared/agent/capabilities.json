@@ -632,6 +632,49 @@
       ],
       "type": "number"
     },
+    "CaptureConflict": {
+      "additionalProperties": false,
+      "description": "An armed/monitoring audio track whose chosen input the single capture endpoint cannot honour — it records the open device's signal instead.",
+      "properties": {
+        "device": {
+          "description": "the input device this track asked for",
+          "type": "string"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "device"
+      ],
+      "type": "object"
+    },
+    "CaptureState": {
+      "additionalProperties": false,
+      "description": "Single-capture-endpoint honesty (SPEC §5.5): the device the engine has open, tracks it cannot honour, and any capture-open failure. session/hello + event/captureState.",
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/schemas/CaptureConflict"
+          },
+          "type": "array"
+        },
+        "deviceId": {
+          "description": "open capture endpoint; \"\" = capture closed",
+          "type": "string"
+        },
+        "error": {
+          "description": "capture failed to open — input recording/monitoring is silent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "conflicts"
+      ],
+      "type": "object"
+    },
     "CcEditRequest": {
       "additionalProperties": false,
       "description": "One undo entry for the whole batch (mirrors cmd/notes.edit); granular clip scope.",
@@ -1779,6 +1822,14 @@
         },
         "automationWrite": {
           "description": "automation-write arm — absent on older engines",
+          "type": "boolean"
+        },
+        "captureState": {
+          "$ref": "#/schemas/CaptureState",
+          "description": "single-capture-endpoint honesty — absent on older engines"
+        },
+        "dirty": {
+          "description": "engine-side unsaved-changes flag — absent on older engines",
           "type": "boolean"
         },
         "engine": {

@@ -755,12 +755,25 @@ export const checks = [
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       });
       tt.ok(menu, "the File menu button is present");
+      // Settings moved into a File ▸ Settings submenu (e6e955b): click the parent
+      // item to open it (ContextMenu's activate() opens submenus on click too),
+      // then the "Open Settings…" child. Exact-text matches so a rename explains
+      // itself here instead of as a silent timeout.
       await s.click(menu.x, menu.y);
       await s.untilEval("the File menu opens", () =>
-        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Settings…"));
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Settings"));
+      const parent = await s.eval(() => {
+        const el = [...document.querySelectorAll(".ctx-item")]
+          .find((i) => i.textContent.trim() === "Settings");
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      });
+      await s.click(parent.x, parent.y);
+      await s.untilEval("the Settings submenu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim() === "Open Settings…"));
       const entry = await s.eval(() => {
         const el = [...document.querySelectorAll(".ctx-item")]
-          .find((i) => i.textContent.trim() === "Settings…");
+          .find((i) => i.textContent.trim() === "Open Settings…");
         const b = el.getBoundingClientRect();
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       });
@@ -841,6 +854,41 @@ export const checks = [
 
       await s.probe("cmd/punch.set", { startBeat: 0, endBeat: 0, enabled: false });
       await s.probe("cmd/loop.set", { startBeat: 0, endBeat: 8, enabled: false });
+    },
+  },
+
+  {
+    id: "capture-conflict-chip",
+    title: "arming two audio tracks on different inputs raises the honest warning chip",
+    area: "transport",
+    guards: "NEXT.md NOW item — App::desiredCaptureDeviceId opens ONE endpoint (the first armed track's), so a second armed track on another device silently records the winner's signal; SPEC §10 says the UI must say so (event/captureState → TransportBar chip)",
+    run: async (s, tt) => {
+      const a = (await s.probe("cmd/track.add", { kind: "audio", name: "Cap A" })).payload.track;
+      const b = (await s.probe("cmd/track.add", { kind: "audio", name: "Cap B" })).payload.track;
+      try {
+        tt.ok(!(await s.eval(() => !!document.querySelector(".tb-capture-warn"))),
+          "no chip before any conflict exists (it must be able to be absent)");
+
+        await s.probe("cmd/track.set", { trackId: a.id, patch: { recordArm: true } });
+        await s.probe("cmd/track.set",
+          { trackId: b.id, patch: { inputDevice: "Imaginary Input", recordArm: true } });
+        await s.untilEval("conflict chip appears", () => !!document.querySelector(".tb-capture-warn"));
+
+        const chip = await s.eval(() => {
+          const el = document.querySelector(".tb-capture-warn");
+          return { text: el?.textContent ?? "", title: el?.getAttribute("title") ?? "" };
+        });
+        tt.match(chip.text, /Input conflict/, "chip names the problem");
+        tt.match(chip.title, /Cap B/, "tooltip names the conflicting track");
+        tt.match(chip.title, /Imaginary Input/, "tooltip names the device it asked for");
+
+        await s.probe("cmd/track.set", { trackId: b.id, patch: { recordArm: false } });
+        await s.untilEval("chip clears once the conflict is resolved",
+          () => !document.querySelector(".tb-capture-warn"));
+      } finally {
+        await s.probe("cmd/track.remove", { trackId: b.id });
+        await s.probe("cmd/track.remove", { trackId: a.id });
+      }
     },
   },
 
@@ -945,6 +993,15 @@ export const checks = [
       await s.reload();
 
       // Expand via the header 'A' toggle — the affordance that is about to disappear.
+      // reload() returns at app MOUNT; the header rows render only after the hello
+      // project arrives, so under load a bare eval here read an empty track list
+      // (the one intermittent failure this suite had, 2026-08-07 gate run).
+      await s.untilEval("the MIDI 1 header row renders its controls", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("MIDI 1"));
+        return [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .some((b) => b.textContent.trim() === "A");
+      });
       const a = await s.eval(() => {
         const row = [...document.querySelectorAll(".tlh-row")]
           .find((r) => r.textContent.trim().startsWith("MIDI 1"));

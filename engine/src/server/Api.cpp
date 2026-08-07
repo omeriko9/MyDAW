@@ -646,7 +646,10 @@ json Api::sessionHello() {
                 // which also disabled its auto-save-before-replace guard (File > New/Open
                 // would then discard the edits silently). Seed it from the engine here.
                 {"dirty", app_.projectIO.isDirty()},
-                {"midiMaps", app_.midiMapsJson()}};
+                {"midiMaps", app_.midiMapsJson()},
+                // Capture honesty (SPEC §5.5): a tab connecting mid-session must not need
+                // to wait for the next event/captureState to learn about an input conflict.
+                {"captureState", app_.captureStateJson()}};
 }
 
 json Api::loadProjectPath(const std::string& path, std::string& ec, std::string& em) {
