@@ -476,6 +476,87 @@ export const checks = [
   },
 
   {
+    id: "technique-audition-ab",
+    title: "the wizard's A/B audition really removes and restores the applied edits — and closing mid-Without auto-restores",
+    area: "techniques",
+    guards: "Omer 2026-08-07: 'the techniques are a mystery — let me HEAR them'. Without = undo×N / With = redo×N must be exact-state symmetric ON THE ENGINE (not UI state), stage actions must lock while in Without (a new command would truncate the redo tail and strand the With state), and closing the wizard mid-Without must auto-restore — otherwise audition becomes silent data loss",
+    run: async (s, tt) => {
+      const insertsOnMaster = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project.masterTrack.inserts;
+      const before = await insertsOnMaster();
+
+      const clickStarts = async (selector, text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+            .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
+          if (!el) return null;
+          el.scrollIntoView({ block: "center" });
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`not found: ${selector} starting with ${JSON.stringify(text)}`);
+        await s.click(box.x, box.y);
+      };
+
+      // Open the wizard on Master Glue Chain and apply stage 1 (stock compressor).
+      await clickStarts('[role="menuitem"][aria-label="Project"]', "");
+      await s.untilEval("Project menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Production Techniques")));
+      await clickStarts(".ctx-item", "Production Techniques");
+      await s.untilEval("technique cards render", () =>
+        document.querySelectorAll(".tech-card").length >= 10);
+      await clickStarts(".tech-card", "Master Glue Chain");
+      await s.untilEval("wizard shows the three stages", () =>
+        document.querySelectorAll(".tech-stage").length === 3);
+      await clickStarts(".tech-stage.next .btn.primary", "Apply");
+      await s.until("glue compressor inserted on the master", async () =>
+        (await insertsOnMaster()).length === before.length + 1);
+      await s.untilEval("the audition A/B appears once something is applied", () =>
+        !!document.querySelector(".tech-audition"));
+
+      // The engine restores BEFORE the client's toggle batch resolves (until() polls
+      // the engine), so wait for the wizard's own settled state before every click —
+      // a click on the still-disabled button is a silent no-op.
+      const settled = async (why) =>
+        s.untilEval(why, () => document.querySelector(".tech-ab-without")?.disabled === false);
+
+      // Without: the engine really loses the edits, and stage actions lock.
+      await settled("audition controls are enabled");
+      await clickStarts(".tech-ab-without", "Without");
+      await s.until("Without removes the applied edits on the engine", async () =>
+        (await insertsOnMaster()).length === before.length);
+      const lockedApply = await s.eval(() =>
+        document.querySelector(".tech-stage.next .btn.primary")?.disabled === true);
+      tt.ok(lockedApply, "Apply is locked while hearing Without (redo tail must survive)");
+
+      // With: the exact state comes back.
+      await settled("controls settle in Without");
+      await clickStarts(".tech-ab-with", "With");
+      await s.until("With restores the applied edits", async () => {
+        const now = await insertsOnMaster();
+        return now.length === before.length + 1 &&
+          now[now.length - 1].uid === "builtin:compressor";
+      });
+
+      // The leg that guards against silent loss: close the wizard while in Without —
+      // the unmount cleanup must redo everything back on its own.
+      await settled("controls settle back in With");
+      await clickStarts(".tech-ab-without", "Without");
+      await s.until("Without again before closing", async () =>
+        (await insertsOnMaster()).length === before.length);
+      await s.key("Escape");
+      await s.until("closing mid-Without auto-restored the edits", async () =>
+        (await insertsOnMaster()).length === before.length + 1);
+
+      // leave the project as found (same cap rationale as technique-master-glue)
+      for (let n = 0; n < 12 && (await insertsOnMaster()).length > before.length; n++) {
+        await s.probe("edit/undo", {});
+      }
+      tt.eq((await insertsOnMaster()).length, before.length, "master restored for later checks");
+    },
+  },
+
+  {
     id: "palette-tab-keeps-keyboard",
     title: "Tab inside the command palette does not strand focus and freeze the keyboard",
     area: "palette-keyboard",

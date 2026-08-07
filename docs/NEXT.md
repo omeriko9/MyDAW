@@ -71,13 +71,28 @@ hit while *playing* — the flaky gate assertion, then MIDI hardware output, the
 scale/robustness items. The multi-input capture trap below becomes a blocker the moment
 someone else records with it — and "someone else" now has an exe they can download.
 
-## NOW — Production Techniques growth (Omer-paced)
+## NOW — Techniques REDIRECT (Omer, 2026-08-07): make it help him, don't grow it
 
-Both fix items above are shipped; per Omer (2026-08-07) the focus is the techniques
-wizard. 55 techniques shipped (11 per category, Project ▸ Production Techniques… /
-Alt+T). The growth queue is docs/PRODUCTION_TECHNIQUES_BACKLOG.md — per-category
-queues plus the primitive-gaps table; the stock-saturator gap is CLOSED,
-M/S・de-esser・multiband lead the remainder.
+Omer's verdict on the 61-card catalog: it doesn't help him — the 2-step techniques he
+can do by hand, and the jargon-named cards mean nothing to someone who doesn't already
+know the techniques ("unknown what should be used at what stage, even with the
+categories"). Direction decided with him (in order):
+
+1. **A/B audition — SHIPPED same day**: With/Without toggle on every wizard run
+   (undo×N / redo×N, exact-state symmetric; stage actions lock while in Without; any
+   exit auto-restores). ui-smoke `technique-audition-ab` guards it, including the
+   close-mid-Without leg. Plan doc §0 has the mechanism.
+2. **NEXT UP: Production Guide reframe** — stage-of-work-first (Arrange → Sound design
+   → Edit → Mix → Transitions → Master), plain-language goals, techniques as
+   means-to-a-goal, and project-aware relevance read from HIS song (declarative
+   `relevance(ctx)` per goal, same pattern as `requirements(ctx)`). Emphasis
+   (Omer picked): balanced — why-now + what-you'll-hear up front, one click to apply,
+   by-hand steps behind a toggle.
+3. **Then**: outcome-level flows (Macros shape) become the primary catalog;
+   2-steppers demote to building blocks + search results.
+
+Classic-category growth is PARKED until the guide lands
+(docs/PRODUCTION_TECHNIQUES_PLAN.md §0; backlog queues stay but don't extend them).
 
 ## QUEUED
 

@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { transportBus, useStore } from "../../store/store";
-import { undo } from "../../store/actions";
+import { redo, undo } from "../../store/actions";
 import { revealPane } from "../../shell/reveal";
 import { Modal } from "../common/Modal";
 import { Select } from "../common/Select";
@@ -203,6 +203,61 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
   const [busy, setBusy] = useState(false);
   const [manualOpen, setManualOpen] = useState<number | null>(null);
 
+  /**
+   * A/B audition (Omer, 2026-08-07: "the techniques are a mystery — let me HEAR them").
+   * "Without" = undo everything this run applied; "With" = redo the same count. The
+   * pair is exact-state symmetric, so nothing is ever lost — but while in Without the
+   * stage actions are locked (a new command would truncate the engine's redo tail and
+   * strand the With state), and ANY exit (back, close, popout) auto-restores With via
+   * the unmount cleanup below. `commands` is the undo depth taken at Without time.
+   */
+  const auditionRef = useRef<{ mode: "with" | "without"; commands: number }>({
+    mode: "with",
+    commands: 0,
+  });
+  /** In-flight toggle batch — the unmount restore chains on it, so an Escape that
+   *  lands MID-batch cannot strand the project in the Without state. */
+  const auditionOpRef = useRef<Promise<void> | null>(null);
+  const inAudition = auditionRef.current.mode === "without";
+  useEffect(
+    () => () => {
+      const pending = auditionOpRef.current;
+      void (async () => {
+        if (pending) await pending.catch(() => {});
+        const a = auditionRef.current;
+        if (a.mode !== "without" || a.commands === 0) return;
+        auditionRef.current = { mode: "with", commands: 0 };
+        for (let k = 0; k < a.commands; k++) await redo();
+      })().catch(() => showToast("Audition restore failed — press Ctrl+Y to redo", "error"));
+    },
+    [],
+  );
+
+  const setAuditionMode = (mode: "with" | "without", commands: number) => {
+    const a = auditionRef.current;
+    if (busy || mode === a.mode || (mode === "without" && commands === 0)) return;
+    setBusy(true);
+    const op = (async () => {
+      try {
+        if (mode === "without") {
+          for (let k = 0; k < commands; k++) await undo();
+          auditionRef.current = { mode: "without", commands };
+        } else {
+          for (let k = 0; k < a.commands; k++) await redo();
+          auditionRef.current = { mode: "with", commands: 0 };
+        }
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Audition toggle failed", "error");
+      }
+    })();
+    auditionOpRef.current = op;
+    void op.finally(() => {
+      auditionOpRef.current = null;
+      setBusy(false);
+      rerender();
+    });
+  };
+
   if (!ctx) return <div className="tech-empty">No project — connect to the engine first.</div>;
   if (sessionRef.current === null || sessionRef.current.techniqueId !== technique.id)
     sessionRef.current = newSession(technique, ctx);
@@ -321,7 +376,7 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
           <button
             type="button"
             className="btn primary"
-            disabled={busy || !reqsOk}
+            disabled={busy || inAudition || !reqsOk}
             title={
               reqsOk
                 ? "Run every remaining stage in order (optional ones included)"
@@ -382,21 +437,21 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
                 </span>
                 <div className="grow" />
                 {st.kind === "applied" && i === lastApplied && (
-                  <button type="button" className="btn" disabled={busy} onClick={() => void takeBack(i)}>
+                  <button type="button" className="btn" disabled={busy || inAudition} onClick={() => void takeBack(i)}>
                     Take back
                   </button>
                 )}
                 {(st.kind === "pending" || st.kind === "error") && (
                   <>
                     {stage.optional && (
-                      <button type="button" className="btn" disabled={busy} onClick={() => markDone(i, "skipped")}>
+                      <button type="button" className="btn" disabled={busy || inAudition} onClick={() => markDone(i, "skipped")}>
                         Skip
                       </button>
                     )}
                     <button
                       type="button"
                       className="btn"
-                      disabled={busy}
+                      disabled={busy || inAudition}
                       onClick={() => setManualOpen(manualOpen === i ? null : i)}
                     >
                       I'll do it myself
@@ -404,7 +459,7 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
                     <button
                       type="button"
                       className="btn primary"
-                      disabled={busy || !reqsOk}
+                      disabled={busy || inAudition || !reqsOk}
                       title={reqsOk ? undefined : "Fix the requirements above first"}
                       onClick={() => void apply(i)}
                     >
@@ -447,6 +502,42 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
           );
         })}
       </div>
+
+      {totalCommands > 0 && (
+        <div className={"tech-audition" + (inAudition ? " active" : "")}>
+          <span className="tech-ab-label">Audition</span>
+          <div className="tech-ab-seg">
+            <button
+              type="button"
+              className={"btn tech-ab-without" + (inAudition ? " primary" : "")}
+              disabled={busy}
+              title={
+                `Temporarily undo the ${totalCommands} edit${totalCommands === 1 ? "" : "s"} ` +
+                "this technique applied (plus anything you changed since) so you can hear " +
+                "the difference. Nothing is lost — With restores the exact state."
+              }
+              onClick={() => void setAuditionMode("without", totalCommands)}
+            >
+              Without
+            </button>
+            <button
+              type="button"
+              className={"btn tech-ab-with" + (!inAudition ? " primary" : "")}
+              disabled={busy}
+              title="Restore everything the technique applied"
+              onClick={() => void setAuditionMode("with", 0)}
+            >
+              With
+            </button>
+          </div>
+          <span className="tech-ab-hint">
+            {inAudition
+              ? "Hearing your project WITHOUT this technique. Stage actions are paused; " +
+                "closing the wizard restores everything automatically."
+              : `Play your loop and flip to compare. Listen for: ${technique.tagline}`}
+          </span>
+        </div>
+      )}
 
       {allDone && (
         <div className="tech-summary">

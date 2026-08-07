@@ -613,3 +613,44 @@
   flex-direction: column;
   gap: 1px;
 }
+
+/* ---- A/B audition (hear the technique: undo/redo everything this run applied) ---- */
+.tech-audition {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--tech-tint, var(--accent)) 45%, transparent);
+  background: color-mix(in srgb, var(--tech-tint, var(--accent)) 8%, transparent);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+.tech-audition.active {
+  border-color: var(--warn, #d90);
+  background: color-mix(in srgb, var(--warn, #d90) 10%, transparent);
+}
+.tech-ab-label {
+  font-weight: 600;
+  font-size: 12px;
+}
+.tech-ab-seg {
+  display: flex;
+  gap: 0;
+}
+.tech-ab-seg .btn {
+  border-radius: 0;
+}
+.tech-ab-seg .btn:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.tech-ab-seg .btn:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.tech-ab-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tech-audition.active .tech-ab-hint {
+  color: var(--warn, #d90);
+}

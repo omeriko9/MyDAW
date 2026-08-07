@@ -1,5 +1,36 @@
 # Production Techniques — plan
 
+## 0. REDIRECT (Omer, 2026-08-07) — audible first, then a Production Guide; NOT growth
+
+Omer's verdict on the 61-card catalog: it does not help him. Two reasons: (a) the
+classic 2–4-stage techniques are things he can do by hand quickly, so the wizard adds
+little; (b) the catalog is named and organized in insider jargon — for someone
+unfamiliar with the techniques the cards mean nothing, and nothing says what belongs
+at which stage of a production. Decisions (same day):
+
+1. **A/B audition — SHIPPED 2026-08-07.** Every run with applied stages gets a
+   With/Without toggle in the wizard (`.tech-audition`): Without = `edit/undo` × the
+   run's total applied commands, With = the same count of `edit/redo` — exact-state
+   symmetric, so nothing is ever lost. While in Without, stage actions are LOCKED (a
+   new command would truncate the engine's redo tail and strand the With state) and
+   any exit (back / close / popout) auto-restores With via unmount cleanup that
+   chains on the in-flight toggle batch. The hint line says what to listen for
+   (tagline). Guard: ui-smoke `technique-audition-ab` (engine-truth A/B + the
+   close-mid-Without auto-restore leg).
+2. **Next: Production Guide reframe** — a stage-of-work-first surface (Arrange →
+   Sound design → Edit & tighten → Mix → Transitions & automation → Master): each
+   stage a plain-language checklist of GOALS, techniques appearing as means-to-a-goal,
+   and **project-aware relevance** read from the actual song (declarative
+   `relevance(ctx)` per goal — same pattern as `requirements(ctx)`; e.g. "kick + bass
+   but no sidechain anywhere", "vocal has no reverb send"). Emphasis: balanced —
+   why-now + what-you'll-hear up front, one click to apply, by-hand steps behind a
+   toggle.
+3. **Then: outcome-level flows become the primary catalog** (the Macros shape);
+   2-steppers demote to building blocks inside them, still reachable via search.
+
+Until the guide lands, do NOT grow the classic categories (the backlog queues stay
+parked; primitive-gap work is still fine).
+
 Status: v1 SHIPPED 2026-08-01 (10 techniques, wizard, docs); batch 2 same day (+30);
 round 3 SHIPPED 2026-08-02 (+15 → 55, 11 per category); round 4 same day added the
 **Macros — Full Flows** category: six 5–8-stage techniques (The Drop, Full Vocal
