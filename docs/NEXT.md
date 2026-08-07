@@ -112,9 +112,50 @@ categories"). Direction decided with him (in order):
 Classic-category growth stays PARKED
 (docs/PRODUCTION_TECHNIQUES_PLAN.md §0; backlog queues stay but don't extend them).
 
-## QUEUED
+## QUEUED (Omer's 2026-08-07 bug list — remaining items)
 
-(nothing — the gate flake and the capture item both shipped 2026-08-07, see above)
+Shipped the same day (commits `2c55809`, `7632ed9`): PR left-edge resize, Alt+edge
+repeat-clone, record-select, Shift-fast nudge, Ctrl+S-from-anywhere, waveform outline,
+instrument drop-replace, rack remove, Add FX Track, and the five host perf fixes
+(timeBeginPeriod, EcoQoS opt-out, message-only pump window, suspend-around-setState +
+120 s chunk capture, install.reg-only bundle discovery + warn default off). Remaining:
+
+### 1. Add Audio Track dialog: mono/stereo + input (device::channel) + Inspector edit
+Recon done (all five entry points funnel through `addTrackMenuItems`,
+TrackHeaders.tsx:115): store-driven dialog (DialogsState + DialogsHost), payload
+`{channels, inputDevice, inputChannel, index}` → `addTrack` then `setTrack`. Lift
+ChannelStrip's `InputSelect` option builder (running-driver-only, `dev.id::ch`
+encoding, pairs stride 2) into a shared lib helper and reuse it in the dialog AND in
+Inspector TrackSection (whose current pair-stride-1 options should be reconciled).
+NOTE: `channels` is add-time-only (TrackPatch has no channels field) — the dialog is
+the only place mono/stereo can be honest.
+
+### 2. Live waveform while recording
+Engine streams recorded-so-far peaks (AudioRecorder already owns the written frames;
+mirror event/recordingNotes' shape — ~15 Hz event/recordingPeaks with min/max buckets
+since the take start), ClipCanvas draws the growing take rectangle + wave on armed
+tracks between record start/stop. The recording frame + recordingNotes plumbing is the
+template.
+
+### 3. Eliminate "instrument track per MIDI track" — NEEDS OMER'S DIRECTION
+Recon (2026-08-07): the RT graph ALREADY renders instrument inserts on MIDI-kind
+tracks — only the command-layer guard (Commands.cpp `pluginAdd`: "MIDI tracks cannot
+host plugins"), the CPR importer's insert skip, and three UI mirrors enforce the
+split. Three candidate directions:
+  (a) Rack-first UX: keep the model; hide clip-less feeder-fed instrument hosts from
+      the ARRANGEMENT track list (they stay in mixer+rack); all create flows route
+      through the rack. Cheapest, no model change.
+  (b) Merge: allow instruments directly on MIDI tracks (drop the guard), making
+      Cubase-style "instrument track" the one concept; the rack then lists tracks
+      with instruments + shared hosts. Model-simplifying but touches import,
+      freeze, catalog techniques, SPEC §8.4 ("source is first isInstrument insert").
+  (c) First-class rack entity separate from tracks — deepest change, not recommended.
+
+### 4. VST perf follow-ups (after Omer re-tests Kontakt/AD2 on 7632ed9)
+If still slow: check the per-instance `captureOverlay` line in the engine log
+(files:true = a bundle is still arming for that plugin), then per-param broadcast
+coalescing (event/pluginParams is one WS frame per param change) and moving getState
+captures off the host GUI thread.
 
 ---
 
