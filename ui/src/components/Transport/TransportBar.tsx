@@ -541,6 +541,7 @@ export default function TransportBar() {
   const status = useStore((s) => s.engineStatus);
   const exportProgress = useStore((s) => s.exportProgress);
   const captureState = useStore((s) => s.captureState);
+  const audioDevices = useStore((s) => s.audioDevices);
   const tool = useStore((s) => s.tool);
   const setTool = useStore((s) => s.setTool);
   const sizingMode = useStore((s) => s.sizingMode);
@@ -561,10 +562,10 @@ export default function TransportBar() {
       ? project.name
       : `${project.name}.mydaw`
     : "No project";
-  // Capture honesty (SPEC §5.5/§10): a persistent chip while an armed track would record
-  // the wrong input (or no input at all) — a toast alone outlives its 10 s and the take
-  // being recorded wrong does not.
-  const captureWarning = describeCaptureState(captureState, project);
+  // Capture honesty (SPEC §5.5/§10): a persistent chip while an armed track's input
+  // device could not be opened (it records silence) — a toast alone outlives its 10 s
+  // and the take being recorded silent does not.
+  const captureWarning = describeCaptureState(captureState, project, audioDevices);
 
   return (
     <div className="transport-bar">

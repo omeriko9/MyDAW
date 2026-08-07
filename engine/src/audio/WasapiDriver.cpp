@@ -282,17 +282,41 @@ struct WasapiDriver::Impl {
     IMMDevice* renderDevice = nullptr;
     IAudioClient* renderClient = nullptr;
     IAudioRenderClient* renderService = nullptr;
-    IMMDevice* capDevice = nullptr;
-    IAudioClient* capClient = nullptr;
-    IAudioCaptureClient* capService = nullptr;
+
+    // One open capture endpoint (multi-endpoint capture, SPEC §5.5 2026-08-07): its own
+    // shared-mode session, event, thread and SPSC ring — the same drift model as the
+    // original single session (zero-fill on underflow, drop on overflow), per device.
+    struct CaptureSession {
+        std::string requestedId; // "default" or an endpoint id — track→slot match key
+        IMMDevice* device = nullptr;
+        IAudioClient* client = nullptr;
+        IAudioCaptureClient* service = nullptr;
+        HANDLE event = nullptr; // auto-reset, owned
+        std::thread thread;
+        FloatRing ring;
+        std::vector<float> inter;               // quantum * ch (render-side deinterleave)
+        std::vector<std::vector<float>> planes; // ch x quantum
+        int ch = 0;
+        UINT32 bufFrames = 0;
+
+        ~CaptureSession() {
+            if (thread.joinable()) // stop() joins first; this is the safety net
+                thread.join();
+            safeRelease(service);
+            safeRelease(client);
+            safeRelease(device);
+            if (event)
+                CloseHandle(event);
+        }
+    };
+    std::vector<std::unique_ptr<CaptureSession>> caps;
+    int totalCapCh = 0; // Σ session channels (the callback's numIn)
 
     // --- events / threads -----------------------------------------------------------------
     HANDLE renderEvent = nullptr; // auto-reset
-    HANDLE capEvent = nullptr;    // auto-reset
     HANDLE stopEvent = nullptr;   // manual-reset
     HANDLE faultEvent = nullptr;  // manual-reset
     std::thread renderThread;
-    std::thread capThread;
     std::thread faultThread;
 
     // --- stream geometry ------------------------------------------------------------------
@@ -302,8 +326,6 @@ struct WasapiDriver::Impl {
     UINT32 renderBufferFrames = 0;
     int quantum = 512;    // engine block (frames per AudioCallback)
     int sr = 48000;
-    int capCh = 0;        // 0 = no capture
-    UINT32 capBufferFrames = 0;
     int latencyInFrames = 0;
     int latencyOutFrames = 0;
 
@@ -321,22 +343,16 @@ struct WasapiDriver::Impl {
     std::vector<float> engL, engR;             // engine output block (quantum)
     std::vector<float*> engPtrs;               // {engL,engR}
     std::vector<float> popL, popR;             // FIFO pop staging (quantum)
-    std::vector<std::vector<float>> capPlanes; // capCh x quantum
-    std::vector<const float*> capPtrs;
-    std::vector<float> capInter;               // quantum * capCh (render side)
-    std::vector<float> capThreadBuf;           // capture-thread interleave scratch
+    std::vector<const float*> capPtrs;         // totalCapCh pointers into session planes
     StereoFifo fifo;
-    FloatRing capRing;
 
     Impl() {
         renderEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        capEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         faultEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     }
     ~Impl() {
         if (renderEvent) CloseHandle(renderEvent);
-        if (capEvent) CloseHandle(capEvent);
         if (stopEvent) CloseHandle(stopEvent);
         if (faultEvent) CloseHandle(faultEvent);
     }
@@ -522,32 +538,36 @@ struct WasapiDriver::Impl {
         return true;
     }
 
-    bool openCapture(const std::string& capId, std::string& err) {
-        HRESULT hr = deviceById(eCapture, capId, &capDevice);
+    // Opens ONE capture endpoint into `cs` (device/client/service/event; no thread yet —
+    // start() spawns those). False + err on failure; the caller drops the session and
+    // records the id as unavailable.
+    bool openCaptureSession(const std::string& capId, CaptureSession& cs, std::string& err) {
+        cs.requestedId = capId;
+        HRESULT hr = deviceById(eCapture, capId, &cs.device);
         if (FAILED(hr)) {
             err = hrText("capture device lookup", hr);
             return false;
         }
-        hr = capDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                 reinterpret_cast<void**>(&capClient));
+        hr = cs.device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                 reinterpret_cast<void**>(&cs.client));
         if (FAILED(hr)) {
             err = hrText("capture Activate(IAudioClient)", hr);
             return false;
         }
         int mixCh = 2;
         WAVEFORMATEX* mix = nullptr;
-        if (SUCCEEDED(capClient->GetMixFormat(&mix)) && mix) {
+        if (SUCCEEDED(cs.client->GetMixFormat(&mix)) && mix) {
             mixCh = std::clamp(static_cast<int>(mix->nChannels), 1, 8);
             CoTaskMemFree(mix);
         }
         const DevFormat f{DevSampleKind::Float32, 4, 32};
         WAVEFORMATEXTENSIBLE wf = makeWf(f, mixCh, sr);
         REFERENCE_TIME defPeriod = 0, minPeriod = 0;
-        capClient->GetDevicePeriod(&defPeriod, &minPeriod);
+        cs.client->GetDevicePeriod(&defPeriod, &minPeriod);
         REFERENCE_TIME dur = 2000000; // 200 ms cushion
         if (dur < defPeriod)
             dur = defPeriod;
-        hr = capClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
+        hr = cs.client->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
                                        AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
                                        AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -556,29 +576,26 @@ struct WasapiDriver::Impl {
             err = hrText("capture IAudioClient::Initialize", hr);
             return false;
         }
-        hr = capClient->SetEventHandle(capEvent);
+        cs.event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        hr = cs.client->SetEventHandle(cs.event);
         if (FAILED(hr)) {
             err = hrText("capture SetEventHandle", hr);
             return false;
         }
-        hr = capClient->GetService(__uuidof(IAudioCaptureClient),
-                                   reinterpret_cast<void**>(&capService));
+        hr = cs.client->GetService(__uuidof(IAudioCaptureClient),
+                                   reinterpret_cast<void**>(&cs.service));
         if (FAILED(hr)) {
             err = hrText("GetService(IAudioCaptureClient)", hr);
             return false;
         }
-        capClient->GetBufferSize(&capBufferFrames);
-        capCh = mixCh;
-        latencyInFrames = static_cast<int>(capBufferFrames) + quantum;
+        cs.client->GetBufferSize(&cs.bufFrames);
+        cs.ch = mixCh;
         return true;
     }
 
     void releaseCapture() {
-        safeRelease(capService);
-        safeRelease(capClient);
-        safeRelease(capDevice);
-        capCh = 0;
-        capBufferFrames = 0;
+        caps.clear(); // ~CaptureSession releases COM objects + event
+        totalCapCh = 0;
         latencyInFrames = 0;
     }
 
@@ -615,23 +632,30 @@ struct WasapiDriver::Impl {
     void pullEngine() {
         const float* const* inArr = nullptr;
         int nIn = 0;
-        if (capCh > 0) {
-            const size_t want = static_cast<size_t>(quantum) * static_cast<size_t>(capCh);
-            const size_t got = capRing.read(capInter.data(), want);
-            if (got < want) {
-                std::memset(capInter.data() + got, 0, (want - got) * sizeof(float));
-                capZeroFills.fetch_add(1, std::memory_order_relaxed);
-            }
-            for (int c = 0; c < capCh; ++c) {
-                float* dst = capPlanes[static_cast<size_t>(c)].data();
-                const float* src = capInter.data() + c;
-                for (int i = 0; i < quantum; ++i) {
-                    dst[i] = *src;
-                    src += capCh;
+        if (totalCapCh > 0) {
+            // Per session: pop exactly one engine block from its ring and deinterleave
+            // into the session's planes. capPtrs concatenates all sessions' planes in
+            // captureSlots order, so `in` channel indices match the reported layout.
+            for (auto& csp : caps) {
+                CaptureSession& cs = *csp;
+                const size_t want =
+                    static_cast<size_t>(quantum) * static_cast<size_t>(cs.ch);
+                const size_t got = cs.ring.read(cs.inter.data(), want);
+                if (got < want) {
+                    std::memset(cs.inter.data() + got, 0, (want - got) * sizeof(float));
+                    capZeroFills.fetch_add(1, std::memory_order_relaxed);
+                }
+                for (int c = 0; c < cs.ch; ++c) {
+                    float* dst = cs.planes[static_cast<size_t>(c)].data();
+                    const float* src = cs.inter.data() + c;
+                    for (int i = 0; i < quantum; ++i) {
+                        dst[i] = *src;
+                        src += cs.ch;
+                    }
                 }
             }
             inArr = capPtrs.data();
-            nIn = capCh;
+            nIn = totalCapCh;
         }
         std::memset(engL.data(), 0, static_cast<size_t>(quantum) * sizeof(float));
         std::memset(engR.data(), 0, static_cast<size_t>(quantum) * sizeof(float));
@@ -794,13 +818,16 @@ struct WasapiDriver::Impl {
     }
 
     // ------------------------------------------------------------------ capture thread ---
-    void capThreadMain() {
+    // One thread per open capture session (multi-endpoint): each device delivers on its
+    // own event at its own clock, into its own ring. A dead device faults the WHOLE
+    // stream exactly like before — DriverManager restarts on defaults.
+    void capThreadMain(CaptureSession& cs) {
         ensureComInitialized();
         DWORD taskIdx = 0;
         HANDLE mmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIdx);
         _mm_setcsr(_mm_getcsr() | 0x8040u);
 
-        HANDLE hs[2] = {stopEvent, capEvent};
+        HANDLE hs[2] = {stopEvent, cs.event};
         while (!stopReq.load(std::memory_order_acquire)) {
             const DWORD w = WaitForMultipleObjects(2, hs, FALSE, 500);
             if (w == WAIT_OBJECT_0)
@@ -811,11 +838,11 @@ struct WasapiDriver::Impl {
                 break;
 
             UINT32 pkt = 0;
-            while (SUCCEEDED(capService->GetNextPacketSize(&pkt)) && pkt > 0) {
+            while (SUCCEEDED(cs.service->GetNextPacketSize(&pkt)) && pkt > 0) {
                 BYTE* data = nullptr;
                 UINT32 frames = 0;
                 DWORD flags = 0;
-                const HRESULT hr = capService->GetBuffer(&data, &frames, &flags, nullptr,
+                const HRESULT hr = cs.service->GetBuffer(&data, &frames, &flags, nullptr,
                                                          nullptr);
                 if (FAILED(hr)) {
                     fail("WASAPI capture GetBuffer (device invalidated?)", hr);
@@ -825,19 +852,19 @@ struct WasapiDriver::Impl {
                     xruns.fetch_add(1, std::memory_order_relaxed);
 
                 const size_t samples =
-                    static_cast<size_t>(frames) * static_cast<size_t>(capCh);
+                    static_cast<size_t>(frames) * static_cast<size_t>(cs.ch);
                 size_t written;
                 if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-                    written = capRing.writeZeros(samples);
+                    written = cs.ring.writeZeros(samples);
                 } else {
                     // Shared + AUTOCONVERTPCM with our float format -> data is already
                     // interleaved float32 at the session rate.
-                    written = capRing.write(reinterpret_cast<const float*>(data), samples);
+                    written = cs.ring.write(reinterpret_cast<const float*>(data), samples);
                 }
                 if (written < samples)
                     capDrops.fetch_add(static_cast<long long>(samples - written),
                                        std::memory_order_relaxed); // drift: drop overflow
-                capService->ReleaseBuffer(frames);
+                cs.service->ReleaseBuffer(frames);
             }
         }
         if (mmcss)
@@ -1029,36 +1056,47 @@ bool WasapiDriver::open(const AudioConfig& config, AudioCallback callback, void*
         return false;
     }
 
-    s.capCh = 0;
-    if (!config.captureDeviceId.empty()) {
+    // Multi-endpoint capture (SPEC §5.5): one session per requested device. A device
+    // that fails to open is SKIPPED (recorded in fallbackInfo; absent from
+    // captureSlots) — its tracks record silence rather than another device's signal.
+    s.releaseCapture();
+    const size_t q = static_cast<size_t>(s.quantum);
+    for (const std::string& capId : config.captureDeviceIds) {
+        if (capId.empty())
+            continue;
+        auto cs = std::make_unique<Impl::CaptureSession>();
         std::string capErr;
-        if (!s.openCapture(config.captureDeviceId, capErr)) {
-            Log::warn("WASAPI: capture open failed (%s) — continuing render-only",
-                      capErr.c_str());
-            appendInfo(s.fallbackInfo, "capture unavailable: " + capErr);
-            s.releaseCapture();
+        if (!s.openCaptureSession(capId, *cs, capErr)) {
+            Log::warn("WASAPI: capture open failed for '%s' (%s) — continuing without it",
+                      capId.c_str(), capErr.c_str());
+            appendInfo(s.fallbackInfo, "capture '" + capId + "' unavailable: " + capErr);
+            continue;
         }
+        cs->planes.assign(static_cast<size_t>(cs->ch), std::vector<float>(q, 0.0f));
+        cs->inter.assign(q * static_cast<size_t>(cs->ch), 0.0f);
+        size_t ringCap = static_cast<size_t>(s.sr) / 4; // ~250 ms
+        if (ringCap < q * 8)
+            ringCap = q * 8;
+        cs->ring.init(ringCap * static_cast<size_t>(cs->ch));
+        s.latencyInFrames =
+            std::max(s.latencyInFrames, static_cast<int>(cs->bufFrames) + s.quantum);
+        s.caps.push_back(std::move(cs));
+    }
+    s.totalCapCh = 0;
+    s.capPtrs.clear();
+    for (auto& csp : s.caps) {
+        for (int c = 0; c < csp->ch; ++c)
+            s.capPtrs.push_back(csp->planes[static_cast<size_t>(c)].data());
+        s.totalCapCh += csp->ch;
     }
 
     // Pre-allocate all RT staging.
-    const size_t q = static_cast<size_t>(s.quantum);
     s.engL.assign(q, 0.0f);
     s.engR.assign(q, 0.0f);
     s.engPtrs = {s.engL.data(), s.engR.data()};
     s.popL.assign(q, 0.0f);
     s.popR.assign(q, 0.0f);
     s.fifo.init(q + static_cast<size_t>(s.renderBufferFrames) + q);
-    if (s.capCh > 0) {
-        s.capPlanes.assign(static_cast<size_t>(s.capCh), std::vector<float>(q, 0.0f));
-        s.capPtrs.resize(static_cast<size_t>(s.capCh));
-        for (int c = 0; c < s.capCh; ++c)
-            s.capPtrs[static_cast<size_t>(c)] = s.capPlanes[static_cast<size_t>(c)].data();
-        s.capInter.assign(q * static_cast<size_t>(s.capCh), 0.0f);
-        size_t ringCap = static_cast<size_t>(s.sr) / 4; // ~250 ms
-        if (ringCap < q * 8)
-            ringCap = q * 8;
-        s.capRing.init(ringCap * static_cast<size_t>(s.capCh));
-    }
 
     AudioConfig actual = config;
     actual.driverType = DriverType::Wasapi;
@@ -1071,21 +1109,24 @@ bool WasapiDriver::open(const AudioConfig& config, AudioCallback callback, void*
             actual.deviceId = utf8FromWide(wid);
             CoTaskMemFree(wid);
         }
-        wid = nullptr;
-        if (s.capDevice && SUCCEEDED(s.capDevice->GetId(&wid)) && wid) {
-            actual.captureDeviceId = utf8FromWide(wid);
-            CoTaskMemFree(wid);
-        } else {
-            actual.captureDeviceId.clear();
+    }
+    actual.captureSlots.clear();
+    {
+        int base = 0;
+        for (auto& csp : s.caps) {
+            actual.captureSlots.push_back(CaptureSlot{csp->requestedId, csp->ch, base});
+            base += csp->ch;
         }
     }
     s.actual = actual;
     s.opened = true;
     const std::string extra =
         s.fallbackInfo.empty() ? std::string() : (" [" + s.fallbackInfo + "]");
-    Log::info("WASAPI: opened %s, %d Hz, engine block %d, device buffer %u frames%s%s",
+    Log::info("WASAPI: opened %s, %d Hz, engine block %d, device buffer %u frames, "
+              "%d capture device(s) / %d ch%s",
               s.exclusive ? "EXCLUSIVE" : "shared (AUTOCONVERTPCM)", s.sr, s.quantum,
-              s.renderBufferFrames, s.capCh > 0 ? ", capture on" : "", extra.c_str());
+              s.renderBufferFrames, static_cast<int>(s.caps.size()), s.totalCapCh,
+              extra.c_str());
     return true;
 }
 
@@ -1097,7 +1138,8 @@ bool WasapiDriver::start() {
     s.stopReq.store(false, std::memory_order_release);
     ResetEvent(s.stopEvent);
     s.fifo.head = s.fifo.tail = 0;
-    s.capRing.reset();
+    for (auto& csp : s.caps)
+        csp->ring.reset();
 
     // Pre-fill the render buffer with silence to avoid a startup glitch.
     {
@@ -1108,16 +1150,19 @@ bool WasapiDriver::start() {
     }
 
     s.faultThread = std::thread([this] { impl_->faultThreadMain(); });
-    if (s.capCh > 0)
-        s.capThread = std::thread([this] { impl_->capThreadMain(); });
+    for (auto& csp : s.caps) {
+        Impl::CaptureSession* cs = csp.get();
+        cs->thread = std::thread([this, cs] { impl_->capThreadMain(*cs); });
+    }
     s.renderThread = std::thread([this] { impl_->renderThreadMain(); });
 
     HRESULT hr = S_OK;
-    if (s.capClient) {
-        hr = s.capClient->Start();
+    for (auto& csp : s.caps) {
+        hr = csp->client->Start();
         if (FAILED(hr))
-            Log::warn("WASAPI: capture Start failed (hr=0x%08lX) — inputs will be silent",
-                      static_cast<unsigned long>(hr));
+            Log::warn("WASAPI: capture Start failed for '%s' (hr=0x%08lX) — that input "
+                      "will be silent",
+                      csp->requestedId.c_str(), static_cast<unsigned long>(hr));
     }
     hr = s.renderClient->Start();
     if (FAILED(hr)) {
@@ -1137,14 +1182,16 @@ void WasapiDriver::stop() {
         SetEvent(s.stopEvent);
     if (s.renderThread.joinable())
         s.renderThread.join();
-    if (s.capThread.joinable())
-        s.capThread.join();
+    for (auto& csp : s.caps)
+        if (csp->thread.joinable())
+            csp->thread.join();
     if (s.faultThread.joinable())
         s.faultThread.join();
     if (s.renderClient)
         s.renderClient->Stop();
-    if (s.capClient)
-        s.capClient->Stop();
+    for (auto& csp : s.caps)
+        if (csp->client)
+            csp->client->Stop();
     ResetEvent(s.stopEvent);
     s.running.store(false, std::memory_order_release);
 }

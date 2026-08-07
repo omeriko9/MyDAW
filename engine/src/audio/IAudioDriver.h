@@ -33,6 +33,20 @@ inline bool driverTypeFromString(const std::string& s, DriverType& out) {
     return false;
 }
 
+// Sentinel base channel for "this track's capture device is NOT open": far beyond any
+// real input, so every consumer's range check (TrackNode, AudioRecorder) resolves to
+// SILENCE — never another device's signal.
+constexpr int kNoCaptureChannel = 1 << 24;
+
+// One OPEN capture endpoint and where its channels sit in the callback's `in` array
+// (multi-endpoint capture, SPEC §5.5 2026-08-07: one session per distinct armed device).
+struct CaptureSlot {
+    std::string deviceId; // as REQUESTED ("default" or an endpoint id) — the engine keys
+                          // track→slot matching on this exact string
+    int channels = 0;
+    int baseChannel = 0;  // first index in the callback's `in` array
+};
+
 // engine/setAudioConfig payload + persisted audio settings.
 struct AudioConfig {
     DriverType driverType = DriverType::Wasapi;
@@ -40,9 +54,16 @@ struct AudioConfig {
     int sampleRate = 48000;
     int bufferSize = 512;      // frames per callback (requested; see actualConfig())
     bool exclusive = false;    // WASAPI exclusive mode
-    // NOTE(spec): capture device is not part of §5.4 setAudioConfig; the engine opens
-    // capture only while a track is armed/monitoring (§7). "" = default capture device.
-    std::string captureDeviceId;
+    // NOTE(spec): capture devices are not part of §5.4 setAudioConfig; the engine opens
+    // capture only while tracks are armed/monitoring (§7) — one session per DISTINCT
+    // device here ("default" = default capture endpoint; empty list = no capture).
+    // The callback's `in` array is the concatenation of the open devices' channels in
+    // this order. actualConfig().captureSlots reports what actually opened.
+    std::vector<std::string> captureDeviceIds;
+    // Filled by the driver in actualConfig() only: the endpoints that actually opened
+    // and their channel layout. A requested id absent here failed to open — the engine
+    // maps its tracks to silence and reports it (event/captureState).
+    std::vector<CaptureSlot> captureSlots;
 };
 
 // One device as reported by engine/getDevices (SPEC §5.4).

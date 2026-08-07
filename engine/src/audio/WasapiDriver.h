@@ -20,13 +20,17 @@
 //     fires once from a dedicated (non-RT) fault thread; DriverManager then restarts on the
 //     default device.
 //
-// Capture: opened only when AudioConfig.captureDeviceId is non-empty.
-//   NOTE(spec): "" means "no capture" (the engine opens capture only while a track is
-//   armed/monitoring, §7); the sentinel "default" selects the default capture endpoint;
-//   anything else is a capture endpoint id from enumerate(). Capture runs shared-mode
-//   event-driven at the session rate (AUTOCONVERTPCM) on its own thread and feeds the
-//   render thread through a lock-free SPSC ring. Clock drift between the two devices is
-//   handled by zero-filling on ring underflow and dropping on ring overflow (see .cpp).
+// Capture (MULTI-ENDPOINT, 2026-08-07): one session per id in
+//   AudioConfig.captureDeviceIds (empty list = no capture; the engine opens capture only
+//   while tracks are armed/monitoring, §7). "default" selects the default capture
+//   endpoint; anything else is a capture endpoint id from enumerate(). Each session runs
+//   shared-mode event-driven at the session rate (AUTOCONVERTPCM) on ITS OWN thread and
+//   feeds the render thread through its own lock-free SPSC ring; the callback's `in`
+//   array concatenates the sessions' channels in captureDeviceIds order
+//   (actualConfig().captureSlots reports the layout; a requested id that failed to open
+//   is absent from it). Clock drift per device is handled by zero-filling on ring
+//   underflow and dropping on ring overflow (see .cpp) — proper per-device resampling
+//   stays future work (STUBS.md).
 //
 // Threading: open/start/stop/close on non-RT threads (DriverManager). One open() per
 // close(). The instance is reusable (open/close cycles).

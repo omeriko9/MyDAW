@@ -71,6 +71,12 @@ public:
     // recording). Main thread; takes effect at the next rebuild().
     void setMidiThruTracks(std::vector<uint64_t> trackIds);
 
+    // Multi-endpoint capture (SPEC §5.5): resolves a track's EFFECTIVE input device
+    // ("default" or an endpoint id) to its first channel in the driver's `in` array —
+    // App wires this to App::captureBaseChannel. Called at rebuild() time only (main
+    // thread, non-RT). Unset = base 0 (single-device/offline behaviour).
+    void setCaptureBaseResolver(std::function<int(const std::string&)> fn);
+
     // RT driver callback. `in` = capture channels (may be null/0), `out` = device output.
     void processBlock(const float* const* in, int numIn, float* const* out, int numOut,
                       int frames, Transport& transport);

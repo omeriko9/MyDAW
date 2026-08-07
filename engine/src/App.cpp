@@ -515,6 +515,11 @@ void App::prepareGraphFormat(const AudioConfig& actual) {
     graph->configure(currentSampleRate_, currentMaxBlock_, &meters, &assetStore, host.get(),
                      builtin.get(), &midiInput, metronome.get(), &midiOutput);
     graph->setRecordTap(&audioRecorder);
+    // Multi-endpoint capture: TrackNode input offsets follow the per-device layout the
+    // driver actually granted (rebuild-time lookups; reconfigures rebuild via below).
+    graph->setCaptureBaseResolver([this](const std::string& dev) {
+        return captureBaseChannel(dev);
+    });
     if (cmd) {
         cmd->setAudioFormat(currentSampleRate_, currentMaxBlock_);
         cmd->syncEngineFromModel(); // re-derives loop samples + rebuilds the plan
@@ -547,44 +552,57 @@ bool App::reconfigureAudio(const AudioConfig& cfg, json& actualOut, std::string&
     return true;
 }
 
-std::string App::desiredCaptureDeviceId() const {
-    // The first armed/monitored audio track picks the capture endpoint. An empty model
-    // selection means "system default"; map it to the "default" sentinel so WASAPI actually
-    // opens it (an empty captureDeviceId means "no capture at all").
-    for (const Track& t : model.project.tracks) {
-        if (t.kind != TrackKind::Audio)
-            continue;
-        if (!(t.recordArm || t.monitor))
-            continue;
-        return t.inputDevice.empty() ? std::string("default") : t.inputDevice;
-    }
-    return {};
-}
-
-json App::captureStateJson() const {
-    // Winner + losers of the single-capture-endpoint rule: the first armed/monitored audio
-    // track picks the device every armed node hears (desiredCaptureDeviceId). Any OTHER
-    // armed/monitoring audio track naming a different device lands in `conflicts` — it will
-    // silently record the winner's signal, so the UI must say so (SPEC §10). Comparison is
-    // textual: "" (default) vs the default device's literal id counts as a conflict, which
-    // over-warns rather than under-warns.
-    std::string winner;
-    bool haveWinner = false;
-    json conflicts = json::array();
+std::vector<std::string> App::desiredCaptureDeviceIds() const {
+    // Multi-endpoint capture (SPEC §5.5, 2026-08-07): every armed/monitored audio track
+    // gets ITS chosen device opened — one session per DISTINCT device, in track order.
+    // An empty model selection means "system default"; map it to the "default" sentinel
+    // so the driver actually opens it (an empty list means "no capture at all").
+    std::vector<std::string> out;
     for (const Track& t : model.project.tracks) {
         if (t.kind != TrackKind::Audio || !(t.recordArm || t.monitor))
             continue;
         const std::string dev = t.inputDevice.empty() ? std::string("default") : t.inputDevice;
-        if (!haveWinner) {
-            winner = dev;
-            haveWinner = true;
-            continue;
-        }
-        if (dev != winner)
-            conflicts.push_back(json{{"trackId", t.id}, {"device", dev}});
+        if (std::find(out.begin(), out.end(), dev) == out.end())
+            out.push_back(dev);
     }
-    json st{{"deviceId", haveWinner ? winner : std::string()},
-            {"conflicts", std::move(conflicts)}};
+    return out;
+}
+
+int App::captureBaseChannel(const std::string& effectiveDevice) const {
+    // Track→slot matching is on the REQUESTED id string (the driver echoes it in its
+    // captureSlots). A device that is not open maps far beyond any real input, which
+    // every consumer (TrackNode monitor/meter, AudioRecorder) range-checks into SILENCE
+    // — recording the WRONG device's signal is the one failure this fix exists to end.
+    const AudioConfig actual = driver->actual();
+    for (const CaptureSlot& s : actual.captureSlots)
+        if (s.deviceId == effectiveDevice)
+            return s.baseChannel;
+    return kNoCaptureChannel;
+}
+
+json App::captureStateJson() const {
+    // The open endpoints + every armed/monitoring audio track whose device is NOT among
+    // them (it records/monitors silence until its device opens — reported, never guessed
+    // around; SPEC §10). Matching is textual on the requested id: "" (default) vs the
+    // default device's literal id counts as distinct, which over-opens (two sessions on
+    // the same endpoint work fine) rather than mis-attributes.
+    const AudioConfig actual = driver->actual();
+    json devices = json::array();
+    for (const CaptureSlot& s : actual.captureSlots)
+        devices.push_back(json{{"deviceId", s.deviceId},
+                               {"channels", s.channels},
+                               {"base", s.baseChannel}});
+    json unavailable = json::array();
+    for (const Track& t : model.project.tracks) {
+        if (t.kind != TrackKind::Audio || !(t.recordArm || t.monitor))
+            continue;
+        const std::string dev = t.inputDevice.empty() ? std::string("default") : t.inputDevice;
+        const bool open = std::any_of(actual.captureSlots.begin(), actual.captureSlots.end(),
+                                      [&](const CaptureSlot& s) { return s.deviceId == dev; });
+        if (!open)
+            unavailable.push_back(json{{"trackId", t.id}, {"device", dev}});
+    }
+    json st{{"devices", std::move(devices)}, {"unavailable", std::move(unavailable)}};
     if (!captureError_.empty())
         st["error"] = captureError_;
     return st;
@@ -594,10 +612,10 @@ void App::reconcileCaptureDevice() {
     if (reconcilingCapture_)
         return; // reconfigureAudio -> prepareGraphFormat -> syncEngineFromModel re-enters
     reconcilingCapture_ = true;
-    const std::string desired = desiredCaptureDeviceId();
-    if (desired != currentConfig_.captureDeviceId) {
+    const std::vector<std::string> desired = desiredCaptureDeviceIds();
+    if (desired != currentConfig_.captureDeviceIds) {
         AudioConfig cfg = currentConfig_;
-        cfg.captureDeviceId = desired;
+        cfg.captureDeviceIds = desired;
         json actual;
         std::string err;
         if (!reconfigureAudio(cfg, actual, err)) {
@@ -606,17 +624,22 @@ void App::reconcileCaptureDevice() {
             captureError_ = err;
         } else {
             captureError_.clear();
-            if (desired.empty())
+            if (desired.empty()) {
                 Log::info("capture closed (no audio track armed/monitoring)");
-            else
-                Log::info("capture opened on '%s'", desired.c_str());
+            } else {
+                std::string list;
+                for (const std::string& d : desired)
+                    list += (list.empty() ? "'" : ", '") + d + "'";
+                Log::info("capture open on %s (%d device(s))", list.c_str(),
+                          static_cast<int>(driver->actual().captureSlots.size()));
+            }
         }
     } else if (desired.empty()) {
         captureError_.clear(); // nothing wanted: a stale failure must not outlive its cause
     }
     reconcilingCapture_ = false;
-    // The honest picture can change while the winning device does not (arming a SECOND
-    // track with a different input), so the event fires on payload change, not device change.
+    // The honest picture can change while the device list does not (arming another track
+    // on an already-open device), so the event fires on payload change, not list change.
     json st = captureStateJson();
     if (st != lastCaptureState_) {
         lastCaptureState_ = st;
@@ -747,7 +770,13 @@ bool App::startRecording(std::string& err) {
             RecordTarget rt;
             rt.trackId = t.id;
             rt.channels = t.channels;
-            rt.inputChannelOffset = t.inputChannel >= 0 ? t.inputChannel : 0;
+            // Multi-endpoint: the track's slice starts at its DEVICE's base channel.
+            // A device that is not open maps to kNoCaptureChannel → recorded silence
+            // (AudioRecorder range-checks), never another device's signal.
+            const std::string dev =
+                t.inputDevice.empty() ? std::string("default") : t.inputDevice;
+            rt.inputChannelOffset =
+                captureBaseChannel(dev) + (t.inputChannel >= 0 ? t.inputChannel : 0);
             targets.push_back(rt);
         } else if (t.kind == TrackKind::Midi || t.kind == TrackKind::Instrument) {
             anyMidi = true;

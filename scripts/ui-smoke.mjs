@@ -1012,31 +1012,34 @@ export const checks = [
 
   {
     id: "capture-conflict-chip",
-    title: "arming two audio tracks on different inputs raises the honest warning chip",
+    title: "arming a track on an input device that can't open raises the honest warning chip",
     area: "transport",
-    guards: "NEXT.md NOW item — App::desiredCaptureDeviceId opens ONE endpoint (the first armed track's), so a second armed track on another device silently records the winner's signal; SPEC §10 says the UI must say so (event/captureState → TransportBar chip)",
+    guards: "SPEC §5.5 multi-endpoint capture (2026-08-07, from Omer's two-mic session) — every armed track's device opens in its own session, so different inputs on different tracks just WORK; what remains warnable is a device that fails to open (that track records SILENCE), surfaced via event/captureState → TransportBar chip with the track and device NAMED (the raw-GUID toast was the bug report)",
     run: async (s, tt) => {
       const a = (await s.probe("cmd/track.add", { kind: "audio", name: "Cap A" })).payload.track;
       const b = (await s.probe("cmd/track.add", { kind: "audio", name: "Cap B" })).payload.track;
       try {
         tt.ok(!(await s.eval(() => !!document.querySelector(".tb-capture-warn"))),
-          "no chip before any conflict exists (it must be able to be absent)");
+          "no chip before any problem exists (it must be able to be absent)");
 
+        // Two tracks on two different (real) inputs must raise NO warning — that is
+        // the multi-endpoint contract, and exactly what used to warn before.
         await s.probe("cmd/track.set", { trackId: a.id, patch: { recordArm: true } });
         await s.probe("cmd/track.set",
           { trackId: b.id, patch: { inputDevice: "Imaginary Input", recordArm: true } });
-        await s.untilEval("conflict chip appears", () => !!document.querySelector(".tb-capture-warn"));
+        await s.untilEval("unavailable-device chip appears", () => !!document.querySelector(".tb-capture-warn"));
 
         const chip = await s.eval(() => {
           const el = document.querySelector(".tb-capture-warn");
           return { text: el?.textContent ?? "", title: el?.getAttribute("title") ?? "" };
         });
-        tt.match(chip.text, /Input conflict/, "chip names the problem");
-        tt.match(chip.title, /Cap B/, "tooltip names the conflicting track");
+        tt.match(chip.text, /Input unavailable/, "chip names the problem");
+        tt.match(chip.title, /Cap B/, "tooltip names the affected track");
         tt.match(chip.title, /Imaginary Input/, "tooltip names the device it asked for");
+        tt.match(chip.title, /SILENCE/, "tooltip states the consequence");
 
         await s.probe("cmd/track.set", { trackId: b.id, patch: { recordArm: false } });
-        await s.untilEval("chip clears once the conflict is resolved",
+        await s.untilEval("chip clears once the missing device is disarmed",
           () => !document.querySelector(".tb-capture-warn"));
       } finally {
         await s.probe("cmd/track.remove", { trackId: b.id });

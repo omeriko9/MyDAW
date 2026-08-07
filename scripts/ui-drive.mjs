@@ -345,8 +345,13 @@ export async function spawnSlot(slot, { headful = false } = {}) {
   }
 
   if (!existsSync(ENGINE)) throw new Error(`engine not built: ${ENGINE}`);
+  // --null-input 2: the slot's "default" capture device must actually OPEN — since
+  // multi-endpoint capture (SPEC §5.5), an armed track whose device cannot open shows
+  // the honest Input-unavailable chip, and without a synthetic input EVERY armed track
+  // would trip it (the null driver otherwise has no capture devices at all).
   const eng = spawn(ENGINE, [
     "--port", String(enginePort), "--no-browser", "--driver", "null", "--ui-root", UI_ROOT,
+    "--null-input", "2",
   ], { env: { ...process.env, APPDATA: appdata }, detached: true, stdio: "ignore" });
   eng.unref();
 

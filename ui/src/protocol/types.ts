@@ -1832,22 +1832,30 @@ export interface MidiActivityEvent {
   trackId?: number;
 }
 
-/** An armed/monitoring audio track whose chosen input the single capture endpoint
- *  cannot honour — it records the OPEN device's signal instead (SPEC §5.5). */
-export interface CaptureConflict {
+/** One OPEN capture endpoint (multi-endpoint capture, SPEC §5.5 2026-08-07). */
+export interface CaptureDeviceSlot {
+  /** As requested: "default" or an endpoint id. */
+  deviceId: string;
+  channels: number;
+  /** First channel in the engine's input array. */
+  base: number;
+}
+
+/** An armed/monitoring audio track whose chosen device is NOT open — it records
+ *  and monitors SILENCE (never another device's signal) until it opens. */
+export interface CaptureUnavailable {
   trackId: number;
   /** The input device this track asked for. */
   device: string;
 }
 
 /** event/captureState + session/hello `captureState` (SPEC §5.5 / §10 honesty):
- *  v1 opens ONE capture endpoint — the first armed/monitoring audio track's input.
- *  Any other armed/monitoring audio track naming a different device is a conflict. */
+ *  the engine opens one capture session per DISTINCT armed/monitoring device.
+ *  `unavailable` lists armed tracks whose device failed to open. */
 export interface CaptureStateEvent {
-  /** The open capture endpoint ("default" = system default); "" = capture closed. */
-  deviceId: string;
-  conflicts: CaptureConflict[];
-  /** Capture failed to open — input recording/monitoring is silent. */
+  devices: CaptureDeviceSlot[];
+  unavailable: CaptureUnavailable[];
+  /** Capture reconfigure failed outright — input recording/monitoring is silent. */
   error?: string;
 }
 

@@ -443,18 +443,25 @@ the entire drag.
 ### 5.5 Recording & media
 - `cmd/track.set recordArm` + `transport/record` records armed audio tracks (WASAPI capture of
   selected input) to `audio/rec-<n>.wav` and armed MIDI tracks from enabled MIDI inputs.
-- **Single capture endpoint + honesty** (2026-08-07): v1 opens ONE capture device — the FIRST
-  armed/monitoring audio track's input (`App::desiredCaptureDeviceId`; "" model selection →
-  "default") — and every armed node is fed its buffer. A second armed/monitoring audio track
-  naming a different device would silently record the winner's signal, so the engine reports
-  `captureState {deviceId, conflicts:[{trackId, device}], error?}` — in `session/hello` and,
-  on every change, as `event/captureState` (§10: the UI shows a persistent TransportBar chip
-  + a one-shot toast; `error` = the capture stream failed to open, so input is silent).
-  Reconciled centrally after every mutating command (`CommandProcessor::execute`) and on
-  load/undo/redo (`syncEngineFromModel`), so removing/duplicating an armed track or undoing
-  an arm keeps both the stream and the report current. Device comparison is textual: "" vs
-  the default device's literal id counts as a conflict (over-warns, never under-warns).
-  Multi-endpoint capture is the real fix and stays deferred (STUBS.md).
+- **Multi-endpoint capture + honesty** (2026-08-07, two revisions the same day): the engine
+  opens ONE WASAPI capture session per DISTINCT device among armed/monitoring audio tracks
+  (`App::desiredCaptureDeviceIds`, track order, "" model selection → "default") — two mics
+  on two interfaces record simultaneously, each track reading its own device's channels.
+  Each session runs on its own thread at its own clock into its own SPSC ring; the engine's
+  `in` array concatenates the open devices' channels (`AudioConfig.captureSlots` carries
+  the layout; track offset = its device's base + `Track.inputChannel`). A device that
+  CANNOT open maps its tracks to silence (`kNoCaptureChannel` — range-checked in TrackNode
+  and AudioRecorder), never to another device's signal, and is reported: `captureState
+  {devices:[{deviceId, channels, base}], unavailable:[{trackId, device}], error?}` in
+  `session/hello` and, on change, as `event/captureState` (§10: persistent TransportBar
+  chip + one-shot toast, device ids resolved to FRIENDLY NAMES in the UI). Reconciled
+  centrally after every mutating command (`CommandProcessor::execute`) and on
+  load/undo/redo (`syncEngineFromModel`). Device matching is textual on the requested id
+  ("" vs the default's literal id = two sessions on one endpoint — harmless). Known limit:
+  per-device clock drift is zero-fill/drop per ring (same as the old single session);
+  proper drift-compensating resampling stays deferred (STUBS.md). Headless: `--null-input
+  N` synthesizes TWO capture devices — "null"/"default" (position-recoverable ramp) and
+  "null-b" (negated ramp) — so per-device routing is testable (`record-capture-test.mjs`).
 - **Input gain** (`Track.inputGainDb`, audio tracks only, −24..+24 dB, default 0, set via
   `cmd/track.set {inputGainDb}`): a pre-insert gain stage applied to everything entering the
   track's insert chain — live input and clip playback alike. **The recorded FILE is RAW**: the
@@ -1174,9 +1181,9 @@ host-side capture via Windows.Graphics.Capture → WebRTC video track + input fo
 NOT implemented; "Open native UI" opens a real local window instead — implemented), time-stretch
 (offline `cmd/clip.stretch` WSOLA + transpose is implemented; interactive *resize*-drag is still
 trim only), multichannel >2 (schema+graph ready, UI exposes mono/stereo, panner is stereo),
-multi-endpoint capture (§5.5: one device at a time, conflicts surfaced via `captureState`),
-plugin preview/audition without track. STUBS.md explains exactly where each
-interface is and what to implement.
+per-capture-device drift resampling (§5.5: multi-endpoint capture is DONE; drift is still
+zero-fill/drop per session), plugin preview/audition without track. STUBS.md explains exactly
+where each interface is and what to implement.
 
 ## 11. Definition of done (v1 smoke)
 

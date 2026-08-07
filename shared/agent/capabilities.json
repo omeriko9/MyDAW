@@ -632,9 +632,57 @@
       ],
       "type": "number"
     },
-    "CaptureConflict": {
+    "CaptureDeviceSlot": {
       "additionalProperties": false,
-      "description": "An armed/monitoring audio track whose chosen input the single capture endpoint cannot honour — it records the open device's signal instead.",
+      "description": "One OPEN capture endpoint (multi-endpoint capture): its id as requested, channel count, and first channel in the engine's input array.",
+      "properties": {
+        "base": {
+          "type": "number"
+        },
+        "channels": {
+          "type": "number"
+        },
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "channels",
+        "base"
+      ],
+      "type": "object"
+    },
+    "CaptureState": {
+      "additionalProperties": false,
+      "description": "Capture honesty (SPEC §5.5): the endpoints the engine has open (one session per distinct armed device), armed tracks whose device is NOT open (they record silence), and any capture failure. session/hello + event/captureState.",
+      "properties": {
+        "devices": {
+          "items": {
+            "$ref": "#/schemas/CaptureDeviceSlot"
+          },
+          "type": "array"
+        },
+        "error": {
+          "description": "capture reconfigure failed — input recording/monitoring is silent",
+          "type": "string"
+        },
+        "unavailable": {
+          "items": {
+            "$ref": "#/schemas/CaptureUnavailable"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "devices",
+        "unavailable"
+      ],
+      "type": "object"
+    },
+    "CaptureUnavailable": {
+      "additionalProperties": false,
+      "description": "An armed/monitoring audio track whose chosen input device is not open — it records and monitors silence until the device is available.",
       "properties": {
         "device": {
           "description": "the input device this track asked for",
@@ -647,31 +695,6 @@
       "required": [
         "trackId",
         "device"
-      ],
-      "type": "object"
-    },
-    "CaptureState": {
-      "additionalProperties": false,
-      "description": "Single-capture-endpoint honesty (SPEC §5.5): the device the engine has open, tracks it cannot honour, and any capture-open failure. session/hello + event/captureState.",
-      "properties": {
-        "conflicts": {
-          "items": {
-            "$ref": "#/schemas/CaptureConflict"
-          },
-          "type": "array"
-        },
-        "deviceId": {
-          "description": "open capture endpoint; \"\" = capture closed",
-          "type": "string"
-        },
-        "error": {
-          "description": "capture failed to open — input recording/monitoring is silent",
-          "type": "string"
-        }
-      },
-      "required": [
-        "deviceId",
-        "conflicts"
       ],
       "type": "object"
     },

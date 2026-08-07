@@ -57,7 +57,18 @@ std::vector<DeviceInfo> NullDriver::enumerate() {
     d.maxInputs = testInputChannels_;
     d.maxOutputs = kNullChannels;
     d.sampleRates = {44100, 48000, 88200, 96000, 176400, 192000};
-    return {d};
+    std::vector<DeviceInfo> out{d};
+    if (testInputChannels_ > 0) {
+        // Second synthetic capture device (multi-endpoint tests): negated ramp.
+        DeviceInfo b;
+        b.id = "null-b";
+        b.name = "Null capture B (test, negated ramp)";
+        b.maxInputs = testInputChannels_;
+        b.maxOutputs = 0;
+        b.sampleRates = d.sampleRates;
+        out.push_back(b);
+    }
+    return out;
 }
 
 bool NullDriver::open(const AudioConfig& config, AudioCallback callback, void* user,
@@ -77,7 +88,7 @@ bool NullDriver::open(const AudioConfig& config, AudioCallback callback, void* u
     actual_ = config;
     actual_.driverType = DriverType::Null;
     actual_.deviceId = "null";
-    actual_.captureDeviceId.clear();
+    actual_.captureSlots.clear();
     actual_.exclusive = false;
     actual_.sampleRate = std::clamp(config.sampleRate, 8000, 384000);
     // Engine blocks must respect the shm/plugin maxBlock of 2048 (SPEC §8.1).
@@ -89,17 +100,33 @@ bool NullDriver::open(const AudioConfig& config, AudioCallback callback, void* u
     for (int c = 0; c < kNullChannels; ++c)
         outPtrs_[static_cast<size_t>(c)] = outPlanes_[static_cast<size_t>(c)].data();
 
-    // Synthetic capture planes, allocated here so the callback thread never does.
+    // Synthetic capture (multi-endpoint): grant one slot per REQUESTED id that names a
+    // synthetic device ("null"/"default"/"" → ramp, "null-b" → negated ramp); anything
+    // else fails to open exactly like a device that is not there. Each open device is
+    // opened once (first request wins), in request order — matching the WASAPI contract.
+    slotIsB_.clear();
+    inPlanes_.clear();
+    inPtrs_.clear();
     if (testInputChannels_ > 0) {
-        inPlanes_.assign(static_cast<size_t>(testInputChannels_),
+        bool haveA = false, haveB = false;
+        for (const std::string& id : config.captureDeviceIds) {
+            const bool isA = id.empty() || id == "default" || id == "null";
+            const bool isB = id == "null-b";
+            if ((isA && haveA) || (isB && haveB) || (!isA && !isB))
+                continue; // duplicate or unknown device — unknown = unavailable
+            (isA ? haveA : haveB) = true;
+            actual_.captureSlots.push_back(CaptureSlot{
+                id.empty() ? std::string("default") : id, testInputChannels_,
+                static_cast<int>(slotIsB_.size()) * testInputChannels_});
+            slotIsB_.push_back(isB);
+        }
+        const size_t totalCh =
+            slotIsB_.size() * static_cast<size_t>(testInputChannels_);
+        inPlanes_.assign(totalCh,
                          std::vector<float>(static_cast<size_t>(actual_.bufferSize), 0.0f));
-        inPtrs_.resize(static_cast<size_t>(testInputChannels_));
-        for (int c = 0; c < testInputChannels_; ++c)
-            inPtrs_[static_cast<size_t>(c)] = inPlanes_[static_cast<size_t>(c)].data();
-        actual_.captureDeviceId = "null";
-    } else {
-        inPlanes_.clear();
-        inPtrs_.clear();
+        inPtrs_.resize(totalCh);
+        for (size_t c = 0; c < totalCh; ++c)
+            inPtrs_[c] = inPlanes_[c].data();
     }
     inFrame_ = 0;
 
@@ -116,15 +143,23 @@ void NullDriver::setTestInput(int channels) {
 void NullDriver::fillTestInput(int64_t frame, int n) noexcept {
     // 1 Hz sawtooth over [-1, 1): period == sampleRate, so the phase of any captured
     // sample identifies its absolute frame index modulo one second. That is what makes a
-    // sample-accurate punch assertion possible — a periodic tone would not.
+    // sample-accurate punch assertion possible — a periodic tone would not. Slot "null-b"
+    // carries the NEGATED ramp so a per-device routing test can tell devices apart.
     const int64_t period = actual_.sampleRate > 0 ? actual_.sampleRate : 48000;
     const float inv = 2.0f / static_cast<float>(period);
-    for (int c = 0; c < testInputChannels_; ++c) {
-        float* dst = inPlanes_[static_cast<size_t>(c)].data();
-        const float scale = 1.0f / static_cast<float>(c + 1); // channel identity by amplitude
-        for (int i = 0; i < n; ++i) {
-            const int64_t k = (frame + i) % period;
-            dst[i] = (static_cast<float>(k) * inv - 1.0f) * scale;
+    for (size_t slot = 0; slot < slotIsB_.size(); ++slot) {
+        const float sign = slotIsB_[slot] ? -1.0f : 1.0f;
+        for (int c = 0; c < testInputChannels_; ++c) {
+            float* dst =
+                inPlanes_[slot * static_cast<size_t>(testInputChannels_) +
+                          static_cast<size_t>(c)]
+                    .data();
+            const float scale =
+                sign / static_cast<float>(c + 1); // channel identity by amplitude
+            for (int i = 0; i < n; ++i) {
+                const int64_t k = (frame + i) % period;
+                dst[i] = (static_cast<float>(k) * inv - 1.0f) * scale;
+            }
         }
     }
 }
@@ -231,11 +266,11 @@ void NullDriver::threadMain() {
 
         for (auto& plane : outPlanes_)
             std::memset(plane.data(), 0, blockBytes);
-        if (testInputChannels_ > 0) {
+        if (!inPtrs_.empty()) {
             fillTestInput(inFrame_, block);
             inFrame_ += block;
-            callback_(user_, inPtrs_.data(), testInputChannels_, outPtrs_.data(), kNullChannels,
-                      block);
+            callback_(user_, inPtrs_.data(), static_cast<int>(inPtrs_.size()),
+                      outPtrs_.data(), kNullChannels, block);
         } else {
             callback_(user_, nullptr, 0, outPtrs_.data(), kNullChannels, block);
         }

@@ -57,6 +57,13 @@ public:
      * WHICH samples were recorded, not merely that something was. Sample-accurate punch
      * in/out cannot be tested against a signal you cannot locate yourself in. Channel c is
      * the same ramp scaled by 1/(c+1), so channels are told apart by amplitude.
+     *
+     * Multi-endpoint (2026-08-07): with test input on, TWO capture devices exist —
+     * "null" (default; also matched by "default") carrying the ramp, and "null-b"
+     * carrying the NEGATED ramp, so a two-device recording test can prove per-device
+     * routing (which file got which device's signal). Any other requested capture id
+     * fails to open, exactly like a device that is not there — which is what makes the
+     * unavailable-device honesty path testable headlessly.
      */
     void setTestInput(int channels);
 
@@ -64,6 +71,10 @@ private:
     void threadMain();
     /** RT: fill inPlanes_ with the ramp for [frame, frame+n). Allocation- and lock-free. */
     void fillTestInput(int64_t frame, int n) noexcept;
+
+    // Which synthetic devices open() actually granted, in slot order ("null" / "null-b").
+    // Drives fillTestInput's sign per slot and actual_.captureSlots.
+    std::vector<bool> slotIsB_;
 
     AudioConfig actual_{};
     AudioCallback callback_ = nullptr;

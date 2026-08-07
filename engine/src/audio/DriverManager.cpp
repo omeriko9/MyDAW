@@ -72,7 +72,7 @@ bool DriverManager::openLocked(const AudioConfig& config, std::string& err) {
         AudioConfig c = config;
         c.driverType = DriverType::Null;
         c.deviceId.clear();
-        c.captureDeviceId.clear();
+        c.captureDeviceIds.clear();
         c.exclusive = false;
         attempts.push_back(c);
     }

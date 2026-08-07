@@ -185,44 +185,86 @@ try {
       Math.abs(c1 * 2 - c0) < 1e-3, `ch0=${c0.toFixed(5)} ch1=${c1.toFixed(5)}`);
   }
 
-  // ---- single-capture-endpoint honesty (SPEC §5.5 / §10) -----------------------------
-  // v1 opens ONE endpoint: the first armed/monitoring audio track wins, and every armed
-  // node is fed its buffer. A second armed track naming a DIFFERENT device would silently
-  // record the winner's signal — so the engine must SAY so (event/captureState + hello),
-  // which is what these pin down. Driver-independent: no reconfigure happens because the
-  // winner does not change.
-  report("hello carries captureState for the armed track",
-    hello.payload.captureState?.deviceId === "default" &&
-      hello.payload.captureState?.conflicts?.length === 0,
+  // ---- multi-endpoint capture honesty (SPEC §5.5 / §10) ------------------------------
+  // One session per DISTINCT armed device. A device that cannot open is reported as
+  // `unavailable` (its track records SILENCE — never another device's signal), in
+  // event/captureState and in hello.
+  report("hello carries captureState with the open default device",
+    hello.payload.captureState?.devices?.some((d) => d.deviceId === "default") &&
+      hello.payload.captureState?.unavailable?.length === 0,
     JSON.stringify(hello.payload.captureState));
 
   const t2 = (await req("cmd/track.add", { kind: "audio", name: "Cap2" })).payload.track;
   lastCaptureState = null;
   await req("cmd/track.set",
     { trackId: t2.id, patch: { inputDevice: "Imaginary Input", recordArm: true } });
-  const conflicted = await untilCapture((c) => c && c.conflicts.length > 0);
-  report("arming a second track on another device raises the conflict",
-    !!conflicted && conflicted.deviceId === "default" &&
-      conflicted.conflicts.length === 1 &&
-      conflicted.conflicts[0].trackId === t2.id &&
-      conflicted.conflicts[0].device === "Imaginary Input" &&
-      conflicted.error === undefined,
-    JSON.stringify(conflicted));
+  const missing = await untilCapture((c) => c && c.unavailable.length > 0);
+  report("arming on a device that can't open reports it unavailable",
+    !!missing && missing.unavailable.length === 1 &&
+      missing.unavailable[0].trackId === t2.id &&
+      missing.unavailable[0].device === "Imaginary Input" &&
+      missing.devices.some((d) => d.deviceId === "default"),
+    JSON.stringify(missing));
 
   // Undo restores arm/input states WHOLESALE (syncEngineFromModel), which must reconcile
   // capture too — this failed silently before the hook moved there.
   lastCaptureState = null;
   await req("edit/undo", {});
-  const cleared = await untilCapture((c) => c && c.conflicts.length === 0);
-  report("undoing the arm clears the conflict (undo/load path reconciles)",
-    !!cleared && cleared.deviceId === "default" && cleared.conflicts.length === 0,
-    JSON.stringify(cleared));
+  const cleared = await untilCapture((c) => c && c.unavailable.length === 0);
+  report("undoing the arm clears the unavailable report (undo/load path reconciles)",
+    !!cleared && cleared.unavailable.length === 0, JSON.stringify(cleared));
+
+  // ---- TWO devices, really recorded (the two-mic session that prompted all this) -----
+  // Track 1 stays armed on the default null device (positive ramp); Cap2 arms on the
+  // second synthetic device "null-b" (NEGATED ramp). Both record simultaneously and
+  // each take file must carry ITS device's signal — per-device ROUTING, not merely
+  // per-device open.
+  lastCaptureState = null;
+  await req("cmd/track.set",
+    { trackId: t2.id, patch: { inputDevice: "null-b", recordArm: true } });
+  const dual = await untilCapture((c) => c && c.devices.length === 2);
+  report("arming on a second real device opens BOTH capture sessions",
+    !!dual && dual.devices.length === 2 && dual.unavailable.length === 0 &&
+      dual.devices.some((d) => d.deviceId === "null-b" && d.base > 0),
+    JSON.stringify(dual));
+
+  await req("transport/locate", { beat: 0 });
+  await req("transport/record", {});
+  await sleep(800);
+  await req("transport/stop", {});
+  await sleep(900);
+
+  const files2 = readdirSync(dir).filter((f) => f.endsWith(".wav")).sort();
+  report("the two-device take wrote one file per armed track",
+    files2.length === 3, files2.join(", "));
+  // Ramp SLOPE tells the devices apart (values alone don't — both ramps span [-1,1)):
+  // +2/SR per sample on the default device, −2/SR on null-b. Targets are created in
+  // track order, so rec-2 = Cap (default) and rec-3 = Cap2 (null-b).
+  const slope = (w) => {
+    const frames2 = w.bytes / (w.fmt.ch * 4);
+    const n = Math.min(256, frames2);
+    let sum = 0;
+    for (let i = 1; i < n; i++) {
+      const a = w.buf.readFloatLE(w.off + (i - 1) * w.fmt.ch * 4);
+      const b2 = w.buf.readFloatLE(w.off + i * w.fmt.ch * 4);
+      const d = b2 - a;
+      if (Math.abs(d) < 1) sum += d; // skip the once-per-second wrap
+    }
+    return sum;
+  };
+  const wA = readWav(path.join(dir, files2[1]));
+  const wB = readWav(path.join(dir, files2[2]));
+  report("track 1's file carries the DEFAULT device's rising ramp",
+    !!wA && slope(wA) > 0, `slope=${wA ? slope(wA).toExponential(2) : "?"}`);
+  report("track 2's file carries null-b's FALLING (negated) ramp",
+    !!wB && slope(wB) < 0, `slope=${wB ? slope(wB).toExponential(2) : "?"}`);
 
   lastCaptureState = null;
+  await req("cmd/track.set", { trackId: t2.id, patch: { recordArm: false } });
   await req("cmd/track.set", { trackId: track.id, patch: { recordArm: false } });
-  const closed = await untilCapture((c) => c && c.deviceId === "");
-  report("unarming the last track reports capture closed",
-    !!closed && closed.deviceId === "" && closed.conflicts.length === 0,
+  const closed = await untilCapture((c) => c && c.devices.length === 0);
+  report("unarming everything closes all capture sessions",
+    !!closed && closed.devices.length === 0 && closed.unavailable.length === 0,
     JSON.stringify(closed));
 } catch (e) {
   report("harness completed", false, e?.stack ?? String(e));

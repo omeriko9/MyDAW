@@ -1,26 +1,36 @@
 /**
  * Capture-honesty wording (SPEC §5.5 / §10) — pure functions turning the engine's
- * captureState (single capture endpoint + tracks it cannot honour) into the strings
- * the TransportBar chip and the warning toast show. Pure so vitest can pin them.
+ * captureState (open capture endpoints + armed tracks whose device is NOT open)
+ * into the strings the TransportBar chip and the warning toast show. Pure so
+ * vitest can pin them.
  *
- * v1 opens ONE capture endpoint: the first armed/monitoring audio track picks the
- * device, and every other armed/monitoring audio track is fed that same signal. A
- * track on the `conflicts` list asked for a different input and would silently
- * record the wrong source — the exact failure this wording exists to prevent.
+ * Multi-endpoint capture (2026-08-07): the engine opens one session per distinct
+ * armed/monitoring device, so two mics on two interfaces just WORK. What remains
+ * to warn about is a device that could not be opened (unplugged, wrong id, driver
+ * refused) — that track records/monitors silence until it opens — and a capture
+ * reconfigure failing outright. Device ids are raw endpoint GUIDs on the wire;
+ * everything user-facing resolves them to friendly names via the device list
+ * (the raw-GUID toast is exactly the bug report that prompted this rewrite).
  */
 
-import type { CaptureStateEvent, Project } from "../protocol/types";
+import type { CaptureStateEvent, GetDevicesReply, Project } from "../protocol/types";
 
 export interface CaptureWarning {
-  /** Short chip label ("Input conflict" / "Input error"). */
+  /** Short chip label ("Input unavailable" / "Input error"). */
   chip: string;
   /** Full sentence(s) for the chip tooltip and the transition toast. */
   detail: string;
-  /** true when capture itself failed to open (worse than a conflict). */
+  /** true when capture itself failed to open (worse than one missing device). */
   isError: boolean;
 }
 
-const deviceLabel = (d: string): string => (d === "default" || d === "" ? "system default" : d);
+/** Resolve an endpoint id to its friendly name; falls back to the raw id. */
+export function deviceName(id: string, devices: GetDevicesReply | null): string {
+  if (id === "default" || id === "") return "the system default input";
+  for (const drv of devices?.drivers ?? [])
+    for (const d of drv.devices) if (d.id === id) return `“${d.name}”`;
+  return `“${id}”`;
+}
 
 function trackName(project: Project | null, trackId: number): string {
   const t = project?.tracks.find((x) => x.id === trackId);
@@ -28,12 +38,13 @@ function trackName(project: Project | null, trackId: number): string {
 }
 
 /**
- * Null when there is nothing to warn about (no conflict, no error) — the normal
- * state, in which the UI shows nothing at all.
+ * Null when there is nothing to warn about — the normal state (including the
+ * normal MULTI-device state), in which the UI shows nothing at all.
  */
 export function describeCaptureState(
   cs: CaptureStateEvent | null,
   project: Project | null,
+  devices: GetDevicesReply | null,
 ): CaptureWarning | null {
   if (!cs) return null;
   if (cs.error) {
@@ -45,17 +56,16 @@ export function describeCaptureState(
       isError: true,
     };
   }
-  if (cs.conflicts.length === 0) return null;
-  const winner = deviceLabel(cs.deviceId);
-  const list = cs.conflicts
-    .map((c) => `"${trackName(project, c.trackId)}" (wants ${deviceLabel(c.device)})`)
+  if (cs.unavailable.length === 0) return null;
+  const list = cs.unavailable
+    .map((u) => `“${trackName(project, u.trackId)}” (wants ${deviceName(u.device, devices)})`)
     .join(", ");
   return {
-    chip: "Input conflict",
+    chip: "Input unavailable",
     detail:
-      `One input device at a time in v1: capture is open on ${winner}, so ` +
-      `${list} would record ${winner}'s signal instead. ` +
-      "Arm tracks that share one input device, or re-point their input.",
+      `Couldn't open the input device for ${list} — that track records and monitors ` +
+      "SILENCE until its device is available. Check the device is connected, or " +
+      "re-point the track's input.",
     isError: false,
   };
 }
@@ -64,6 +74,6 @@ export function describeCaptureState(
 export function captureWarningKey(cs: CaptureStateEvent | null): string {
   if (!cs) return "";
   if (cs.error) return `error:${cs.error}`;
-  if (cs.conflicts.length === 0) return "";
-  return "conflict:" + cs.conflicts.map((c) => `${c.trackId}=${c.device}`).join(",");
+  if (cs.unavailable.length === 0) return "";
+  return "unavailable:" + cs.unavailable.map((u) => `${u.trackId}=${u.device}`).join(",");
 }

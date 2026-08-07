@@ -1152,10 +1152,10 @@ json Api::handleEngine(const std::string& type, const json& p, std::string& ec,
             cfg.bufferSize = getOr<int>(p, "bufferSize", cfg.bufferSize);
         if (hasKey(p, "exclusive"))
             cfg.exclusive = getOr<bool>(p, "exclusive", false);
-        // Keep any capture stream that armed/monitoring tracks need open across this I/O
+        // Keep any capture streams that armed/monitoring tracks need open across this I/O
         // change — setAudioConfig only carries render fields, so without this a buffer/device
-        // switch would silently drop the microphone.
-        cfg.captureDeviceId = app_.desiredCaptureDeviceId();
+        // switch would silently drop the microphones.
+        cfg.captureDeviceIds = app_.desiredCaptureDeviceIds();
         json actual;
         std::string err;
         if (!app_.reconfigureAudio(cfg, actual, err)) {
@@ -1164,7 +1164,7 @@ json Api::handleEngine(const std::string& type, const json& p, std::string& ec,
             return json();
         }
         AudioConfig persisted = cfg;
-        persisted.captureDeviceId.clear(); // capture is runtime state, not persisted (SPEC §7)
+        persisted.captureDeviceIds.clear(); // capture is runtime state, not persisted (SPEC §7)
         app_.settings.storeAudioConfig(persisted);
         return json{{"actual", std::move(actual)}};
     }

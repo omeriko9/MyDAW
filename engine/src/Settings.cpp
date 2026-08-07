@@ -132,7 +132,8 @@ AudioConfig Settings::audioConfig() const {
     c.sampleRate = getOr<int>(a, "sampleRate", 48000);
     c.bufferSize = getOr<int>(a, "bufferSize", 512);
     c.exclusive = getOr<bool>(a, "exclusive", false);
-    c.captureDeviceId = getOr(a, "captureDeviceId", "");
+    // Capture devices are runtime state derived from armed/monitoring tracks (SPEC §7) —
+    // deliberately not read from settings (an old "captureDeviceId" key is ignored).
     return c;
 }
 
@@ -141,8 +142,7 @@ void Settings::storeAudioConfig(const AudioConfig& c) {
                           {"deviceId", c.deviceId},
                           {"sampleRate", c.sampleRate},
                           {"bufferSize", c.bufferSize},
-                          {"exclusive", c.exclusive},
-                          {"captureDeviceId", c.captureDeviceId}};
+                          {"exclusive", c.exclusive}};
     save();
 }
 

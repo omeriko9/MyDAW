@@ -166,18 +166,24 @@ public:
     void requestGraphRebuild(); // thread-safe, coalesced on the main loop
     int currentSampleRate() const { return currentSampleRate_; }
     AudioConfig currentAudioConfig() const { return currentConfig_; }
-    // The capture endpoint the model currently needs open: the inputDevice of the first
-    // armed / monitored audio track ("" model selection -> "default"), or "" when no audio
-    // track wants input (capture stays closed). Main thread.
-    std::string desiredCaptureDeviceId() const;
-    // {deviceId, conflicts:[{trackId, device}], error?} — the single capture endpoint plus
-    // every armed/monitoring audio track whose chosen input it can NOT honour (v1 opens ONE
-    // device; those tracks are fed the winner's signal). Carried by session/hello and, on
-    // change, by event/captureState (SPEC §5.5 / §10 honesty). Main thread.
+    // The capture endpoints the model currently needs open (multi-endpoint, SPEC §5.5
+    // 2026-08-07): the DISTINCT effective inputDevices of all armed/monitored audio
+    // tracks, in track order ("" model selection -> "default"). Empty = capture closed.
+    // Main thread.
+    std::vector<std::string> desiredCaptureDeviceIds() const;
+    // {devices:[{deviceId, channels, base}], unavailable:[{trackId, device}], error?} —
+    // the open capture endpoints plus every armed/monitoring audio track whose device is
+    // NOT open (it records/monitors SILENCE, never another device's signal). Carried by
+    // session/hello and, on change, by event/captureState (§10 honesty). Main thread.
     json captureStateJson() const;
-    // Open / close / repoint the WASAPI capture stream so it matches desiredCaptureDeviceId().
-    // No-op when it already matches. Reconfigures the driver otherwise. Broadcasts
-    // event/captureState when the honest picture (device/conflicts/error) changed. Main thread.
+    // First `in` channel of `effectiveDevice` per the driver's actual captureSlots, or
+    // a beyond-any-input offset when the device is not open (consumers range-check and
+    // fall to silence). Main thread.
+    int captureBaseChannel(const std::string& effectiveDevice) const;
+    // Open / close / repoint the capture sessions so they match desiredCaptureDeviceIds().
+    // No-op when they already match. Reconfigures the driver otherwise. Broadcasts
+    // event/captureState when the honest picture (devices/unavailable/error) changed.
+    // Main thread.
     void reconcileCaptureDevice();
 
     // Spawn a detached child engine (a "new project window") on a free loopback port,

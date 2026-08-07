@@ -4,7 +4,21 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-07 — **both open fix items SHIPPED**, clearing the deck for the
+Last updated: 2026-08-07 (evening) — **MULTI-ENDPOINT CAPTURE SHIPPED.** Omer hit the
+single-endpoint wall the same day it was surfaced (Rode on default + condenser on the
+Audio Kontrol 1: the warning fired — with a raw GUID in it — and the second mic was
+unreachable). The honest-v1 warning became the real fix within the day: one WASAPI
+capture session per distinct armed device (`WasapiDriver` CaptureSession refactor),
+per-device channel bases through `AudioGraph`/`AudioRecorder`, unavailable devices →
+SILENCE + `captureState {devices, unavailable, error?}` (chip/toast now resolve device
+ids to friendly names — the GUID toast is dead). Two-device routing proven headlessly:
+the null driver grew a second synthetic device ("null-b", negated ramp) and
+`record-capture-test.mjs` records BOTH at once and asserts each file carries its own
+device's ramp. ui-drive slots run `--null-input 2` now (an armed track with no openable
+device honestly trips the chip otherwise). Remaining known limit: per-device clock
+drift is zero-fill/drop (STUBS.md has the resampler pickup).
+
+Earlier the same day: **both open fix items SHIPPED**, clearing the deck for the
 Production Techniques arc (Omer: "first fix what needs fixin', then the prod techniques").
 
 1. **Capture honesty (the former NOW)**: the engine now reports

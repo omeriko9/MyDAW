@@ -122,6 +122,9 @@ struct AudioGraph::Impl {
     // Live-MIDI thru targets (the UI's track selection; setMidiThruTracks). Main
     // thread only: written by the setter, read by buildPlan.
     std::set<uint64_t> midiThru;
+    // Effective input device → first channel in the driver's `in` array (multi-endpoint
+    // capture; App::captureBaseChannel). Rebuild-time only, never on the RT thread.
+    std::function<int(const std::string&)> captureBase;
 
     // midi/preview injection: main thread (single producer) -> RT consumer.
     struct LiveInject {
@@ -815,7 +818,15 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                 // during a take (otherwise users monitoring through their interface get a
                 // doubled/latent signal they explicitly disabled).
                 cfg.liveAudioWhenRecording = false;
-                cfg.inputChannelOffset = std::max(0, t.inputChannel);
+                // Multi-endpoint capture: offset = the track's DEVICE base + its channel
+                // pick within that device. An unavailable device resolves far beyond any
+                // real input (kNoCaptureChannel) — TrackNode range-checks into silence.
+                {
+                    const std::string dev =
+                        t.inputDevice.empty() ? std::string("default") : t.inputDevice;
+                    const int base = captureBase ? captureBase(dev) : 0;
+                    cfg.inputChannelOffset = base + std::max(0, t.inputChannel);
+                }
                 // Input meter (SPEC §5.5): armed or monitoring audio tracks get a second
                 // slot under a composite key. Recorded in the plan so rebuild() can
                 // release it when the track disappears or dis-arms.
@@ -1116,6 +1127,10 @@ void AudioGraph::configure(int sampleRate, int maxBlock, Meters* meters,
 
 void AudioGraph::setMidiThruTracks(std::vector<uint64_t> trackIds) {
     impl_->midiThru = std::set<uint64_t>(trackIds.begin(), trackIds.end());
+}
+
+void AudioGraph::setCaptureBaseResolver(std::function<int(const std::string&)> fn) {
+    impl_->captureBase = std::move(fn);
 }
 
 void AudioGraph::rebuild(const Model& model) {

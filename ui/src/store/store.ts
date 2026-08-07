@@ -838,7 +838,8 @@ function adoptCaptureState(cs: CaptureStateEvent | undefined): void {
   useStore.setState({ captureState: cs });
   const key = captureWarningKey(cs);
   if (key === "" || key === prevKey) return;
-  const warning = describeCaptureState(cs, useStore.getState().project);
+  const now = useStore.getState();
+  const warning = describeCaptureState(cs, now.project, now.audioDevices);
   if (warning) showToast(warning.detail, "error");
 }
 
