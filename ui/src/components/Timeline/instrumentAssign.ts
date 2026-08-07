@@ -12,6 +12,7 @@
  * drops are deferred — a projectChanged in between must not double-apply).
  */
 
+import { useSyncExternalStore } from "react";
 import { useStore } from "../../store/store";
 import { addPlugin, addTrack, removePlugin, setTrack } from "../../store/actions";
 import type { PluginInfo, Project, Track } from "../../protocol/types";
@@ -19,6 +20,68 @@ import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 
 function liveTrack(trackId: number): Track | undefined {
   return useStore.getState().project?.tracks.find((t) => t.id === trackId);
+}
+
+/* ============================================================================
+ * In-flight registry (Omer, 2026-08-07: "some can take time, add a small
+ * spinning thingy … so the user won't try to do the same action again")
+ *
+ * cmd/plugin.add does not reply until the engine has spawned the host AND the
+ * plug-in finished init — for Kontakt/Addictive Drums that is seconds. During
+ * that window the new instanceId does not exist yet, so store.pluginStates has
+ * NOTHING to show: the promise itself is the only truth. Module-level +
+ * useSyncExternalStore (same pattern as ToastHost) so any flow can mark a track
+ * busy without prop-drilling.
+ * ========================================================================= */
+
+const busyTracks = new Set<number>();
+const busySubs = new Set<() => void>();
+let busyVersion = 0;
+
+function emitBusy(): void {
+  busyVersion++;
+  for (const cb of [...busySubs]) cb();
+}
+
+/** Run `fn` with `trackId` marked busy; always clears, success or failure. */
+export async function withInstrumentBusy<T>(trackId: number, fn: () => Promise<T>): Promise<T> {
+  busyTracks.add(trackId);
+  emitBusy();
+  try {
+    return await fn();
+  } finally {
+    busyTracks.delete(trackId);
+    emitBusy();
+  }
+}
+
+export function subscribeInstrumentBusy(cb: () => void): () => void {
+  busySubs.add(cb);
+  return () => {
+    busySubs.delete(cb);
+  };
+}
+
+export const instrumentBusyVersion = (): number => busyVersion;
+export const isInstrumentBusy = (trackId: number): boolean => busyTracks.has(trackId);
+
+/**
+ * A predicate for "is this track's instrument being swapped/loaded right now" —
+ * one hook call for a whole list of rows (a per-row hook would break the rules
+ * of hooks). Combines the in-flight command above with the engine's own
+ * "loading" state for inserts that already exist (event/pluginState): the first
+ * covers the add round-trip (during which no instanceId exists yet), the second
+ * a plug-in still streaming samples after it replied.
+ */
+export function useInstrumentBusyCheck(): (trackId: number) => boolean {
+  useSyncExternalStore(subscribeInstrumentBusy, instrumentBusyVersion, () => 0);
+  const pluginStates = useStore((s) => s.pluginStates);
+  const project = useStore((s) => s.project);
+  return (trackId: number) => {
+    if (busyTracks.has(trackId)) return true;
+    const t = project?.tracks.find((x) => x.id === trackId);
+    return !!t && t.inserts.some((i) => pluginStates[i.instanceId]?.state === "loading");
+  };
 }
 
 /**
@@ -62,13 +125,14 @@ export async function createInstrumentHost(p: PluginInfo): Promise<Track> {
 export function replaceInstrumentOn(trackId: number, p: PluginInfo): void {
   const live = liveTrack(trackId);
   if (!live || live.frozen) return;
+  if (isInstrumentBusy(trackId)) return; // a swap is already loading — ignore the re-click
   const cur = instrumentInsertOfTrack(live);
   if (cur?.uid === p.uid) return; // already this instrument
-  void (async () => {
+  void withInstrumentBusy(trackId, async () => {
     const idx = cur ? live.inserts.findIndex((i) => i.instanceId === cur.instanceId) : 0;
     await addPlugin(live.id, p.uid, Math.max(0, idx));
     if (cur) await removePlugin(live.id, cur.instanceId);
-  })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
+  }).catch((e) => console.warn("[timeline] instrument replace failed:", e));
 }
 
 /**
@@ -78,10 +142,11 @@ export function replaceInstrumentOn(trackId: number, p: PluginInfo): void {
  * remain the Instrument Rack's job (routeMidiToInstrument).
  */
 export function assignInstrumentToFeeder(feederId: number, p: PluginInfo): void {
-  void (async () => {
+  if (isInstrumentBusy(feederId)) return;
+  void withInstrumentBusy(feederId, async () => {
     await setTrack(feederId, { kind: "instrument" });
     await addPlugin(feederId, p.uid);
-  })().catch((e) => console.warn("[timeline] assign instrument failed:", e));
+  }).catch((e) => console.warn("[timeline] assign instrument failed:", e));
 }
 
 /**

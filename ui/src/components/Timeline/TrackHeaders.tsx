@@ -41,6 +41,7 @@ import {
   openInstrumentDropChoices,
   replaceInstrumentOn,
   routeMidiToInstrument,
+  useInstrumentBusyCheck,
 } from "./instrumentAssign";
 import {
   hasAssetDrag,
@@ -256,6 +257,8 @@ export default function TrackHeaders({
   const registry = useStore((s) => s.registry);
   const lanesExpanded = useAutomationUi((s) => s.expanded);
   const takesExpanded = useTakesUi((s) => s.expanded);
+  // "Is this track's instrument loading right now" — one hook for every row.
+  const instrumentBusy = useInstrumentBusyCheck();
 
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [reorderVis, setReorderVis] = useState<ReorderVisual | null>(null);
@@ -1002,6 +1005,9 @@ export default function TrackHeaders({
     const showInstRow =
       row.height >= 62 && showControls && (t.kind === "instrument" || t.kind === "midi");
     const instrumentInsert = t.kind === "instrument" ? instrumentInsertOf(t) : undefined;
+    // Heavy samplers take seconds to load; without feedback AT THE CONTROL the user
+    // re-picks and stacks work (Omer, 2026-08-07).
+    const instBusy = instrumentBusy(t.id) || (midiHost ? instrumentBusy(midiHost.id) : false);
     return (
       <div
         key={t.id}
@@ -1162,12 +1168,14 @@ export default function TrackHeaders({
             {t.kind === "instrument" ? (
               <button
                 type="button"
-                className="tlh-inst-btn"
-                disabled={!!t.frozen}
+                className={"tlh-inst-btn" + (instBusy ? " busy" : "")}
+                disabled={!!t.frozen || instBusy}
                 title={
-                  t.frozen
-                    ? "Track is frozen — unfreeze to change the instrument"
-                    : "Click: change instrument (favorites) · double-click: open its editor"
+                  instBusy
+                    ? "Loading the instrument — large sample libraries can take a while"
+                    : t.frozen
+                      ? "Track is frozen — unfreeze to change the instrument"
+                      : "Click: change instrument (favorites) · double-click: open its editor"
                 }
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1180,9 +1188,15 @@ export default function TrackHeaders({
                   openInstrumentEditor(t, () => openInstrumentPicker(t, r.left, r.bottom + 2));
                 }}
               >
-                <Icon name="piano" size={11} />
+                {instBusy ? (
+                  <span className="tlh-inst-spin">
+                    <Icon name="refresh" size={11} />
+                  </span>
+                ) : (
+                  <Icon name="piano" size={11} />
+                )}
                 <span className="tlh-inst-name">
-                  {instrumentInsert?.name ?? "Choose instrument…"}
+                  {instBusy ? "Loading…" : (instrumentInsert?.name ?? "Choose instrument…")}
                 </span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
@@ -1191,11 +1205,14 @@ export default function TrackHeaders({
               // "assign a VST to this midi channel" without leaving the channel.
               <button
                 type="button"
-                className="tlh-inst-btn"
+                className={"tlh-inst-btn" + (instBusy ? " busy" : "")}
+                disabled={instBusy}
                 title={
-                  midiHost.frozen
-                    ? `Plays through "${midiHost.name}" (frozen host)`
-                    : `Plays through "${midiHost.name}" — click to choose a destination, double-click to open its editor`
+                  instBusy
+                    ? "Loading the instrument — large sample libraries can take a while"
+                    : midiHost.frozen
+                      ? `Plays through "${midiHost.name}" (frozen host)`
+                      : `Plays through "${midiHost.name}" — click to choose a destination, double-click to open its editor`
                 }
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1210,9 +1227,17 @@ export default function TrackHeaders({
                   );
                 }}
               >
-                <Icon name="piano" size={11} />
+                {instBusy ? (
+                  <span className="tlh-inst-spin">
+                    <Icon name="refresh" size={11} />
+                  </span>
+                ) : (
+                  <Icon name="piano" size={11} />
+                )}
                 <span className="tlh-inst-name">
-                  {`→ ${midiHost.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`}
+                  {instBusy
+                    ? "Loading…"
+                    : `→ ${midiHost.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`}
                 </span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
@@ -1221,16 +1246,29 @@ export default function TrackHeaders({
               // instrument track with the picked VST and route into it.
               <button
                 type="button"
-                className="tlh-inst-btn"
-                title="Choose an existing instrument instance or create a new one"
+                className={"tlh-inst-btn" + (instBusy ? " busy" : "")}
+                disabled={instBusy}
+                title={
+                  instBusy
+                    ? "Loading the instrument — large sample libraries can take a while"
+                    : "Choose an existing instrument instance or create a new one"
+                }
                 onClick={(e) => {
                   e.stopPropagation();
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                   openFeederAssignPicker(t, r.left, r.bottom + 2);
                 }}
               >
-                <Icon name="piano" size={11} />
-                <span className="tlh-inst-name">Instrument destination…</span>
+                {instBusy ? (
+                  <span className="tlh-inst-spin">
+                    <Icon name="refresh" size={11} />
+                  </span>
+                ) : (
+                  <Icon name="piano" size={11} />
+                )}
+                <span className="tlh-inst-name">
+                  {instBusy ? "Loading…" : "Instrument destination…"}
+                </span>
                 <Icon name="chevronDown" size={10} className="tlh-inst-caret" />
               </button>
             )}

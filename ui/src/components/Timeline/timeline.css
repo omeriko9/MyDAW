@@ -617,3 +617,22 @@
   border-radius: 3px;
   background: linear-gradient(90deg, #4aa3e8, #d8c945, #e0504c);
 }
+
+/* Instrument dropdown busy state: a heavy sampler takes seconds to load, and
+   without feedback AT the control users re-pick and stack work.
+   (app-spin keyframes: defined once in Transport/transport.css — Vite emits one
+   stylesheet, so keyframe names are global across components.) */
+.tlh-inst-spin {
+  display: inline-flex;
+  color: var(--accent);
+  animation: app-spin 1.1s linear infinite;
+}
+:root[data-motion="off"] .tlh-inst-spin {
+  animation: none; /* the "Loading…" label still says it; only the rotation stops */
+}
+.tlh-inst-btn.busy {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 1; /* override the generic :disabled dimming — this is ACTIVE, not dead */
+  cursor: progress;
+}

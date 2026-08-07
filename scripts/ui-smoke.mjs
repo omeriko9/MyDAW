@@ -697,6 +697,79 @@ export const checks = [
   },
 
   {
+    id: "instrument-swap-shows-busy",
+    title: "the track's instrument dropdown shows a spinner and refuses re-clicks while loading",
+    area: "timeline-tracks",
+    guards: "Omer 2026-08-07: 'some can take time, add a small spinning thingy … so the user won't try to do the same action again thinking it didn't stick'. cmd/plugin.add does not reply until the plug-in finished init, so the new instanceId does not exist yet — store.pluginStates has nothing to show and the in-flight command is the only truth (instrumentAssign's busy registry)",
+    run: async (s, tt) => {
+      const inst = (await s.probe("cmd/track.add", { kind: "instrument", name: "Busy Test" }))
+        .payload.track;
+      try {
+        await s.reload();
+        // Pick the built-in piano from the header dropdown and assert the control
+        // reports itself busy at least once, then settles showing the instrument.
+        const btn = await s.eval(`(() => {
+          const row = [...document.querySelectorAll(".tlh-row")]
+            .find((r) => r.textContent.includes("Busy Test"));
+          const b = row?.querySelector(".tlh-inst-btn");
+          if (!b) return null;
+          const r = b.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })()`);
+        if (!btn) throw new SkipError("track row too short to show the instrument dropdown");
+
+        // Watch for the busy class from BEFORE the click (the swap can be fast).
+        await s.eval(`(() => {
+          window.__instBusySeen = false;
+          const row = [...document.querySelectorAll(".tlh-row")]
+            .find((r) => r.textContent.includes("Busy Test"));
+          const obs = new MutationObserver(() => {
+            if (row.querySelector(".tlh-inst-btn.busy")) window.__instBusySeen = true;
+          });
+          obs.observe(row, { subtree: true, attributes: true, attributeFilter: ["class"] });
+          window.__instBusyObs = obs;
+          return true;
+        })()`);
+
+        await s.click(btn.x, btn.y);
+        await s.untilEval("the instrument picker opens", () =>
+          document.querySelectorAll(".ctx-item").length > 0);
+        // The stock "Piano" (builtin:piano) — always present, always fast. A real VST
+        // here would make the check depend on this machine's plug-in folder.
+        const pick = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(".ctx-item")]
+            .find((i) => i.textContent.trim() === "Piano");
+          if (!el) return null;
+          el.scrollIntoView({ block: "center" });
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!pick) throw new SkipError("the stock Piano is not in this picker");
+        await s.click(pick.x, pick.y);
+
+        await s.until("the engine loaded an instrument onto the track", async () => {
+          const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+          const t = p.tracks.find((x) => x.id === inst.id);
+          return !!t && t.inserts.length > 0;
+        });
+        const seen = await s.eval(() => window.__instBusySeen === true);
+        tt.ok(seen, "the dropdown reported busy while the instrument was loading");
+        await s.untilEval("the button settles out of the busy state", () => {
+          const row = [...document.querySelectorAll(".tlh-row")]
+            .find((r) => r.textContent.includes("Busy Test"));
+          return !!row && !row.querySelector(".tlh-inst-btn.busy");
+        });
+        await s.eval(() => {
+          window.__instBusyObs?.disconnect();
+          return true;
+        });
+      } finally {
+        await s.probe("cmd/track.remove", { trackId: inst.id });
+      }
+    },
+  },
+
+  {
     id: "palette-tab-keeps-keyboard",
     title: "Tab inside the command palette does not strand focus and freeze the keyboard",
     area: "palette-keyboard",

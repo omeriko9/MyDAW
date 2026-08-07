@@ -1369,9 +1369,15 @@ json Api::handleDialog(const std::string& type, std::string& ec, std::string& em
                                                 app_.model.project.name);
         const std::string initialFolder = parentDir(suggested);
         ensureDir(initialFolder);
-        const bool ok = Dialogs::saveFile("Save Project", {{"MyDAW Project", "*.mydaw"}},
-                                          "mydaw", app_.model.project.name, path,
-                                          initialFolder);
+        // A .mydaw project is a FOLDER (SPEC §6: project.json + audio/ + peaks/ +
+        // plugin-states/ + autosave/), so the dialog must not present itself as saving
+        // a file — it names the folder that gets created (Omer, 2026-08-07: "if he's
+        // creating a folder, it's a bug to tell the user he's creating a file"). A
+        // folder PICKER would be worse: naming a NEW project is the whole point here.
+        const bool ok = Dialogs::saveFile("Save Project Folder — a .mydaw folder is "
+                                          "created with your audio inside",
+                                          {{"MyDAW Project Folder", "*.mydaw"}}, "mydaw",
+                                          app_.model.project.name, path, initialFolder);
         return json{{"path", ok ? json(path) : json()}};
     }
     if (type == "dialog/importProject") {
