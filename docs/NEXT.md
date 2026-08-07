@@ -112,7 +112,13 @@ categories"). Direction decided with him (in order):
 Classic-category growth stays PARKED
 (docs/PRODUCTION_TECHNIQUES_PLAN.md §0; backlog queues stay but don't extend them).
 
-## QUEUED (Omer's 2026-08-07 bug list — remaining items)
+## DONE — Omer's 2026-08-07 bug list is CLEARED (13/13)
+
+Commits `2c55809` (UI batch), `7632ed9` (host perf), `31ebfe5` (Cubase instrument
+tracks), `b48117e` (audio-track dialog + live waveform), `02936b3` (Omer's own
+Vst2Host DLL-search fix). The queue below is what's left AFTER that list.
+
+## QUEUED — next up
 
 Shipped the same day (commits `2c55809`, `7632ed9`): PR left-edge resize, Alt+edge
 repeat-clone, record-select, Shift-fast nudge, Ctrl+S-from-anywhere, waveform outline,
