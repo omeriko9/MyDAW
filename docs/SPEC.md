@@ -153,9 +153,14 @@ the entire drag.
   project (`bad_request` on a second), no clips/inserts/sends/mixer strip, invisible to the
   audio graph like folders, fixed row height, cannot be duplicated.
 - `cmd/track.remove {trackId}` ; `cmd/track.reorder {trackId, newIndex, parentId?}`
-- `cmd/track.set {trackId, patch:{name?,color?,height?,volume?,pan?,mute?,solo?,recordArm?,
+- `cmd/track.set {trackId, patch:{name?,kind?,color?,height?,volume?,pan?,mute?,solo?,recordArm?,
   monitor?, inputDevice?, inputChannel?, inputGainDb?, outputTarget?, midiTarget?, midiOutChannel?, vcaId?}}` (outputTarget: trackId
-  of bus, or "master", or "none"). `vcaId` assigns the track to a VCA group (0 clears; changing it
+  of bus, or "master", or "none"). `kind` ("midi"|"instrument", 2026-08-07 Cubase-style
+  instrument tracks): converts between the two structurally-identical kinds IN PLACE (clips,
+  sends, routing kept) — this is how a MIDI track adopts its own instrument instead of a
+  separate host track being minted. midi→instrument clears the track's own `midiTarget`;
+  instrument→midi requires an empty insert chain and disconnects any feeders pointing at it.
+  Structural. `vcaId` assigns the track to a VCA group (0 clears; changing it
   is structural). `midiTarget` (number): valid ONLY on `kind:"midi"` tracks — routes the
   track's MIDI into the `kind:"instrument"` track with that id (one shared instrument instance can
   serve several MIDI tracks); the target must exist and be an instrument track (`bad_request`

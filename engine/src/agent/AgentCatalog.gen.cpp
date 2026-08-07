@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d90a788ccda20bd00941f770fc01a76e11590934b99b0cb5259853d47fd908b4";
+const char kAgentCatalogSha256[] = "d641bb54a93eccf37936a4184a622bd168fc5febd8005f973762ba9c307c9ada";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4237,6 +4237,14 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "inputGainDb": {
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
+        },
+        "kind": {
+          "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
+          "enum": [
+            "midi",
+            "instrument"
+          ],
+          "type": "string"
         },
         "midiMod": {
           "additionalProperties": false,

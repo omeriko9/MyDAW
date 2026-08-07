@@ -763,6 +763,9 @@ export interface TrackReorderRequest {
 
 export interface TrackPatch {
   name?: string;
+  /** Cubase-style instrument tracks (2026-08-07): convert midi↔instrument in place.
+   *  midi→instrument clears midiTarget; instrument→midi needs an empty insert chain. */
+  kind?: "midi" | "instrument";
   color?: string;
   height?: number;
   volume?: number;

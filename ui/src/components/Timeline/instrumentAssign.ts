@@ -71,11 +71,16 @@ export function replaceInstrumentOn(trackId: number, p: PluginInfo): void {
   })().catch((e) => console.warn("[timeline] instrument replace failed:", e));
 }
 
-/** Unrouted MIDI track: create an Instrument track hosting `p` and route into it. */
+/**
+ * MIDI track gets its own instrument — Cubase behavior (Omer, 2026-08-07): the track
+ * CONVERTS to an Instrument track in place (clips, sends, routing kept) and hosts the
+ * plugin itself. No separate host track is minted anymore; shared/multitimbral hosts
+ * remain the Instrument Rack's job (routeMidiToInstrument).
+ */
 export function assignInstrumentToFeeder(feederId: number, p: PluginInfo): void {
   void (async () => {
-    const inst = await createInstrumentHost(p);
-    await setTrack(feederId, { midiTarget: inst.id });
+    await setTrack(feederId, { kind: "instrument" });
+    await addPlugin(feederId, p.uid);
   })().catch((e) => console.warn("[timeline] assign instrument failed:", e));
 }
 
@@ -110,8 +115,9 @@ export function openInstrumentDropChoices(
     })),
     ...(matching.length > 0 ? (["separator"] as MenuEntry[]) : []),
     {
-      label: "Create new instance for this track",
-      icon: "plus",
+      label: "Load on this track (becomes an Instrument track)",
+      icon: "piano",
+      title: "Cubase-style: the MIDI track converts in place and hosts the instrument itself",
       onClick: () => assignInstrumentToFeeder(feeder.id, p),
     },
   ];

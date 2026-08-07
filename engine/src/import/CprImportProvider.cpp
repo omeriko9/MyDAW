@@ -3207,21 +3207,20 @@ void wireModernMidiRouting(CprCtx& c) {
     // pass renames on merge instead.
 }
 
-// Collapse the MIDI-track / rack-instrument split for MYDAW'S OWN .cpr EXPORTS ONLY
-// (Synth-Slot ordinal routing, c.synthSlotOrdinalRouting): the export lowered each
-// Instrument track to a MIDI track + Synth Slot pair, so re-import must fuse them back
-// into ONE Instrument track. Native Cubase projects are NOT collapsed — they keep the
-// arrangement MIDI tracks (kind Midi, routed via Track::midiTarget) next to the rack's
-// standalone Instrument tracks, the shape the corpus/recreate tests pin down:
-//   - a rack instrument's FIRST feeder MIDI track merges into it (notes + name move
-//     onto the track that hosts the VSTi);
-//   - ADDITIONAL feeders (N:1, e.g. two parts driving one Ivory) each become their
-//     own Instrument track with a CLONE of the instrument chain — same plugins, same
-//     state bytes, independent channels;
+// Collapse the MIDI-track / rack-instrument split into Cubase-style Instrument tracks
+// (Omer, 2026-08-07: "like Cubase — better for importing cpr as well"). Runs for EVERY
+// import now, with one semantic difference by origin:
+//   - a rack instrument's FIRST (or only) feeder MIDI track merges into it (notes +
+//     name move onto the track that hosts the VSTi) — one track, no junk pair;
+//   - ADDITIONAL feeders (N:1): for MyDAW's OWN .cpr exports (`cloneMultiFeeders`,
+//     Synth-Slot ordinal routing — they originated as separate Instrument tracks) each
+//     becomes its own Instrument track with a CLONE of the chain (same state bytes);
+//     NATIVE projects keep true multitimbral sharing instead — the rack instrument +
+//     kind-Midi feeders stay (cloning would mint N copies of one Kontakt);
 //   - leftover unrouted MIDI tracks become empty Instrument tracks (drop a VSTi in).
-// Guard: instruments that already carry clips never absorb feeders — that only
-// happens to deliberate MyDAW-built routing being re-imported, which must survive.
-void collapseFeederTracks(CprCtx& c) {
+// Guard: instruments that already carry clips never absorb feeders — deliberate
+// MyDAW-built routing being re-imported must survive.
+void collapseFeederTracks(CprCtx& c, bool cloneMultiFeeders) {
     auto& tracks = c.model.project.tracks;
     std::map<uint64_t, std::vector<size_t>> feeders; // instrument id -> midi indices
     for (size_t i = 0; i < tracks.size(); ++i)
@@ -3232,6 +3231,8 @@ void collapseFeederTracks(CprCtx& c) {
         Track* inst = c.model.trackById(instId);
         if (!inst || inst->kind != TrackKind::Instrument || !inst->clips.empty())
             continue;
+        if (!cloneMultiFeeders && list.size() > 1)
+            continue; // native multitimbral group: keep the rack + its feeders
         // feeder 1 merges INTO the instrument track
         {
             Track& f = tracks[list[0]];
@@ -3241,7 +3242,20 @@ void collapseFeederTracks(CprCtx& c) {
                              [](const Clip& a, const Clip& b2) {
                                  return clipStartBeat(a) < clipStartBeat(b2);
                              });
-            if (!f.name.empty())
+            // The merged track takes the feeder's name only when the user actually
+            // NAMED it — a default "MIDI 07" would wipe the instrument's identity
+            // (and nine mergers all called "MIDI 01" collide; Cubase names the
+            // instrument track after the instrument).
+            const bool defaultName = [&] {
+                const std::string& n = f.name;
+                if (n.rfind("MIDI ", 0) != 0)
+                    return false;
+                for (size_t i = 5; i < n.size(); ++i)
+                    if (!std::isdigit(static_cast<unsigned char>(n[i])))
+                        return false;
+                return n.size() > 5;
+            }();
+            if (!f.name.empty() && !defaultName)
                 inst->name = f.name;
             merged.insert(list[0]);
             Log::info("cpr import: merged MIDI track '%s' into its instrument track",
@@ -3781,12 +3795,12 @@ bool CprImportProvider::import(const std::string& absPath, const ImportContext& 
         // AFTER both the arrangement and Devices passes.
         wireModernMidiRouting(c);
     }
-    // MyDAW's OWN exports (Synth-Slot ordinal routing, no Devices rack) collapse the
-    // MIDI-track + Synth-Slot pairs back into the original Instrument tracks. Native
-    // Cubase projects keep the MIDI/rack split: arrangement MIDI tracks stay kind Midi
-    // and route into the rack's standalone Instrument tracks via Track::midiTarget.
-    if (c.synthSlotOrdinalRouting)
-        collapseFeederTracks(c);
+    // Cubase-style instrument tracks (2026-08-07): EVERY import collapses 1:1
+    // MIDI-track/rack-instrument pairs into single Instrument tracks. MyDAW's own
+    // exports (Synth-Slot ordinal routing) additionally clone N:1 groups back into
+    // the separate Instrument tracks they originated as; native projects keep N:1
+    // groups as rack + feeders (true multitimbral sharing).
+    collapseFeederTracks(c, /*cloneMultiFeeders=*/c.synthSlotOrdinalRouting);
     if (c.isSxEra)
         Log::info("cpr import: SX-era master-bus volume not imported — no verified "
                   "encoding for the SX output-channel block in the corpus (master left "

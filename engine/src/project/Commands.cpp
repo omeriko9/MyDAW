@@ -1321,6 +1321,28 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
     const json& patch = p["patch"];
     const bool isMaster = (t->kind == TrackKind::Master);
 
+    // kind (Cubase-style instrument tracks, 2026-08-07): a MIDI track that loads its
+    // own instrument BECOMES an Instrument track in place — clips, sends and routing
+    // kept, no separate host track minted. Only the midi↔instrument pair converts
+    // (structurally identical: clip-holding, insert-capable). Validated up front so
+    // a refusal never partially applies; the mutation itself happens with the other
+    // fields below.
+    TrackKind newKind = t->kind;
+    bool hasKind = false;
+    if (hasKey(patch, "kind")) {
+        const std::string ks = getOr<std::string>(patch, "kind", "");
+        if (ks != "midi" && ks != "instrument")
+            return r.fail("bad_request", "kind can only change between midi and instrument");
+        if (t->kind != TrackKind::Midi && t->kind != TrackKind::Instrument)
+            return r.fail("bad_request", "only midi/instrument tracks can change kind");
+        newKind = ks == "instrument" ? TrackKind::Instrument : TrackKind::Midi;
+        if (newKind == TrackKind::Midi && t->kind == TrackKind::Instrument &&
+            !t->inserts.empty())
+            return r.fail("bad_request",
+                          "remove the track's inserts before converting it to a MIDI track");
+        hasKind = newKind != t->kind;
+    }
+
     // Pre-validate the only failing field so failures never partially apply.
     OutputTarget newTarget;
     bool hasTarget = false;
@@ -1520,6 +1542,21 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         }
         any = true;
         mixerOnly = false;
+    }
+    if (hasKind) {
+        if (newKind == TrackKind::Instrument) {
+            t->midiTarget = 0; // its own sound source now — feeder routing would bypass it
+        } else {
+            for (Track& x : m.project.tracks)
+                if (x.midiTarget == t->id)
+                    x.midiTarget = 0; // feeders lose a valid target when it stops being one
+        }
+        t->kind = newKind;
+        any = true;
+        mixerOnly = false;
+        r.structural = true;
+        muteSolo = true;         // effective-mute closure keys on feeder/target topology
+        r.allTracksEvent = true; // instrument→midi clears OTHER tracks' midiTarget too
     }
     if (hasTarget) {
         t->outputTarget = newTarget;

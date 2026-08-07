@@ -4230,6 +4230,11 @@
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
         },
+        "kind": {
+          "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
+          "enum": ["midi", "instrument"],
+          "type": "string"
+        },
         "midiMod": {
           "additionalProperties": false,
           "description": "kind \"midi\"/\"instrument\" — partial MIDI-modifiers patch; absent fields keep their values.",

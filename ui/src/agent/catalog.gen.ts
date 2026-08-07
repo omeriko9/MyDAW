@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "d90a788ccda20bd00941f770fc01a76e11590934b99b0cb5259853d47fd908b4";
+export const AGENT_CATALOG_SHA256 = "d641bb54a93eccf37936a4184a622bd168fc5febd8005f973762ba9c307c9ada";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4257,6 +4257,14 @@ export const AGENT_CATALOG: AgentCatalog = {
         "inputGainDb": {
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
+        },
+        "kind": {
+          "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
+          "enum": [
+            "midi",
+            "instrument"
+          ],
+          "type": "string"
         },
         "midiMod": {
           "additionalProperties": false,
