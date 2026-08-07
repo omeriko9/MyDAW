@@ -2566,13 +2566,21 @@ bool discoverBundle(const std::wstring& pluginPath) {
     return true;
   }
 
-  // Bundle: nearest ancestor install.reg or files\.
+  // Bundle: nearest ancestor carrying install.reg (the explicit bundle marker).
+  // Perf/safety fix 2026-08-07: the walk used to ALSO arm on any directory that
+  // merely CONTAINED a `files\` subdir, all the way to the drive root — a stray
+  // C:\files armed the (expensive) file-virtualization hooks for EVERY plugin on
+  // the drive, amplifying each file API call by 1-2 orders of magnitude. Sample
+  // libraries (Kontakt, Addictive Drums) crawled. Only install.reg — a name no
+  // one has by accident, and RegOverlay.h's own definition of a bundle root —
+  // arms an ancestor bundle now. The adjacent `files\` checks above are untouched
+  // (a bare files\ dir NEXT TO the plugin is still a deliberate arrangement).
   std::wstring cur = dir;
   for (int i = 0; i < 16 && !cur.empty(); ++i) {
     std::wstring cand = cur + L"\\install.reg";
-    std::wstring files = cur + L"\\files";
-    if (isFile(cand) || isDir(files)) {
-      g_regPath = isFile(cand) ? cand : std::wstring();
+    if (isFile(cand)) {
+      std::wstring files = cur + L"\\files";
+      g_regPath = cand;
       g_bundleRoot = cur;
       g_mirrorRoot = isDir(files) ? files : std::wstring();
       return true;
@@ -2815,12 +2823,16 @@ bool installRegOverlayIfPresent(const std::wstring& pluginPath) {
   tracef("[regov] bundle: reg=%ls\n         root=%ls\n         mirror=%ls\n", g_regPath.c_str(),
          g_bundleRoot.c_str(), g_mirrorRoot.empty() ? L"(none)" : g_mirrorRoot.c_str());
 
-  // Capture-diagnostic tier + the profile alias table (both are no-ops without a files mirror).
+  // Capture-diagnostic tier + the profile alias table (both are no-ops without a files
+  // mirror). Default OFF since 2026-08-07: level 1 logged every unique missed path with
+  // a locked, flushed stderr write — a Kontakt library load touches tens of thousands of
+  // unique paths, so the diagnostics themselves became a second slowdown on top of the
+  // hook overhead. Opt in with MYDAW_FILE_WARN=1|2 when debugging a capture bundle.
   {
     const std::wstring w = lc(getEnvW(L"MYDAW_FILE_WARN"));
-    if (w == L"0" || w == L"off" || w == L"none") g_fileWarnLevel = 0;
-    else if (w == L"2" || w == L"all") g_fileWarnLevel = 2;
-    else g_fileWarnLevel = 1;
+    if (w == L"2" || w == L"all") g_fileWarnLevel = 2;
+    else if (w == L"1" || w == L"on") g_fileWarnLevel = 1;
+    else g_fileWarnLevel = 0;
   }
   buildPathAliases();
   loadSealedList();

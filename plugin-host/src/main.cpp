@@ -41,6 +41,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <timeapi.h> // timeBeginPeriod (after windows.h)
+#pragma comment(lib, "winmm.lib")
 #include <shellapi.h>
 
 #include <atomic>
@@ -347,6 +350,48 @@ void drainControlQueue(ServeState& s, ControlQueue& q) {
 }
 
 // ---------------------------------------------------------------------------
+// Pump window (perf fix 2026-08-07): control wakes and the idle timer used to
+// be hwnd==nullptr THREAD messages — which a plugin's own modal loop (context
+// menu, dropdown, drag, Kontakt's file browser) retrieves and DISCARDS, so all
+// engine↔host control traffic stalled for as long as a menu was open, and the
+// reader thread sat in an untimed wait. A message-ONLY window fixes both:
+// DispatchMessage in ANY modal loop routes hwnd messages to this WndProc.
+// ---------------------------------------------------------------------------
+ServeState* g_pumpState = nullptr;
+ControlQueue* g_pumpQueue = nullptr;
+
+LRESULT CALLBACK pumpWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+  ServeState* s = g_pumpState;
+  ControlQueue* q = g_pumpQueue;
+  if (s && q && (m == kMsgControl || m == WM_TIMER)) {
+    drainControlQueue(*s, *q);
+    if (m == WM_TIMER && s->adapter && s->inited.load(std::memory_order_acquire) &&
+        !s->editor.isOpen()) {
+      // VST2 effIdle/needIdle pumping with no editor window; while the editor
+      // is open EditorWindow's own timer drives editorIdle + resizePending.
+      s->adapter->editorIdle();
+    }
+    return 0;
+  }
+  if (s && m == kMsgPipeClosed) {
+    if (!s->quitting.exchange(true)) PostQuitMessage(0);
+    return 0;
+  }
+  return DefWindowProcW(h, m, w, l);
+}
+
+HWND createPumpWindow() {
+  WNDCLASSW wc{};
+  wc.lpfnWndProc = pumpWndProc;
+  wc.hInstance = GetModuleHandleW(nullptr);
+  wc.lpszClassName = L"MyDawHostPump";
+  RegisterClassW(&wc);
+  // HWND_MESSAGE: a message-only window — never visible, never enumerated.
+  return CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+                         nullptr, wc.hInstance, nullptr);
+}
+
+// ---------------------------------------------------------------------------
 // Notifier thread: ParamEditBuffer → `paramEdited` pushes (throttled ~30 Hz
 // per param id, leaving throttled edits dirty for the next tick) + latency
 // watch → `latencyChanged {samples}` (see NOTE(spec) at the top).
@@ -439,11 +484,16 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   s.rpc = std::make_unique<mydaw::JsonRpc>(s.pipe);
 
   ControlQueue ctlq;
+  // The pump window must exist before the first control op can arrive.
+  g_pumpState = &s;
+  g_pumpQueue = &ctlq;
+  const HWND pumpWnd = createPumpWindow();
+
   mydaw::JsonRpc* rpcRaw = s.rpc.get();
   DWORD mainThreadId = s.mainThreadId;
-  s.rpc->setHandler([&ctlq, rpcRaw, mainThreadId](const std::string& type,
-                                                  const json& payload,
-                                                  int64_t requestId) {
+  s.rpc->setHandler([&ctlq, rpcRaw, mainThreadId, pumpWnd](const std::string& type,
+                                                           const json& payload,
+                                                           int64_t requestId) {
     ControlOp op;
     op.type = &type;
     op.payload = &payload;
@@ -457,16 +507,24 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
       }
       ctlq.ops.push_back(&op);
     }
-    // Wake the pump; if this post is ever lost the 20 ms timer drains the
-    // queue anyway. NEVER call request() from here (JsonRpc contract).
-    PostThreadMessageW(mainThreadId, kMsgControl, 0, 0);
+    // Wake the pump via the message-only WINDOW: hwnd messages survive plugin
+    // modal loops (thread messages are discarded there). If this post is ever
+    // lost the idle timer drains the queue anyway. NEVER call request() from
+    // here (JsonRpc contract).
+    if (pumpWnd)
+      PostMessageW(pumpWnd, kMsgControl, 0, 0);
+    else
+      PostThreadMessageW(mainThreadId, kMsgControl, 0, 0);
     std::unique_lock<std::mutex> lk(op.m);
     op.cv.wait(lk, [&op] { return op.done; });
   });
 
-  std::thread reader([&s] {
+  std::thread reader([&s, pumpWnd] {
     s.rpc->runReaderLoop();
-    PostThreadMessageW(s.mainThreadId, kMsgPipeClosed, 0, 0);
+    if (pumpWnd)
+      PostMessageW(pumpWnd, kMsgPipeClosed, 0, 0);
+    else
+      PostThreadMessageW(s.mainThreadId, kMsgPipeClosed, 0, 0);
   });
 
   // Crash flow (§8.1): ShmServer set the shm state to Crashed; flush one log
@@ -533,7 +591,9 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   std::atomic<bool> notifierQuit{false};
   std::thread notifier([&s, &notifierQuit] { notifierMain(s, notifierQuit); });
 
-  const UINT_PTR timerId = SetTimer(nullptr, 0, kIdleTimerMs, nullptr);
+  // The idle timer targets the pump WINDOW so it keeps firing (and gets
+  // dispatched) inside plugin modal loops; thread-timer fallback otherwise.
+  const UINT_PTR timerId = SetTimer(pumpWnd, 1, kIdleTimerMs, nullptr);
 
   // --- main message pump ----------------------------------------------------
   MSG msg;
@@ -541,13 +601,11 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
     const BOOL r = GetMessageW(&msg, nullptr, 0, 0);
     if (r == 0 || r == -1) break; // WM_QUIT or queue failure
     if (msg.hwnd == nullptr) {
+      // Legacy thread-message path (pump window creation failed): same handling.
       if (msg.message == kMsgControl || msg.message == WM_TIMER) {
         drainControlQueue(s, ctlq);
         if (msg.message == WM_TIMER && s.adapter &&
             s.inited.load(std::memory_order_acquire) && !s.editor.isOpen()) {
-          // VST2 effIdle/needIdle pumping with no editor window; while the
-          // editor is open EditorWindow's own 20 ms timer drives editorIdle
-          // + resizePending (EditorWindow.h).
           s.adapter->editorIdle();
         }
         continue;
@@ -560,7 +618,10 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
     TranslateMessage(&msg);
     DispatchMessageW(&msg);
   }
-  if (timerId) KillTimer(nullptr, timerId);
+  if (timerId) KillTimer(pumpWnd, timerId);
+  if (pumpWnd) DestroyWindow(pumpWnd);
+  g_pumpState = nullptr;
+  g_pumpQueue = nullptr;
 
   // --- shutdown --------------------------------------------------------------
   // Fail queued/future control ops so the reader thread can never block on a
@@ -616,6 +677,25 @@ int usage() {
 } // namespace
 
 int main() {
+  // Perf (2026-08-07, the Kontakt/AD2 sluggishness findings):
+  // 1) Without timeBeginPeriod the 20 ms idle/editor timers ride the default
+  //    15.625 ms system tick and actually fire at ~31 ms (~32 Hz) — half the
+  //    documented rate. The ENGINE raised its resolution; the host never did.
+  timeBeginPeriod(1);
+  // 2) Windows 11 targets long-lived WINDOWLESS processes (we are spawned
+  //    CREATE_NO_WINDOW) for EcoQoS power throttling: efficiency-core placement
+  //    + frequency clamp — sample streaming and plugin UI both crawl. Opt out.
+#ifdef PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+  {
+    PROCESS_POWER_THROTTLING_STATE pt{};
+    pt.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    pt.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    pt.StateMask = 0; // 0 = never throttle this process
+    SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &pt,
+                          sizeof(pt));
+  }
+#endif
+
   int argc = 0;
   LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (!argvW) {

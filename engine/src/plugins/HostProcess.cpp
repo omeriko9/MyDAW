@@ -45,7 +45,11 @@ constexpr uint32_t kInitTimeoutMs = 30000;      // plugin DLL load + instantiati
 constexpr uint32_t kConnectTimeoutMs = 15000;   // host spawn -> pipe connect
 constexpr uint32_t kQuitGraceMs = 2000;         // polite quit before TerminateProcess
 constexpr int kMaxAutoRestarts = 2;             // SPEC §8.1
-constexpr auto kChunkCaptureInterval = std::chrono::seconds(30);
+// 30 s → 120 s (perf, 2026-08-07): the capture is a synchronous getState executed
+// on the HOST's GUI thread — for a big sampler (Kontakt serializes the whole loaded
+// instrument) that is a MULTI-SECOND editor freeze per capture, by construction.
+// Recovery freshness is worth 2 minutes, not a UI stall every 30 seconds.
+constexpr auto kChunkCaptureInterval = std::chrono::seconds(120);
 
 // Drain delays for in-flight processRt() after disabling the node: the RT wait is at
 // most 2 x block duration (<= ~93 ms at 2048 frames / 44.1 kHz); offline mode waits up
@@ -669,6 +673,14 @@ bool HostProcessManager::spawnAndInit(Instance& inst, std::string& err) {
         params = inst.cachedParams;
     }
     if (!chunk.empty()) {
+        // Suspend audio around the state load (perf, 2026-08-07): samplers
+        // (Kontakt/AD2) serialize process() against their loader thread, so RT
+        // process() calls landing DURING a multi-second setState blow the RT
+        // deadline, trip the 3-miss auto-restart, and kill the host MID-LOAD —
+        // loading then appears to stall and start over. Suspended, the audio
+        // thread answers silence without touching the plugin until resume.
+        json rs;
+        (void)link->rpc->request("suspend", json::object(), rs, kOpTimeoutMs);
         json r;
         if (!link->rpc->request("setState", json{{"chunkB64", b64Encode(chunk)}}, r,
                                 kStateOpTimeoutMs) ||
@@ -677,6 +689,7 @@ bool HostProcessManager::spawnAndInit(Instance& inst, std::string& err) {
                       static_cast<unsigned long long>(inst.id),
                       replyErrorMessage(r, "host error").c_str());
         }
+        (void)link->rpc->request("resume", json::object(), rs, kOpTimeoutMs);
     }
     for (const auto& [paramId, value] : params) {
         json r;
