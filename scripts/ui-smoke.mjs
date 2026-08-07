@@ -633,6 +633,70 @@ export const checks = [
   },
 
   {
+    id: "add-audio-track-asks-mono-stereo-and-input",
+    title: "Add Audio Track asks mono/stereo + input, and the Inspector can flip channels after",
+    area: "timeline-tracks",
+    guards: "Omer 2026-08-07: adding an audio channel must ask mono/stereo and WHICH input (mono 1 vs 2 on an interface). channels is add-time-only on cmd/track.add, so the dialog is the only honest place for it — and cmd/track.set gained `channels` so a mis-created track is fixable instead of being re-made",
+    run: async (s, tt) => {
+      const trackNamed = async (name) =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project.tracks.find(
+          (t) => t.name === name,
+        );
+      const clickStarts = async (selector, text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+            .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
+          if (!el) return null;
+          el.scrollIntoView({ block: "center" });
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`not found: ${selector} starting with ${JSON.stringify(text)}`);
+        await s.click(box.x, box.y);
+      };
+
+      // Project ▸ Add Audio Track opens the dialog instead of adding immediately.
+      await clickStarts('[role="menuitem"][aria-label="Project"]', "");
+      await s.untilEval("Project menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) =>
+          i.textContent.trim().startsWith("Add Audio Track")));
+      await clickStarts(".ctx-item", "Add Audio Track");
+      await s.untilEval("the dialog opens with a mono/stereo choice", () =>
+        [...document.querySelectorAll(".aat-seg .btn")].some((b) => b.textContent.trim() === "Mono"));
+
+      // Name it, pick Mono, create.
+      await s.type("Smoke Mono");
+      await clickStarts(".aat-seg .btn", "Mono");
+      await clickStarts(".aat-actions .btn.primary", "Add Track");
+      await s.until("the mono track is created", async () => {
+        const t = await trackNamed("Smoke Mono");
+        return !!t && t.channels === 1;
+      });
+      const made = await trackNamed("Smoke Mono");
+      tt.eq(made.kind, "audio", "it is an audio track");
+      tt.eq(made.channels, 1, "the Mono choice reached the engine");
+
+      try {
+        // The Inspector's channels badge flips it afterwards (cmd/track.set channels).
+        await s.probe("cmd/track.set", { trackId: made.id, patch: { channels: 2 } });
+        await s.until("channels is editable after creation", async () =>
+          (await trackNamed("Smoke Mono")).channels === 2);
+        // ...and the engine refuses it where it is meaningless.
+        const midi = (await s.probe("cmd/track.add", { kind: "midi", name: "Smoke Midi" })).payload.track;
+        const bad = await s.probe(
+          "cmd/track.set",
+          { trackId: midi.id, patch: { channels: 1 } },
+          { allowError: true },
+        );
+        tt.eq(bad.ok, false, "channels on a MIDI track is refused, not silently applied");
+        await s.probe("cmd/track.remove", { trackId: midi.id });
+      } finally {
+        await s.probe("cmd/track.remove", { trackId: made.id });
+      }
+    },
+  },
+
+  {
     id: "palette-tab-keeps-keyboard",
     title: "Tab inside the command palette does not strand focus and freeze the keyboard",
     area: "palette-keyboard",

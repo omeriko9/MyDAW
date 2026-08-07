@@ -191,8 +191,63 @@ size_t AudioRecorder::drainOnce() {
             ptrScratch_[static_cast<size_t>(c)] = dst;
         }
         ts.writer->appendPlanar(ptrScratch_.data(), static_cast<int>(n));
+        accumulateLivePeaks(ts, static_cast<int>(n));
     }
     return n;
+}
+
+// Reduce the just-written planar frames to min/max buckets (worker thread, SPEC §5.5
+// live waveform). Mixed across the target's channels so the drawn shape matches what a
+// mono/stereo take will look like once committed.
+void AudioRecorder::accumulateLivePeaks(TargetState& ts, int frames) {
+    const int ch = ts.target.channels;
+    std::lock_guard<std::mutex> lk(peaksMutex_);
+    for (int f = 0; f < frames; ++f) {
+        float mn = planarScratch_[0][static_cast<size_t>(f)];
+        float mx = mn;
+        for (int c = 1; c < ch; ++c) {
+            const float v = planarScratch_[static_cast<size_t>(c)][static_cast<size_t>(f)];
+            if (v < mn)
+                mn = v;
+            if (v > mx)
+                mx = v;
+        }
+        if (ts.curCount == 0) {
+            ts.curMin = mn;
+            ts.curMax = mx;
+        } else {
+            if (mn < ts.curMin)
+                ts.curMin = mn;
+            if (mx > ts.curMax)
+                ts.curMax = mx;
+        }
+        if (++ts.curCount >= kLivePeakBucket) {
+            if (ts.pendMins.empty())
+                ts.pendStartSample =
+                    firstSample_.load(std::memory_order_acquire) +
+                    ts.bucketsDone * kLivePeakBucket;
+            ts.pendMins.push_back(ts.curMin);
+            ts.pendMaxs.push_back(ts.curMax);
+            ++ts.bucketsDone;
+            ts.curCount = 0;
+        }
+    }
+}
+
+std::vector<AudioRecorder::LivePeaks> AudioRecorder::drainLivePeaks() {
+    std::vector<LivePeaks> out;
+    std::lock_guard<std::mutex> lk(peaksMutex_);
+    for (TargetState& ts : targets_) {
+        if (ts.pendMins.empty())
+            continue;
+        LivePeaks lp;
+        lp.trackId = ts.target.trackId;
+        lp.startSample = ts.pendStartSample;
+        lp.mins.swap(ts.pendMins);
+        lp.maxs.swap(ts.pendMaxs);
+        out.push_back(std::move(lp));
+    }
+    return out;
 }
 
 void AudioRecorder::logDropsThrottled() {

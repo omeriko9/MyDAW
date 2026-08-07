@@ -476,6 +476,14 @@ the entire drag.
   (no `ParamRef` kind; `automation.set` rejects `track:<id>:inputGain`). The **input meter**
   (`event/meters.inputs`, §5.4) is live while the track is armed or monitoring and reads
   post-gain.
+- **Live take waveform** (2026-08-07): `event/recordingPeaks {bucketSamples, sampleRate,
+  tracks:[{trackId, startSample, mins[], maxs[]}]}` ~15 Hz while an audio take runs. The
+  AudioRecorder's drain worker reduces every chunk it writes to min/max buckets
+  (`kLivePeakBucket` = 512 frames, mixed across the target's channels) as a side effect of
+  writing the WAV; the main loop hands over only the buckets completed since the last tick
+  (APPEND semantics — `startSample` pins each batch's first bucket on the timeline, so
+  punch-in and cycle wraps land correctly and nothing is re-sent). The UI accumulates them
+  per track and draws the growing take; the committed clip takes over at stop.
 - `midi/getInputs {}` → `{inputs:[{id,name,enabled}]}`; `midi/setInputEnabled {id, enabled}`;
   `event/midiActivity {deviceId, trackId?}` (throttled).
 - **Hardware MIDI output** (2026-08-02): `midi/getOutputs {}` →

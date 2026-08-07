@@ -1343,6 +1343,18 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         hasKind = newKind != t->kind;
     }
 
+    // channels (mono/stereo, 2026-08-07): editable after creation so the Inspector can
+    // flip a mis-created track. Audio tracks only; structural (capture taps, recorder
+    // targets and the monitor path all read Track::channels at rebuild/record start).
+    int newChannels = 0;
+    if (hasKey(patch, "channels")) {
+        newChannels = getOr<int>(patch, "channels", t->channels);
+        if (newChannels != 1 && newChannels != 2)
+            return r.fail("bad_request", "channels must be 1 (mono) or 2 (stereo)");
+        if (t->kind != TrackKind::Audio)
+            return r.fail("bad_request", "channels applies to audio tracks only");
+    }
+
     // Pre-validate the only failing field so failures never partially apply.
     OutputTarget newTarget;
     bool hasTarget = false;
@@ -1542,6 +1554,13 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         }
         any = true;
         mixerOnly = false;
+    }
+    if (newChannels != 0 && newChannels != t->channels) {
+        t->channels = newChannels;
+        any = true;
+        mixerOnly = false;
+        r.structural = true; // capture taps/recorder read channels at rebuild; the
+                             // central capture reconcile in execute() re-checks too
     }
     if (hasKind) {
         if (newKind == TrackKind::Instrument) {

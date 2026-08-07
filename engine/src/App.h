@@ -307,6 +307,9 @@ private:
     // event/recordingNotes — throttled in-progress MIDI take (armed track ids + live notes)
     // for real-time timeline feedback while recording. Main thread.
     void broadcastRecordingNotes();
+    // event/recordingPeaks — min/max buckets completed since the last tick, so the
+    // timeline can draw the audio take WHILE it records (SPEC §5.5). Main thread.
+    void broadcastRecordingPeaks();
     void shutdown();
     void joinWorkers();
 

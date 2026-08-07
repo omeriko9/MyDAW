@@ -85,11 +85,13 @@ if (!up) die(2, "engine failed to boot:\n" + elog.slice(-800));
 let nextId = 1;
 const pending = new Map();
 let lastCaptureState = null; // most recent event/captureState payload (SPEC §5.5 honesty)
+const recPeaks = []; // every event/recordingPeaks payload seen (live-waveform stream)
 const sock = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error("ws")); });
 sock.onmessage = (m) => {
   const j = JSON.parse(m.data);
   if (j.type === "event/captureState") lastCaptureState = j.payload;
+  if (j.type === "event/recordingPeaks") recPeaks.push(j.payload);
   if (j.replyTo == null) return;
   const p = pending.get(j.replyTo);
   if (!p) return;
@@ -183,6 +185,43 @@ try {
     const c1 = w.buf.readFloatLE(w.off + 4);
     report("channel 1 is the same ramp at half amplitude",
       Math.abs(c1 * 2 - c0) < 1e-3, `ch0=${c0.toFixed(5)} ch1=${c1.toFixed(5)}`);
+  }
+
+  // ---- live waveform while recording (SPEC §5.5) -------------------------------------
+  // event/recordingPeaks must arrive DURING the take (not only at commit), carry the
+  // ramp's shape, and be positioned on the timeline by startSample.
+  report("recordingPeaks streamed while the take was running", recPeaks.length >= 3,
+    `${recPeaks.length} event(s)`);
+  {
+    const rows = recPeaks.flatMap((e) => e.tracks.map((t) => ({ e, t })));
+    const mine = rows.filter((r) => r.t.trackId === track.id);
+    report("the peaks are addressed to the armed track", mine.length > 0,
+      `${mine.length} batch(es) for track ${track.id}`);
+    const buckets = mine.reduce((n, r) => n + r.t.mins.length, 0);
+    // ~1.2 s at 48k / 512-sample buckets ≈ 112 buckets; assert the order, not the count.
+    report("enough buckets for a drawable wave", buckets > 20, `${buckets} buckets`);
+    const first = mine[0];
+    report("the first batch is pinned at the take's start sample",
+      !!first && first.t.startSample === 0 && first.e.bucketSamples === 512 &&
+        first.e.sampleRate === SR,
+      first ? `startSample=${first.t.startSample} bucket=${first.e.bucketSamples}` : "none");
+    // The synthetic input is a full-scale ramp: buckets must span real amplitude, and
+    // max >= min in every one (a transposed pair would draw inside-out).
+    const allMin = Math.min(...mine.flatMap((r) => r.t.mins));
+    const allMax = Math.max(...mine.flatMap((r) => r.t.maxs));
+    const ordered = mine.every((r) => r.t.mins.every((v, i) => r.t.maxs[i] >= v));
+    report("buckets carry the ramp's amplitude, min<=max everywhere",
+      allMax > 0.5 && allMin < -0.5 && ordered,
+      `min=${allMin.toFixed(3)} max=${allMax.toFixed(3)} ordered=${ordered}`);
+    // Batches are APPEND-only: each track's batches must be contiguous in samples.
+    let contiguous = true;
+    let expect = null;
+    for (const r of mine) {
+      if (expect !== null && r.t.startSample !== expect) contiguous = false;
+      expect = r.t.startSample + r.t.mins.length * r.e.bucketSamples;
+    }
+    report("batches append contiguously (no gaps, no re-sends)", contiguous,
+      `next expected ${expect}`);
   }
 
   // ---- multi-endpoint capture honesty (SPEC §5.5 / §10) ------------------------------

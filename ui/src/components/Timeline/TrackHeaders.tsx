@@ -129,7 +129,15 @@ export function addTrackMenuItems(index?: number): MenuEntry[] {
       title: dupe
         ? `The project already has a${/^[aeiou]/i.test(a.label) ? "n" : ""} ${a.label.toLowerCase()}`
         : undefined,
-      onClick: () => fire(addTrack(a.kind, index !== undefined ? { index } : undefined)),
+      onClick: () => {
+        // Audio tracks ask mono/stereo + which input first (Omer, 2026-08-07);
+        // every other kind still adds immediately.
+        if (a.kind === "audio") {
+          useStore.getState().setDialogs({ addAudioTrack: index !== undefined ? { index } : {} });
+          return;
+        }
+        fire(addTrack(a.kind, index !== undefined ? { index } : undefined));
+      },
     };
   });
   // FX track (Omer, 2026-08-07: "we don't have FX tracks") — a Cubase FX channel is a

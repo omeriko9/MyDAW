@@ -31,6 +31,7 @@ beforeEach(() => {
     dialogs: {
       techniques: false,
       settings: false,
+      addAudioTrack: null,
       export: false,
       shortcuts: false,
       palette: false,

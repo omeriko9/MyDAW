@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d641bb54a93eccf37936a4184a622bd168fc5febd8005f973762ba9c307c9ada";
+const char kAgentCatalogSha256[] = "3cfdf2bb2e8c3a00a9806d52173ee0dff90f9ac43e2db6724f0c875ca2df9239";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -3583,6 +3583,61 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "RecordingPeaks": {
+      "additionalProperties": false,
+      "description": "event/recordingPeaks (~15 Hz, SPEC §5.5): min/max buckets completed since the last event, so the timeline can draw an audio take WHILE it records. Append semantics per track.",
+      "properties": {
+        "bucketSamples": {
+          "type": "number"
+        },
+        "sampleRate": {
+          "type": "number"
+        },
+        "tracks": {
+          "items": {
+            "$ref": "#/schemas/RecordingTrackPeaks"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bucketSamples",
+        "sampleRate",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "RecordingTrackPeaks": {
+      "additionalProperties": false,
+      "description": "One armed audio track's new buckets; startSample pins the FIRST bucket on the timeline (buckets are contiguous from there).",
+      "properties": {
+        "maxs": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "mins": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "startSample": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "startSample",
+        "mins",
+        "maxs"
+      ],
+      "type": "object"
+    },
     "RecoveryInfoReply": {
       "additionalProperties": false,
       "properties": {
@@ -4222,6 +4277,14 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "TrackPatch": {
       "additionalProperties": false,
       "properties": {
+        "channels": {
+          "description": "Mono (1) / stereo (2) — audio tracks only; structural (capture and recording follow).",
+          "enum": [
+            1,
+            2
+          ],
+          "type": "number"
+        },
         "color": {
           "type": "string"
         },

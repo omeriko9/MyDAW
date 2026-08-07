@@ -73,7 +73,9 @@ function inputDeviceOptions(drivers: DriverInfo[]): SelectOption[] {
 function inputChannelOptions(maxInputs: number, stereo: boolean): SelectOption[] {
   const opts: SelectOption[] = [];
   if (stereo) {
-    for (let ch = 0; ch + 1 < maxInputs; ch++) {
+    // Non-overlapping hardware-style pairs (1/2, 3/4) — stride 2, matching the mixer
+    // strip and lib/captureInputs (the old overlapping stride-1 pairs were a bug).
+    for (let ch = 0; ch + 1 < maxInputs; ch += 2) {
       opts.push({ value: String(ch), label: `${ch + 1}/${ch + 2}` });
     }
   } else {
@@ -259,7 +261,21 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
       badge={
         <span className="row gap1">
           <span className="badge">{track.kind}</span>
-          <span className="badge">{track.channels === 2 ? "stereo" : "mono"}</span>
+          {track.kind === "audio" ? (
+            <button
+              type="button"
+              className="badge aat-chan-toggle"
+              title="Click to switch mono/stereo (capture and recording follow)"
+              onClick={(e) => {
+                e.stopPropagation();
+                void setTrack(track.id, { channels: track.channels === 2 ? 1 : 2 });
+              }}
+            >
+              {track.channels === 2 ? "stereo" : "mono"}
+            </button>
+          ) : (
+            <span className="badge">{track.channels === 2 ? "stereo" : "mono"}</span>
+          )}
           {track.frozen ? (
             <span className="badge accent" title="Track is frozen (inserts bypassed, plays bounced audio)">
               <Icon name="snowflake" size={10} /> frozen

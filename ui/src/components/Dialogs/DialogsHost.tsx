@@ -13,6 +13,7 @@
 import React from "react";
 import "./dialogs.css";
 import ExportDialog from "./ExportDialog";
+import AddAudioTrackDialog from "./AddAudioTrackDialog";
 import RelinkDialog from "./RelinkDialog";
 import RecreatePluginsDialog from "./RecreatePluginsDialog";
 import RecoveryDialog from "./RecoveryDialog";
@@ -29,6 +30,7 @@ export default function DialogsHost() {
   return (
     <>
       <ExportDialog />
+      <AddAudioTrackDialog />
       <RelinkDialog />
       <RecreatePluginsDialog />
       <RecoveryDialog />

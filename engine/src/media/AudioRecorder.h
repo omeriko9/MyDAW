@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -92,15 +93,41 @@ public:
         return droppedFrames_.load(std::memory_order_relaxed);
     }
 
+    // ----- live waveform (SPEC §5.5, 2026-08-07) --------------------------------------
+    // The worker reduces every drained chunk to min/max buckets per target as it writes,
+    // so the UI can draw the take WHILE it records instead of only after the commit
+    // (Omer: "it should draw the wave during recording as well"). One bucket per
+    // kLivePeakBucket captured frames, mixed across the target's channels.
+    static constexpr int kLivePeakBucket = 512;
+
+    struct LivePeaks {
+        uint64_t trackId = 0;
+        // Timeline sample of THIS batch's first bucket (buckets are contiguous from here).
+        int64_t startSample = 0;
+        std::vector<float> mins, maxs;
+    };
+
+    // Main thread: hand over the buckets completed since the last call (empty when none).
+    // Cheap — a short mutex the worker also takes once per drained chunk, never on RT.
+    std::vector<LivePeaks> drainLivePeaks();
+
 private:
     struct TargetState {
         RecordTarget target;
         std::unique_ptr<WavWriter> writer; // null if the file failed to open
         std::string wavPath;
+        // Live-peak accumulation (worker thread): partial bucket + completed buckets
+        // waiting for the next drainLivePeaks().
+        float curMin = 0.0f, curMax = 0.0f;
+        int curCount = 0;
+        std::vector<float> pendMins, pendMaxs;
+        int64_t pendStartSample = 0; // timeline sample of pendMins[0]
+        int64_t bucketsDone = 0;     // buckets completed since begin() (for positioning)
     };
 
     void workerLoop();
     size_t drainOnce(); // worker / post-join only; returns frames consumed
+    void accumulateLivePeaks(TargetState& ts, int frames); // worker; takes peaksMutex_
     void logDropsThrottled();
 
     static constexpr size_t kChunkFrames = 4096;
@@ -134,6 +161,9 @@ private:
     std::atomic<bool> active_{false};
     std::atomic<bool> stopWorker_{false};
     std::atomic<int64_t> droppedFrames_{0};
+
+    // Guards the TargetState live-peak fields only (worker writes, main drains).
+    std::mutex peaksMutex_;
 
     std::thread worker_;
     std::vector<float> chunk_;                    // drain scratch (interleaved)

@@ -822,6 +822,32 @@ void App::broadcastRecordingNotes() {
                                                 {"notes", std::move(notes)}});
 }
 
+void App::broadcastRecordingPeaks() {
+    // Live waveform (SPEC §5.5, 2026-08-07): hand the UI the min/max buckets the writer
+    // completed since the last tick. APPEND semantics — each batch continues where the
+    // track's previous one ended (startSample pins it), so the client never re-receives
+    // what it already drew. Nothing pending = no event.
+    std::vector<AudioRecorder::LivePeaks> batches = audioRecorder.drainLivePeaks();
+    if (batches.empty())
+        return;
+    json tracks = json::array();
+    for (const AudioRecorder::LivePeaks& lp : batches) {
+        json mins = json::array(), maxs = json::array();
+        for (size_t i = 0; i < lp.mins.size(); ++i) {
+            mins.push_back(lp.mins[i]);
+            maxs.push_back(lp.maxs[i]);
+        }
+        tracks.push_back(json{{"trackId", lp.trackId},
+                              {"startSample", lp.startSample},
+                              {"mins", std::move(mins)},
+                              {"maxs", std::move(maxs)}});
+    }
+    broadcastEvent("event/recordingPeaks",
+                   json{{"bucketSamples", AudioRecorder::kLivePeakBucket},
+                        {"sampleRate", currentSampleRate_},
+                        {"tracks", std::move(tracks)}});
+}
+
 void App::stopRecordingAndCommit() {
     if (!recordingActive_)
         return;
@@ -1274,7 +1300,7 @@ int App::run() {
     using clock = std::chrono::steady_clock;
     auto now = clock::now();
     auto lastTransport = now, lastMeters = now, lastPump = now, lastAutosave = now,
-         lastMidiPump = now, lastExport = now, lastRecNotes = now;
+         lastMidiPump = now, lastExport = now, lastRecNotes = now, lastRecPeaks = now;
     auto lastClientPresent = now; // for --exit-when-idle child instances
     bool everConnected = false;
     TransportState lastState = transport.state();
@@ -1348,6 +1374,11 @@ int App::run() {
         if (recordingActive_ && midiRecorder.active() && now - lastRecNotes >= 66ms) {
             lastRecNotes = now; // ~15 Hz live take preview
             broadcastRecordingNotes();
+        }
+
+        if (recordingActive_ && audioRecorder.isActive() && now - lastRecPeaks >= 66ms) {
+            lastRecPeaks = now; // ~15 Hz live WAVEFORM (SPEC §5.5)
+            broadcastRecordingPeaks();
         }
 
         if (now - lastAutosave >= 1s) {

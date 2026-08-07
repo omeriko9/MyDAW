@@ -3575,6 +3575,61 @@
       ],
       "type": "object"
     },
+    "RecordingPeaks": {
+      "additionalProperties": false,
+      "description": "event/recordingPeaks (~15 Hz, SPEC §5.5): min/max buckets completed since the last event, so the timeline can draw an audio take WHILE it records. Append semantics per track.",
+      "properties": {
+        "bucketSamples": {
+          "type": "number"
+        },
+        "sampleRate": {
+          "type": "number"
+        },
+        "tracks": {
+          "items": {
+            "$ref": "#/schemas/RecordingTrackPeaks"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "bucketSamples",
+        "sampleRate",
+        "tracks"
+      ],
+      "type": "object"
+    },
+    "RecordingTrackPeaks": {
+      "additionalProperties": false,
+      "description": "One armed audio track's new buckets; startSample pins the FIRST bucket on the timeline (buckets are contiguous from there).",
+      "properties": {
+        "maxs": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "mins": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "startSample": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "startSample",
+        "mins",
+        "maxs"
+      ],
+      "type": "object"
+    },
     "RecoveryInfoReply": {
       "additionalProperties": false,
       "properties": {
@@ -4214,6 +4269,14 @@
     "TrackPatch": {
       "additionalProperties": false,
       "properties": {
+        "channels": {
+          "description": "Mono (1) / stereo (2) — audio tracks only; structural (capture and recording follow).",
+          "enum": [
+            1,
+            2
+          ],
+          "type": "number"
+        },
         "color": {
           "type": "string"
         },
@@ -4232,7 +4295,10 @@
         },
         "kind": {
           "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
-          "enum": ["midi", "instrument"],
+          "enum": [
+            "midi",
+            "instrument"
+          ],
           "type": "string"
         },
         "midiMod": {

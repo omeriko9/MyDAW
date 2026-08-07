@@ -54,6 +54,7 @@ import type {
   MidiMapsState,
   MidiActivityEvent,
   RecordingNotesEvent,
+  RecordingPeaksEvent,
   MidiInputInfo,
   PluginInfo,
   PluginStateEvent,
@@ -112,6 +113,8 @@ export const transportBus: Bus<TransportEvent> = makeBus<TransportEvent>();
 export const midiActivityBus: Bus<MidiActivityEvent> = makeBus<MidiActivityEvent>();
 /** event/recordingNotes — live in-progress MIDI take for the timeline record preview. */
 export const recordingBus: Bus<RecordingNotesEvent> = makeBus<RecordingNotesEvent>();
+/** event/recordingPeaks — live AUDIO take waveform buckets (append-only batches). */
+export const recordingPeaksBus: Bus<RecordingPeaksEvent> = makeBus<RecordingPeaksEvent>();
 
 /* ============================================================================
  * Store types
@@ -209,6 +212,8 @@ export interface DialogsState {
   pluginEditors: number[];
   /** crash-recovery offer (from project/recoveryInfo), or null */
   recovery: RecoveryInfoReply | null;
+  /** Add Audio Track dialog (mono/stereo + input picker); null = closed. */
+  addAudioTrack: { index?: number } | null;
 }
 
 export interface DawState {
@@ -534,7 +539,7 @@ export const useStore = create<DawState>((set) => ({
   workspaces: prefWorkspaces,
   activeMidiClipId: null,
   activeAudioClipId: null,
-  dialogs: { techniques: false, settings: false, export: false, shortcuts: false, palette: false, quickHelp: null, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null },
+  dialogs: { techniques: false, settings: false, export: false, shortcuts: false, palette: false, quickHelp: null, recreatePlugins: false, roomView: false, pluginEditors: [], recovery: null, addAudioTrack: null },
 
   setProject: (project) => set({ project }),
   setEngineStatus: (engineStatus) => set({ engineStatus }),
@@ -823,6 +828,10 @@ ws.on("event/midiActivity", (ev) => {
 
 ws.on("event/recordingNotes", (ev) => {
   recordingBus.emit(ev);
+});
+
+ws.on("event/recordingPeaks", (ev) => {
+  recordingPeaksBus.emit(ev);
 });
 
 /**

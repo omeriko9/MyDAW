@@ -18,7 +18,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { recordingBus, transportBus, useStore } from "../../store/store";
+import { recordingBus, recordingPeaksBus, transportBus, useStore } from "../../store/store";
 import type { Selection, Tool } from "../../store/store";
 import type { RecordingNotesEvent } from "../../protocol/types";
 import {
@@ -89,6 +89,7 @@ import {
   formatBarsBeatsShort,
   gridStepBeats,
   pxToBeat,
+  samplesToBeats,
   timeSigAtBeat,
   type HViewport,
 } from "../../lib/time";
@@ -472,6 +473,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
   // Live recording feedback: latest in-progress take + a stamped transport sample so the
   // take rectangle's right edge can be interpolated smoothly between 20 Hz transport events.
   const recRef = useRef<RecordingNotesEvent | null>(null);
+  /** Live AUDIO take (SPEC §5.5): accumulated min/max buckets per armed track. Batches
+   *  are append-only, so we keep concatenating until the take stops. */
+  const recPeaksRef = useRef<
+    Map<number, { startSample: number; bucketSamples: number; sampleRate: number; mins: number[]; maxs: number[] }>
+  >(new Map());
   const recClockRef = useRef<{ beat: number; at: number; playing: boolean } | null>(null);
 
   const drawRef = useRef<() => void>(() => undefined);
@@ -510,6 +516,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const unsubRec = recordingBus.subscribe((ev) => {
       recRef.current = ev;
     });
+    const unsubPeaks = recordingPeaksBus.subscribe((ev) => {
+      for (const t of ev.tracks) {
+        const cur = recPeaksRef.current.get(t.trackId);
+        if (!cur) {
+          recPeaksRef.current.set(t.trackId, {
+            startSample: t.startSample,
+            bucketSamples: ev.bucketSamples,
+            sampleRate: ev.sampleRate,
+            mins: [...t.mins],
+            maxs: [...t.maxs],
+          });
+        } else {
+          cur.mins.push(...t.mins);
+          cur.maxs.push(...t.maxs);
+        }
+      }
+    });
     const unsubT = transportBus.subscribe((ev) => {
       recClockRef.current = {
         beat: ev.beat,
@@ -527,11 +550,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           raf = 0;
         }
         recRef.current = null;
+        recPeaksRef.current.clear(); // the committed clip takes over the drawing
         drawRef.current(); // one final draw clears the preview
       }
     });
     return () => {
       unsubRec();
+      unsubPeaks();
       unsubT();
       if (raf) cancelAnimationFrame(raf);
     };
@@ -974,6 +999,78 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           }
           ctx.restore();
         }
+      }
+    }
+
+    // live AUDIO take: the wave drawn WHILE recording (SPEC §5.5; Omer 2026-08-07 —
+    // "it should draw the wave during recording as well, not just afterwards").
+    // event/recordingPeaks streams min/max buckets in SAMPLES; the take's timeline
+    // position comes from its first bucket, so punch-in and cycle wraps land right.
+    if (recPeaksRef.current.size > 0) {
+      for (const [tid, pk] of recPeaksRef.current) {
+        if (pk.mins.length === 0 || pk.sampleRate <= 0) continue;
+        const row = trackRowOf(rws, tid);
+        if (!row) continue;
+        const ry = row.top - scrollY;
+        if (ry > h || ry + row.height < 0) continue;
+        const startBeat = samplesToBeats(pk.startSample, proj.tempoMap, pk.sampleRate);
+        const endBeat = samplesToBeats(
+          pk.startSample + pk.mins.length * pk.bucketSamples,
+          proj.tempoMap,
+          pk.sampleRate,
+        );
+        const x0 = beatToPx(startBeat, v);
+        const x1 = beatToPx(endBeat, v);
+        if (x1 < -2 || x0 > w + 2) continue;
+        const rw = Math.max(2, x1 - x0);
+        roundRect(ctx, x0, ry + 1, rw, row.height - 3, 3);
+        ctx.fillStyle = withAlpha(colors.danger, 0.14);
+        ctx.fill();
+        ctx.strokeStyle = colors.danger;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        const areaY = ry + 2;
+        const areaH = row.height - 4;
+        const midY = areaY + areaH / 2;
+        const halfH = areaH / 2 - 1;
+        if (halfH <= 1) continue;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(Math.max(x0, 0), areaY, Math.min(rw, w - Math.max(x0, 0)), areaH);
+        ctx.clip();
+        // One column per device pixel: several buckets can share a pixel when zoomed out.
+        const pxPerBucket = rw / pk.mins.length;
+        const cols = Math.max(1, Math.min(Math.ceil(rw), pk.mins.length));
+        const per = pk.mins.length / cols;
+        ctx.beginPath();
+        for (let i = 0; i < cols; i++) {
+          const b0 = Math.floor(i * per);
+          const b1 = Math.max(b0, Math.floor((i + 1) * per) - 1);
+          let mx = -1;
+          for (let b = b0; b <= b1 && b < pk.maxs.length; b++)
+            if (pk.maxs[b] > mx) mx = pk.maxs[b];
+          const px = x0 + (b0 + 0.5) * pxPerBucket;
+          const y = midY - clamp(mx, -1, 1) * halfH;
+          if (i === 0) ctx.moveTo(px, y);
+          else ctx.lineTo(px, y);
+        }
+        for (let i = cols - 1; i >= 0; i--) {
+          const b0 = Math.floor(i * per);
+          const b1 = Math.max(b0, Math.floor((i + 1) * per) - 1);
+          let mn = 1;
+          for (let b = b0; b <= b1 && b < pk.mins.length; b++)
+            if (pk.mins[b] < mn) mn = pk.mins[b];
+          const px = x0 + (b0 + 0.5) * pxPerBucket;
+          ctx.lineTo(px, midY - clamp(mn, -1, 1) * halfH);
+        }
+        ctx.closePath();
+        ctx.fillStyle = withAlpha(colors.danger, 0.7);
+        ctx.fill();
+        ctx.strokeStyle = withAlpha(colors.danger, 0.95);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
       }
     }
 

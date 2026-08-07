@@ -766,6 +766,8 @@ export interface TrackPatch {
   /** Cubase-style instrument tracks (2026-08-07): convert midi↔instrument in place.
    *  midi→instrument clears midiTarget; instrument→midi needs an empty insert chain. */
   kind?: "midi" | "instrument";
+  /** Mono/stereo (audio tracks only; structural — capture and recording follow). */
+  channels?: 1 | 2;
   color?: string;
   height?: number;
   volume?: number;
@@ -1882,6 +1884,23 @@ export interface RecordingNotesEvent {
   notes: RecordingNote[];
 }
 
+/** One armed audio track's newly completed min/max buckets (append semantics). */
+export interface RecordingTrackPeaks {
+  trackId: number;
+  /** Timeline sample of this batch's FIRST bucket; buckets are contiguous from there. */
+  startSample: number;
+  mins: number[];
+  maxs: number[];
+}
+
+/** event/recordingPeaks (~15 Hz, SPEC §5.5) — lets the timeline draw an audio take
+ *  WHILE it records. Each event carries only the buckets completed since the last one. */
+export interface RecordingPeaksEvent {
+  bucketSamples: number;
+  sampleRate: number;
+  tracks: RecordingTrackPeaks[];
+}
+
 export interface ImportProgressEvent {
   path: string;
   pct: number;
@@ -2148,6 +2167,7 @@ export interface EventMap {
   "event/midiActivity": MidiActivityEvent;
   "event/recordingNotes": RecordingNotesEvent;
   "event/captureState": CaptureStateEvent;
+  "event/recordingPeaks": RecordingPeaksEvent;
   "event/importProgress": ImportProgressEvent;
   "event/exportProgress": ExportProgressEvent;
   "event/dopProgress": DopProgressEvent;
@@ -2335,6 +2355,7 @@ export const Ev = {
   midiActivity: "event/midiActivity",
   recordingNotes: "event/recordingNotes",
   captureState: "event/captureState",
+  recordingPeaks: "event/recordingPeaks",
   importProgress: "event/importProgress",
   exportProgress: "event/exportProgress",
   scanProgress: "event/scanProgress",
