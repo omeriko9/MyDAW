@@ -223,7 +223,11 @@ bool Vst2Host::load(const std::wstring& path, const std::string& uid) {
   if (vst2Trace())
     std::fprintf(stderr, "[vst2] dispatch(effOpen) done\n");
 
-  // v1: no VST2 shell-plugin support (SPEC §8.3).
+  // VST2 shell plug-ins (SPEC §8.3): a shell container reports kPlugCategShell. With no
+  // requested uid it is a scan target only (enumerateShellPlugins lists the children);
+  // with a uid the instance has already (re)instantiated AS that child, because
+  // audioMasterCurrentId returned requestedShellUid_ during construction. DirectShow-backed
+  // shells (Waves WaveShell) therefore need COM initialized before load() — see main.cpp.
   if (vst2Trace())
     std::fprintf(stderr, "[vst2] dispatch(effGetPlugCategory) begin\n");
   const VstIntPtr category = dispatch(effGetPlugCategory);

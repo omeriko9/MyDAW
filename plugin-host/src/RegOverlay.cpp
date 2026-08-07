@@ -2492,8 +2492,22 @@ void installTempUserClasses() {
   g_tempUserClassesLeaves = deleteUserClassesKeys(classesRoot, g_tempUserClassesLeaves);
 
   if (classes && !classes->subkeys.empty()) {
-    for (const auto& [_, sk] : classes->subkeys)
+    for (const auto& [_, sk] : classes->subkeys) {
+      // Skip the legacy DirectShow "Filter" branch (HKCR\Filter\{guid}). We host
+      // DirectShow-wrapped plug-ins (e.g. Waves WaveShell sub-plug-ins) by calling
+      // CoCreateInstance(CLSID, IID_IBaseFilter) directly, which needs only the
+      // CLSID\{guid}\InprocServer32 registration — never the Filter branch, which exists
+      // solely so the filter-graph auto-enumerator (IFilterMapper / Intelligent Connect)
+      // can discover the filter. Materializing those hundreds of media-filter entries into
+      // the REAL HKCU\Software\Classes makes Windows' default-app/association monitor treat
+      // a media handler as (un)installed on every run — firing a spurious, repeating
+      // "An app default was reset" toast. Dropping them costs nothing for load.
+      if (lc(sk.name) == L"filter") {
+        tracef("[regov] skipping HKCR\\\\Filter materialization (avoids default-app-reset toast)\n");
+        continue;
+      }
       materializeKeyToUserClasses(classesRoot, sk.name, sk.name, sk);
+    }
     tracef("[regov] materialized %zu HKCR leaf key(s) into HKCU\\\\Software\\\\Classes\n",
            g_tempUserClassesLeaves.size());
   }

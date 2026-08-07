@@ -45,6 +45,7 @@
 #include <timeapi.h> // timeBeginPeriod (after windows.h)
 #pragma comment(lib, "winmm.lib")
 #include <shellapi.h>
+#include <objbase.h> // CoInitializeEx (WIN32_LEAN_AND_MEAN omits it)
 
 #include <atomic>
 #include <cctype>
@@ -535,6 +536,14 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
                   sehCode);
     rpcRaw->push("log", json{{"level", "error"}, {"msg", msg}});
   });
+
+  // Initialize COM on this (the loading + editor + message-pump) thread BEFORE any
+  // plugin code runs. DirectShow/DMO-backed VST2 plug-ins such as Waves WaveShell
+  // CoCreateInstance their sub-plugin filters during construction, which fails with
+  // CO_E_NOTINITIALIZED if COM is not yet up. STA (apartment-threaded) matches the
+  // apartment a plugin editor expects, and the host pumps messages on this thread. The
+  // host process makes no other COM init, so this never races a prior apartment choice.
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   // --- create + load the adapter on the MAIN thread ------------------------
   if (format == "vst2")
