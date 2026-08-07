@@ -654,3 +654,179 @@
 .tech-audition.active .tech-ab-hint {
   color: var(--warn, #d90);
 }
+
+/* ---- Production Guide (landing view — plan doc §0 step 2) ---- */
+.tech-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 2px;
+}
+.tech-guide-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tech-guide-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+.tech-guide-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  flex: 1 1 auto;
+}
+.tech-guide-head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tech-guide-browse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tech-guide-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tech-guide-stage-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 2px 0;
+}
+.tech-guide-stage-n {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+  align-self: center;
+}
+.tech-guide-stage-title {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tech-guide-stage-intro {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 0;
+}
+.tech-goal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.tech-goal[data-status="suggested"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.tech-goal[data-status="na"] {
+  opacity: 0.6;
+}
+.tech-goal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tech-goal-badge {
+  flex: 0 0 76px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 0;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.tech-goal[data-status="suggested"] .tech-goal-badge {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.tech-goal[data-status="done"] .tech-goal-badge {
+  border-color: var(--ok, #4a4);
+  color: var(--ok, #4a4);
+}
+.tech-goal-title {
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tech-goal-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tech-goal.open .tech-goal-note {
+  white-space: normal;
+}
+.tech-goal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px 96px;
+  font-size: 12px;
+}
+.tech-goal-why {
+  color: var(--text);
+}
+.tech-goal-hear,
+.tech-goal-byhand {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.tech-goal-means {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tech-goal-mean {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.tech-goal-mean-title {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tech-goal-mean-when {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.tech-goal-open {
+  flex: 0 0 auto;
+}

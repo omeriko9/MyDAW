@@ -78,20 +78,24 @@ can do by hand, and the jargon-named cards mean nothing to someone who doesn't a
 know the techniques ("unknown what should be used at what stage, even with the
 categories"). Direction decided with him (in order):
 
-1. **A/B audition — SHIPPED same day**: With/Without toggle on every wizard run
+1. **A/B audition — SHIPPED 2026-08-07**: With/Without toggle on every wizard run
    (undo×N / redo×N, exact-state symmetric; stage actions lock while in Without; any
    exit auto-restores). ui-smoke `technique-audition-ab` guards it, including the
    close-mid-Without leg. Plan doc §0 has the mechanism.
-2. **NEXT UP: Production Guide reframe** — stage-of-work-first (Arrange → Sound design
-   → Edit → Mix → Transitions → Master), plain-language goals, techniques as
-   means-to-a-goal, and project-aware relevance read from HIS song (declarative
-   `relevance(ctx)` per goal, same pattern as `requirements(ctx)`). Emphasis
-   (Omer picked): balanced — why-now + what-you'll-hear up front, one click to apply,
-   by-hand steps behind a toggle.
-3. **Then**: outcome-level flows (Macros shape) become the primary catalog;
-   2-steppers demote to building blocks + search results.
+2. **Production Guide — SHIPPED 2026-08-07 (later)**: the dialog now LANDS on a
+   stage-of-work guide (`techniques/guide.ts` + `GuideView.tsx`) — 6 stages, 22
+   plain-language goals, each with why/what-you'll-hear, techniques as
+   means-to-a-goal, and project-aware `relevance(ctx)` grounded in the actual song
+   ("“Kick” and “Bass 808” found, no sidechain anywhere" → Suggested). Honesty
+   rules in the module header. Guards: `guide.test.ts` + ui-smoke
+   `technique-guide-landing`. **Omer's reaction to the goal set and the relevance
+   rules is the next input** — which suggestions feel right on a real project
+   shapes rounds 2 of the rules.
+3. **NEXT UP: outcome-level flows become the primary catalog** (Macros shape);
+   2-steppers demote to building blocks inside them + search results. The guide's
+   goals suggest the outcomes to build first.
 
-Classic-category growth is PARKED until the guide lands
+Classic-category growth stays PARKED
 (docs/PRODUCTION_TECHNIQUES_PLAN.md §0; backlog queues stay but don't extend them).
 
 ## QUEUED

@@ -17,14 +17,22 @@ at which stage of a production. Decisions (same day):
    chains on the in-flight toggle batch. The hint line says what to listen for
    (tagline). Guard: ui-smoke `technique-audition-ab` (engine-truth A/B + the
    close-mid-Without auto-restore leg).
-2. **Next: Production Guide reframe** — a stage-of-work-first surface (Arrange →
-   Sound design → Edit & tighten → Mix → Transitions & automation → Master): each
-   stage a plain-language checklist of GOALS, techniques appearing as means-to-a-goal,
-   and **project-aware relevance** read from the actual song (declarative
-   `relevance(ctx)` per goal — same pattern as `requirements(ctx)`; e.g. "kick + bass
-   but no sidechain anywhere", "vocal has no reverb send"). Emphasis: balanced —
-   why-now + what-you'll-hear up front, one click to apply, by-hand steps behind a
-   toggle.
+2. **Production Guide reframe — SHIPPED 2026-08-07.** `ui/src/techniques/guide.ts`:
+   6 stages (Write & arrange → Sound design → Edit & tighten → Mix → Transitions &
+   automation → Bus/glue/master), 22 plain-language GOALS, each with why-now +
+   what-you'll-hear up front and techniques as means-to-a-goal (a `when` line per
+   technique). Every goal carries a declarative, project-aware `relevance(ctx)` —
+   same pattern as `requirements(ctx)` — returning `suggested | open | done | na`
+   plus a note GROUNDED in the song ("“Kick” and “Bass 808” found, no sidechain
+   anywhere"). Honesty rules are in the module header: suggested only on a positive
+   project signal, done only on a strong one, na instead of nagging, role detection
+   by track name QUOTES the matched name so a wrong guess explains itself. The
+   guide is the dialog's LANDING view (`GuideView.tsx`; browser behind "Browse all
+   techniques", wizard back button returns to wherever it was opened from). Goals
+   without a wizard show an honest by-hand line (SPEC §10 — no dead rows).
+   Guards: vitest `guide.test.ts` (means resolve, statuses flip on synthetic
+   projects), ui-smoke `technique-guide-landing` (landing view, LIVE na→suggested
+   flip when kick+bass appear over the wire, goal → wizard → back-to-Guide).
 3. **Then: outcome-level flows become the primary catalog** (the Macros shape);
    2-steppers demote to building blocks inside them, still reachable via search.
 

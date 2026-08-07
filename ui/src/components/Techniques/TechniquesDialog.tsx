@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { transportBus, useStore } from "../../store/store";
+import { useStore } from "../../store/store";
 import { redo, undo } from "../../store/actions";
 import { revealPane } from "../../shell/reveal";
 import { Modal } from "../common/Modal";
@@ -40,7 +40,8 @@ import {
   toggleTechFavorite,
 } from "../../techniques/userPrefs";
 import { contextMenuHandler } from "../common/ContextMenu";
-import { allAudioClips, allMidiClips, beatsPerBarOf, bpmOf, isMixerTrack } from "../../techniques/ops";
+import { allAudioClips, allMidiClips, isMixerTrack, makeCtx } from "../../techniques/ops";
+import GuideView from "./GuideView";
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
@@ -53,20 +54,8 @@ import {
 import "./techniques.css";
 
 /* ============================================================================
- * Ctx + run-session state
+ * Run-session state (ctx comes from ops.makeCtx — shared with GuideView)
  * ========================================================================= */
-
-function makeCtx(): TechniqueCtx | null {
-  const s = useStore.getState();
-  if (!s.project) return null;
-  return {
-    project: s.project,
-    selection: s.selection,
-    bpm: bpmOf(s.project),
-    beatsPerBar: beatsPerBarOf(s.project),
-    playheadBeat: transportBus.last?.beat ?? 0,
-  };
-}
 
 type StageStatus =
   | { kind: "pending" }
@@ -193,7 +182,15 @@ function statusIcon(st: StageStatus) {
   }
 }
 
-function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => void }) {
+function Wizard({
+  technique,
+  onBack,
+  backLabel = "All techniques",
+}: {
+  technique: TechniqueDef;
+  onBack: () => void;
+  backLabel?: string;
+}) {
   // Broad subscription on purpose: requirements/params read live project state.
   useStore();
   const ctx = makeCtx();
@@ -369,7 +366,7 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
     <div className="tech-wizard" data-cat={technique.category}>
       <div className="tech-topline">
         <button type="button" className="btn tech-back" onClick={onBack}>
-          <Icon name="chevronLeft" size={14} /> All techniques
+          <Icon name="chevronLeft" size={14} /> {backLabel}
         </button>
         <div className="grow" />
         {!allDone && (
@@ -580,12 +577,15 @@ function Wizard({ technique, onBack }: { technique: TechniqueDef; onBack: () => 
 
 function Browser({
   onPick,
+  onGuide,
   onNewCustom,
   onEditCustom,
   onCustomsChanged,
   customsVersion,
 }: {
   onPick: (t: TechniqueDef) => void;
+  /** Back to the Production Guide landing view. */
+  onGuide: () => void;
   onNewCustom: () => void;
   onEditCustom: (data: CustomTechniqueData) => void;
   onCustomsChanged: () => void;
@@ -639,6 +639,9 @@ function Browser({
   return (
     <div className="tech-browse-wrap">
       <div className="tech-search-row">
+        <button type="button" className="btn tech-back" onClick={onGuide}>
+          <Icon name="chevronLeft" size={14} /> Guide
+        </button>
         <Icon name="search" size={15} />
         <input
           className="tech-search"
@@ -1050,6 +1053,8 @@ export default function TechniquesDialog() {
   const setDialogs = useStore((s) => s.setDialogs);
   const [picked, setPicked] = useState<TechniqueDef | null>(null);
   const [builder, setBuilder] = useState<CustomTechniqueData | null>(null);
+  // The Guide is the LANDING view (plan doc §0): orientation first, catalog on demand.
+  const [view, setView] = useState<"guide" | "browser">("guide");
   const [customsVersion, setCustomsVersion] = useState(0);
   const [popped, setPopped] = useState(false);
   const pop = usePopoutWindow({
@@ -1091,9 +1096,18 @@ export default function TechniquesDialog() {
           if (saved) setCustomsVersion((n) => n + 1);
         }}
       />
-    ) : picked === null ? (
+    ) : picked !== null ? (
+      <Wizard
+        technique={picked}
+        onBack={() => setPicked(null)}
+        backLabel={view === "guide" ? "Guide" : "All techniques"}
+      />
+    ) : view === "guide" ? (
+      <GuideView onOpenTechnique={setPicked} onBrowseAll={() => setView("browser")} />
+    ) : (
       <Browser
         onPick={setPicked}
+        onGuide={() => setView("guide")}
         onNewCustom={() =>
           setBuilder({
             id: freshCustomId(loadCustomTechniques()),
@@ -1107,8 +1121,6 @@ export default function TechniquesDialog() {
         onCustomsChanged={() => setCustomsVersion((n) => n + 1)}
         customsVersion={customsVersion}
       />
-    ) : (
-      <Wizard technique={picked} onBack={() => setPicked(null)} />
     );
 
   return (

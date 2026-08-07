@@ -423,6 +423,9 @@ export const checks = [
       await s.untilEval("Project menu opens", () =>
         [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Production Techniques")));
       await clickStarts(".ctx-item", "Production Techniques");
+      // The Guide is the landing view now (plan doc §0 step 2) — the card browser is behind it.
+      await s.untilEval("the Production Guide lands first", () => !!document.querySelector(".tech-guide"));
+      await clickStarts(".tech-guide-browse", "Browse all techniques");
       await s.untilEval("technique cards render", () =>
         document.querySelectorAll(".tech-card").length >= 10);
       await clickStarts(".tech-card", "Master Glue Chain");
@@ -503,6 +506,9 @@ export const checks = [
       await s.untilEval("Project menu opens", () =>
         [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Production Techniques")));
       await clickStarts(".ctx-item", "Production Techniques");
+      // The Guide is the landing view now (plan doc §0 step 2) — the card browser is behind it.
+      await s.untilEval("the Production Guide lands first", () => !!document.querySelector(".tech-guide"));
+      await clickStarts(".tech-guide-browse", "Browse all techniques");
       await s.untilEval("technique cards render", () =>
         document.querySelectorAll(".tech-card").length >= 10);
       await clickStarts(".tech-card", "Master Glue Chain");
@@ -553,6 +559,72 @@ export const checks = [
         await s.probe("edit/undo", {});
       }
       tt.eq((await insertsOnMaster()).length, before.length, "master restored for later checks");
+    },
+  },
+
+  {
+    id: "technique-guide-landing",
+    title: "the Production Guide lands first, reads THIS project, and reacts when kick+bass appear",
+    area: "techniques",
+    guards: "plan doc §0 step 2 (Omer: 'unknown what should be used at what stage') — the guide must be the dialog's landing view, its relevance rules must read the LIVE project (kick+bass with no sidechain flips the goal to Suggested), and a goal must route into the wizard with a back-to-Guide path",
+    run: async (s, tt) => {
+      const clickStarts = async (selector, text) => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(${JSON.stringify(selector)})]
+            .find((i) => i.textContent.trim().startsWith(${JSON.stringify(text)}));
+          if (!el) return null;
+          el.scrollIntoView({ block: "center" });
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (!box) throw new AssertionError(`not found: ${selector} starting with ${JSON.stringify(text)}`);
+        await s.click(box.x, box.y);
+      };
+      const goalStatus = () => s.eval(() =>
+        document.querySelector('[data-goal="kick-bass"]')?.dataset.status ?? null);
+
+      await clickStarts('[role="menuitem"][aria-label="Project"]', "");
+      await s.untilEval("Project menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((i) => i.textContent.trim().startsWith("Production Techniques")));
+      await clickStarts(".ctx-item", "Production Techniques");
+
+      // Landing = the guide, all six stages, no card browser in sight.
+      await s.untilEval("the guide renders its six stages", () =>
+        document.querySelectorAll(".tech-guide-stage").length === 6);
+      tt.eq(await s.eval(() => document.querySelectorAll(".tech-card").length), 0,
+        "the jargon card browser is NOT the landing view");
+
+      // The fixture has no kick/bass — the goal must say so, not nag.
+      tt.eq(await goalStatus(), "na", "kick-bass reads 'not applicable' without the pair");
+
+      // Create the pair over the wire: the guide must notice the LIVE project.
+      const kick = (await s.probe("cmd/track.add", { kind: "midi", name: "Kick" })).payload.track;
+      const bass = (await s.probe("cmd/track.add", { kind: "midi", name: "Bass 808" })).payload.track;
+      try {
+        await s.probe("cmd/clip.addMidi", { trackId: kick.id, startBeat: 0, lengthBeats: 4 });
+        await s.probe("cmd/clip.addMidi", { trackId: bass.id, startBeat: 0, lengthBeats: 4 });
+        await s.untilEval("kick+bass with no sidechain flips the goal to Suggested", () =>
+          document.querySelector('[data-goal="kick-bass"]')?.dataset.status === "suggested");
+        const note = await s.eval(() =>
+          document.querySelector('[data-goal="kick-bass"] .tech-goal-note')?.textContent ?? "");
+        tt.match(note, /Kick/, "the note quotes the actual track it found");
+
+        // A goal routes into the wizard, and the wizard routes back to the Guide.
+        await clickStarts('[data-goal="kick-bass"] .tech-goal-row', "");
+        await s.untilEval("the goal expands to its means", () =>
+          document.querySelectorAll('[data-goal="kick-bass"] .tech-goal-mean').length >= 2);
+        await clickStarts('[data-goal="kick-bass"] .tech-goal-open', "Open");
+        await s.untilEval("the technique wizard opens", () =>
+          !!document.querySelector(".tech-wizard"));
+        await s.untilEval("the wizard's back button points at the Guide", () =>
+          document.querySelector(".tech-back")?.textContent.trim() === "Guide");
+        await clickStarts(".tech-back", "Guide");
+        await s.untilEval("back lands on the guide again", () =>
+          !!document.querySelector(".tech-guide"));
+      } finally {
+        await s.probe("cmd/track.remove", { trackId: bass.id });
+        await s.probe("cmd/track.remove", { trackId: kick.id });
+      }
     },
   },
 

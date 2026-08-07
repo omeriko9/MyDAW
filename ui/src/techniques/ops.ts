@@ -32,8 +32,24 @@ import type {
   Track,
 } from "../protocol/types";
 import { normFor } from "./norm";
-import { useStore } from "../store/store";
+import { transportBus, useStore } from "../store/store";
 import type { TechniqueCtx } from "./types";
+
+/**
+ * Snapshot of live state for requirements()/relevance()/run() — the one ctx
+ * constructor (wizard, guide and tests share it via this module).
+ */
+export function makeCtx(): TechniqueCtx | null {
+  const s = useStore.getState();
+  if (!s.project) return null;
+  return {
+    project: s.project,
+    selection: s.selection,
+    bpm: bpmOf(s.project),
+    beatsPerBar: beatsPerBarOf(s.project),
+    playheadBeat: transportBus.last?.beat ?? 0,
+  };
+}
 
 /* ============================================================================
  * Tx — undo-entry accounting
