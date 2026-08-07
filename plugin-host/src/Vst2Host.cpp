@@ -140,10 +140,14 @@ bool Vst2Host::load(const std::wstring& path, const std::string& uid) {
     requestedShellUid_ = static_cast<VstInt32>(want);
   }
   if (vst2Trace())
-    std::fprintf(stderr, "[vst2] LoadLibraryW(%ls) begin\n", path.c_str());
-  HMODULE mod = LoadLibraryW(path.c_str());
+    std::fprintf(stderr, "[vst2] LoadLibraryExW(%ls, LOAD_WITH_ALTERED_SEARCH_PATH) begin\n",
+                 path.c_str());
+  // Resolve implicit dependencies relative to the plugin DLL, independently
+  // of the host's current directory (which capture replay may override).
+  HMODULE mod =
+      LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
   if (vst2Trace())
-    std::fprintf(stderr, "[vst2] LoadLibraryW(%ls) -> %p\n", path.c_str(),
+    std::fprintf(stderr, "[vst2] LoadLibraryExW(%ls) -> %p\n", path.c_str(),
                  static_cast<void*>(mod));
   if (!mod) {
     lastError_ = "LoadLibrary failed: " + win32ErrorString(GetLastError());

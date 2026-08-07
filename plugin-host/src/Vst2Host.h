@@ -4,7 +4,8 @@
 //
 // VST2 PluginAdapter implementation over the clean-room vestige ABI
 // (shared/vst2/vestige.h, SPEC §8.4):
-//   * load: LoadLibraryW → VSTPluginMain/main entry → AEffect, instance
+//   * load: LoadLibraryExW (plugin-relative dependency search) →
+//           VSTPluginMain/main entry → AEffect, instance
 //     routed through AEffect::resvd1 (pre-instance audioMaster callbacks —
 //     audioMasterVersion etc. — answered statically/via the loading
 //     instance),
