@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "4fe8b28d7d9af2b797f1bdddb22bf83003d2a340f9274e859980b96d9a5e593e";
+export const AGENT_CATALOG_SHA256 = "5d847de17a88c334a9a166b34cf639ef37118c0a45c966865d4c134bd0a88258";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4345,6 +4345,10 @@ export const AGENT_CATALOG: AgentCatalog = {
           },
           "type": "array"
         },
+        "keepTakes": {
+          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
+          "type": "boolean"
+        },
         "kind": {
           "$ref": "#/schemas/TrackKind"
         },
@@ -4619,6 +4623,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "inputGainDb": {
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
+        },
+        "keepTakes": {
+          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
+          "type": "boolean"
         },
         "kind": {
           "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
@@ -10234,42 +10242,6 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
-      "name": "transport/setKeepTakes",
-      "category": "transport",
-      "description": "Keep Takes record mode: recording over existing material folds into take lanes (newest take plays). Sticky across sessions.",
-      "target": "engine",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "idempotent"
-      ],
-      "supports": [],
-      "requires": [],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "$ref": "#/schemas/TransportReply"
-      },
-      "examples": [
-        {
-          "input": {
-            "enabled": true
-          }
-        }
-      ]
-    },
-    {
       "name": "transport/setMetronome",
       "category": "transport",
       "description": "Enable or disable the metronome, set count-in bars, and control first/other beat click levels.",
@@ -11664,7 +11636,6 @@ export const ENGINE_OPERATION_NAMES = [
   "transport/play",
   "transport/record",
   "transport/setAutomationWrite",
-  "transport/setKeepTakes",
   "transport/setMetronome",
   "transport/stop"
 ] as const satisfies readonly RequestType[];
@@ -12086,10 +12057,6 @@ export const REQUEST_COVERAGE = {
   "transport/setAutomationWrite": {
     "kind": "operation",
     "operation": "transport/setAutomationWrite"
-  },
-  "transport/setKeepTakes": {
-    "kind": "operation",
-    "operation": "transport/setKeepTakes"
   },
   "engine/getDevices": {
     "kind": "operation",
@@ -13258,11 +13225,6 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {}
   ],
   "transport/setAutomationWrite": [
-    {
-      "enabled": true
-    }
-  ],
-  "transport/setKeepTakes": [
     {
       "enabled": true
     }

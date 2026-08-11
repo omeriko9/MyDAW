@@ -6,7 +6,7 @@
  *
  * Boots a real engine headlessly (isolated %APPDATA%, --null-input 2 synthetic capture)
  * and proves the four pieces shipped together:
- *   P1  transport/setKeepTakes round-trips, and PERSISTS across an engine relaunch
+ *   P1  cmd/track.set {keepTakes} round-trips on the track (per-track record mode)
  *   P2  a MIDI recording with zero notes and zero CC creates NO clip (unconditional)
  *   P3  with Keep Takes ON, recording over existing material folds into take lanes:
  *       - over a loose clip: folder{lane0 "Previous"=old clip, lane1=new}, comp plays the
@@ -107,23 +107,18 @@ try {
   await req("session/hello", { clientName: "takes" });
   await req("project/new", {});
 
-  /* ---- P1: toggle round-trip ---------------------------------------------------------- */
-  const set = await req("transport/setKeepTakes", { enabled: true });
-  report("setKeepTakes reply carries the arm", set.keepTakes === true, `keepTakes=${set.keepTakes}`);
-
-  /* ---- P1: persistence across relaunch ------------------------------------------------ */
-  await req("engine/shutdown", {}).catch(() => {});
-  await sleep(1500);
-  try { engine.kill(); } catch {}
-  await launchEngine();
-  await connect();
-  const hello2 = await req("session/hello", { clientName: "takes" });
-  report("keepTakes persists across an engine relaunch (settings.json)",
-    hello2.keepTakes === true, `hello.keepTakes=${hello2.keepTakes}`);
+  /* ---- P1: the per-track flag round-trips and PERSISTS in the project ----------------- */
+  const probe = (await req("cmd/track.add", { kind: "audio", name: "Flag" })).track;
+  await req("cmd/track.set", { trackId: probe.id, patch: { keepTakes: true } });
+  let pf = await trackOf(probe.id);
+  report("cmd/track.set {keepTakes} sticks on the track", pf.keepTakes === true, `keepTakes=${pf.keepTakes}`);
+  await req("cmd/track.set", { trackId: probe.id, patch: { keepTakes: false } });
+  pf = await trackOf(probe.id);
+  report("and clears again", pf.keepTakes !== true, `keepTakes=${pf.keepTakes}`);
+  await req("cmd/track.remove", { trackId: probe.id });
 
   /* ---- P3 toggle OFF first: legacy overlap-and-sum locked ----------------------------- */
   await req("project/new", {});
-  await req("transport/setKeepTakes", { enabled: false });
   const trkOff = (await req("cmd/track.add", { kind: "audio", name: "Off" })).track;
   await req("cmd/track.set", { trackId: trkOff.id, patch: { recordArm: true } });
   await sleep(400);
@@ -136,9 +131,8 @@ try {
   await req("cmd/track.set", { trackId: trkOff.id, patch: { recordArm: false } });
 
   /* ---- P3 ON: audio pass over a loose clip folds --------------------------------------- */
-  await req("transport/setKeepTakes", { enabled: true });
   const trk = (await req("cmd/track.add", { kind: "audio", name: "Takes" })).track;
-  await req("cmd/track.set", { trackId: trk.id, patch: { recordArm: true } });
+  await req("cmd/track.set", { trackId: trk.id, patch: { recordArm: true, keepTakes: true } });
   await sleep(400);
   await recordPass(1200); // pass 1: a loose clip
   let t1 = await trackOf(trk.id);
@@ -203,6 +197,9 @@ try {
     `clips=${mt.clips?.length} folders=${mt.takeFolders?.length}`);
 
   /* ---- P3 ON: MIDI pass over an existing MIDI clip folds ------------------------------- */
+  // Versions mode is PER-TRACK: P2 above ran with it OFF on purpose (the empty-MIDI drop
+  // is unconditional), so this track has to be armed for the fold here.
+  await req("cmd/track.set", { trackId: midiT.id, patch: { keepTakes: true } });
   await recordMidiPass(900, 2); // pass 1 with notes → plain clip
   mt = await trackOf(midiT.id);
   report("a played MIDI pass creates a clip", (mt.clips?.length ?? 0) === 1,

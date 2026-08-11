@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "4fe8b28d7d9af2b797f1bdddb22bf83003d2a340f9274e859980b96d9a5e593e";
+const char kAgentCatalogSha256[] = "5d847de17a88c334a9a166b34cf639ef37118c0a45c966865d4c134bd0a88258";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4325,6 +4325,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           },
           "type": "array"
         },
+        "keepTakes": {
+          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
+          "type": "boolean"
+        },
         "kind": {
           "$ref": "#/schemas/TrackKind"
         },
@@ -4599,6 +4603,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "inputGainDb": {
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
+        },
+        "keepTakes": {
+          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
+          "type": "boolean"
         },
         "kind": {
           "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
@@ -10181,42 +10189,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "name": "transport/setAutomationWrite",
       "category": "transport",
       "description": "Enable or disable live automation writing.",
-      "target": "engine",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "idempotent"
-      ],
-      "supports": [],
-      "requires": [],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "enabled"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "$ref": "#/schemas/TransportReply"
-      },
-      "examples": [
-        {
-          "input": {
-            "enabled": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "transport/setKeepTakes",
-      "category": "transport",
-      "description": "Keep Takes record mode: recording over existing material folds into take lanes (newest take plays). Sticky across sessions.",
       "target": "engine",
       "mode": "write",
       "traits": [

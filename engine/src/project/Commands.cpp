@@ -1523,6 +1523,13 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         any = true;
         mixerOnly = false;
     }
+    if (hasKey(patch, "keepTakes")) {
+        // Per-track versions record mode (SPEC §8.7). Read by recordingCommit only —
+        // nothing in the graph depends on it, so no rebuild.
+        t->keepTakes = getOr<bool>(patch, "keepTakes", t->keepTakes);
+        any = true;
+        mixerOnly = false;
+    }
     bool inputChanged = false;
     if (hasKey(patch, "recordArm")) {
         t->recordArm = getOr<bool>(patch, "recordArm", t->recordArm);
@@ -6590,9 +6597,6 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     Model& m = model();
     const TempoMap& T = tm();
     const std::string pdir = projectIO_ ? projectIO_->projectDir() : std::string();
-    // "Keep Takes" record mode, snapshotted by App at stop time (not read live from the
-    // transport: the user may flip the toggle between stop and this deferred commit).
-    const bool keepTakes = getOr<bool>(p, "keepTakes", false);
 
     json assetsOut = json::array();
     json clipsOut = json::array();
@@ -6690,7 +6694,7 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
 
                 // "Keep Takes" (SPEC §8.7): fold into lanes against existing material —
                 // the fresh take plays, older material parks in its lane.
-                if (keepTakes &&
+                if (t->keepTakes &&
                     foldRecordedUnit(m, *t, T, groupBeat, unitEnd, std::move(laps),
                                      fileStem(wavPath))) {
                     any = true;
@@ -6832,9 +6836,9 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
                 continue;
             std::vector<MidiClip>& group = groups[key];
 
-            // "Keep Takes" (SPEC §8.7): fold this unit into lanes against existing
-            // material — same rule as the audio path above.
-            if (keepTakes) {
+            // Per-track versions mode (SPEC §8.7): fold this unit into lanes against
+            // existing material — same rule as the audio path above.
+            if (t->keepTakes) {
                 double longest = 0.0;
                 std::vector<Clip> laps;
                 laps.reserve(group.size());

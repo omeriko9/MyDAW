@@ -382,11 +382,6 @@ export const setMetronome = (
 export const setAutomationWrite = (enabled: boolean) =>
   ws.request("transport/setAutomationWrite", { enabled });
 
-/** "Keep Takes" record mode: recording over existing material folds into take lanes
- *  (newest take plays). Sticky across sessions (engine settings). */
-export const setKeepTakes = (enabled: boolean) =>
-  ws.request("transport/setKeepTakes", { enabled });
-
 export const getDevices = () => ws.request("engine/getDevices", {});
 
 export const setAudioConfig = (cfg: {

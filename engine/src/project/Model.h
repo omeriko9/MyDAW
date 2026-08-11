@@ -477,6 +477,11 @@ struct Track {
     // plugin-param moves while the transport rolls, WITHOUT arming the whole project —
     // the global transport arm stays a master switch that records every track.
     bool automationWrite = false;
+    // Per-track "Versions" record mode (SPEC §8.7): while on, a recording that overlaps
+    // this track's existing material folds into take lanes (newest version plays, older
+    // ones park in their own sub-rows) instead of overlapping and summing. Per-track
+    // because it is a property of how you are tracking THIS part, not of the transport.
+    bool keepTakes = false;
     bool monitor = false;          // optional
     std::string inputDevice;       // optional capture device id, "" = none/default
     int inputChannel = -1;         // optional, -1 = unset

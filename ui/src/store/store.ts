@@ -254,10 +254,6 @@ export interface DawState {
      while ON and playing, fader/knob drags record automation points at the playhead. */
   automationWrite: boolean;
 
-  /* keepTakes — UI mirror of the "Keep Takes" record mode (SPEC §8.7): recording over
-     existing material folds into take lanes; the newest take plays. */
-  keepTakes: boolean;
-
   /* MIDI control-surface maps + learn arm (seeded from session/hello, reconciled from
      event/midiMaps). armed = the paramRef awaiting the next CC, or null. */
   midiMaps: MidiMap[];
@@ -333,7 +329,6 @@ export interface DawState {
     }>,
   ): void;
   setAutomationWrite(on: boolean): void;
-  setKeepTakes(on: boolean): void;
   /** Open a generic plugin editor window (raises it to the front if already open). */
   openPluginEditorWindow(instanceId: number): void;
   /** Close one editor window (others stay open). */
@@ -521,7 +516,6 @@ export const useStore = create<DawState>((set) => ({
   transport: initialTransport,
   metronome: { enabled: false, countIn: 0, firstBeatVolume: 1, otherBeatVolume: 1 },
   automationWrite: false,
-  keepTakes: false,
   midiMaps: [],
   midiLearnArm: null,
   pluginStates: {},
@@ -625,7 +619,6 @@ export const useStore = create<DawState>((set) => ({
   setDialogs: (patch) => set((s) => ({ dialogs: { ...s.dialogs, ...patch } })),
   setMetronome: (patch) => set((s) => ({ metronome: { ...s.metronome, ...patch } })),
   setAutomationWrite: (automationWrite) => set({ automationWrite }),
-  setKeepTakes: (keepTakes) => set({ keepTakes }),
   openPluginEditorWindow: (instanceId) =>
     set((s) => ({ dialogs: raisePluginEditor(s.dialogs, instanceId) })),
   closePluginEditorWindow: (instanceId) =>
@@ -712,12 +705,6 @@ export function reconcileAutomationWrite(v: boolean | undefined): void {
   if (useStore.getState().automationWrite !== v) useStore.setState({ automationWrite: v });
 }
 
-/** Adopt the engine-reported Keep Takes record mode (optional wire field). */
-export function reconcileKeepTakes(v: boolean | undefined): void {
-  if (v === undefined) return;
-  if (useStore.getState().keepTakes !== v) useStore.setState({ keepTakes: v });
-}
-
 /** Adopt the engine-reported MIDI maps + learn arm (session/hello + event/midiMaps). */
 export function reconcileMidiMaps(s: MidiMapsState | undefined): void {
   if (!s) return;
@@ -764,7 +751,6 @@ async function sendHello(): Promise<void> {
     adoptCaptureState(r.captureState); // seed the capture-honesty mirror (optional field)
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)
     reconcileAutomationWrite(r.automationWrite);
-    reconcileKeepTakes(r.keepTakes);
     reconcileMidiMaps(r.midiMaps);
     syncMidiThru(); // engine restarts forget the thru set — reseed from selection
   } catch (e) {
@@ -820,7 +806,6 @@ ws.on("event/transport", (ev) => {
   // Reconcile the metronome mirror when the event carries it (no-op when unchanged).
   reconcileMetronome(ev.metronome);
   reconcileAutomationWrite(ev.automationWrite);
-  reconcileKeepTakes(ev.keepTakes);
   // Mirror into React state only on state/loop transitions (avoid 20 Hz re-renders).
   const t = useStore.getState().transport;
   if (

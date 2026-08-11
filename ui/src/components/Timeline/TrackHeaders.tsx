@@ -899,7 +899,7 @@ export default function TrackHeaders({
       ? (project?.tracks.filter((x) => selection.trackIds.includes(x.id)) ?? [t])
       : [t];
     const groupToggle = (
-      key: "mute" | "solo" | "recordArm" | "monitor" | "automationWrite",
+      key: "mute" | "solo" | "recordArm" | "monitor" | "automationWrite" | "keepTakes",
       tracks: Track[],
     ) => {
       const compatible = key === "mute" || key === "solo"
@@ -1066,6 +1066,16 @@ export default function TrackHeaders({
             >
               A
             </Toggle>
+            {armable && (
+              <Toggle
+                on={t.keepTakes === true}
+                onChange={() => groupToggle("keepTakes", actionTracks.filter((x) => x.kind === "audio" || x.kind === "midi" || x.kind === "instrument"))}
+                variant="ok"
+                className="tlh-btn"
+                icon="layers"
+                tooltip="Versions — while on, recording over this track's existing material keeps BOTH: each pass becomes a version on its own sub-row (the newest plays). Off = one track, clips just overlap."
+              />
+            )}
             {(t.takeFolders?.length ?? 0) > 0 && (
               <Toggle
                 on={takesExpanded.has(t.id)}

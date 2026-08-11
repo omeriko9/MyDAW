@@ -644,7 +644,6 @@ json Api::sessionHello() {
                                    {"firstBeatVolume", app_.metronome->firstBeatVolume()},
                                    {"otherBeatVolume", app_.metronome->otherBeatVolume()}}},
                 {"automationWrite", app_.transport.automationWrite()},
-                {"keepTakes", app_.transport.keepTakes()},
                 // The UI's dirty flag is client-side, so a reload or a second tab used to
                 // come up believing a project with unsaved engine-side edits was clean —
                 // which also disabled its auto-save-before-replace guard (File > New/Open
@@ -1096,13 +1095,6 @@ json Api::handleTransport(const std::string& type, const json& p, std::string& e
                 static_cast<float>(getOr<double>(p, "otherBeatVolume", 1.0)));
     } else if (type == "transport/setAutomationWrite") {
         app_.transport.setAutomationWrite(getOr<bool>(p, "enabled", false));
-    } else if (type == "transport/setKeepTakes") {
-        // "Keep Takes" record mode (SPEC §8.7): recording over existing material folds
-        // into take lanes. Sticky across sessions — record modes are a user preference,
-        // not project state (Cubase keeps its record mode globally too).
-        const bool enabled = getOr<bool>(p, "enabled", false);
-        app_.transport.setKeepTakes(enabled);
-        app_.settings.set(json{{"recordKeepTakes", enabled}});
     } else {
         ec = "unknown_type";
         em = "unknown message type: " + type;

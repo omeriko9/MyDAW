@@ -363,6 +363,9 @@ export interface Track {
   recordArm: boolean;
   /** Per-track automation-write arm ("W", SPEC §5.4) — absent/false when off. */
   automationWrite?: boolean;
+  /** Per-track versions record mode (SPEC §8.7): a recording that overlaps this track's
+   *  existing material folds into take lanes instead of overlapping and summing. */
+  keepTakes?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -716,8 +719,6 @@ export interface HelloReply {
   metronome?: MetronomeState;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
-  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
-  keepTakes?: boolean;
   /** MIDI control-surface maps + learn-arm — absent on older engines */
   midiMaps?: MidiMapsState;
   /** engine-side unsaved-changes flag — absent on older engines */
@@ -837,6 +838,8 @@ export interface TrackPatch {
   /** Per-track automation-write arm ("W", SPEC §5.4). The transport arm stays a master
    *  switch that records every track. */
   automationWrite?: boolean;
+  /** Per-track versions record mode (SPEC §8.7). */
+  keepTakes?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -1406,8 +1409,6 @@ export interface SetMetronomeRequest {
 export interface TransportReply {
   metronome?: MetronomeState;
   automationWrite?: boolean;
-  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
-  keepTakes?: boolean;
 }
 
 export interface SetAudioConfigRequest {
@@ -1941,8 +1942,6 @@ export interface TransportEvent {
   metronome?: MetronomeState;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
-  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
-  keepTakes?: boolean;
 }
 
 /** [peakL, peakR, rmsL, rmsR], linear 0..~1.4 */
@@ -2217,7 +2216,6 @@ export interface RequestMap {
   "transport/locate": { req: TransportLocateRequest; reply: TransportReply };
   "transport/setMetronome": { req: SetMetronomeRequest; reply: TransportReply };
   "transport/setAutomationWrite": { req: { enabled: boolean }; reply: TransportReply };
-  "transport/setKeepTakes": { req: { enabled: boolean }; reply: TransportReply };
   "engine/getDevices": { req: EmptyObject; reply: GetDevicesReply };
   "engine/setAudioConfig": { req: SetAudioConfigRequest; reply: SetAudioConfigReply };
   "engine/getStatus": { req: EmptyObject; reply: EngineStatus };

@@ -384,6 +384,8 @@ json toJson(const Track& t) {
         j["parentId"] = t.parentId;
     if (t.monitor)
         j["monitor"] = true;
+    if (t.keepTakes)
+        j["keepTakes"] = true; // omitted when off (SPEC §8.7, per-track versions mode)
     if (t.automationWrite)
         j["automationWrite"] = true; // omitted when off (SPEC §5.4, per-track "W")
     if (!t.inputDevice.empty())
@@ -850,6 +852,7 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.solo = getOr<bool>(j, "solo", false);
     out.recordArm = getOr<bool>(j, "recordArm", false);
     out.automationWrite = getOr<bool>(j, "automationWrite", false);
+    out.keepTakes = getOr<bool>(j, "keepTakes", false);
     out.monitor = getOr<bool>(j, "monitor", false);
     out.inputDevice = getOr(j, "inputDevice", "");
     out.inputChannel = getOr<int>(j, "inputChannel", -1);
@@ -909,45 +912,6 @@ bool fromJson(const json& j, Track& out, std::string* err) {
             TakeFolder f;
             if (fromJson(fj, f, nullptr))
                 out.takeFolders.push_back(std::move(f));
-        }
-    }
-    // MIGRATION (2026-08-11): Track Versions were removed in favour of the single
-    // take-lane "versions" feature. A project written by an older engine may still park
-    // inactive material here, and dropping it would be silent data loss — so every parked
-    // clip is adopted onto the track as a MUTED clip, named after the version it came
-    // from. Nothing is lost, everything stays selectable, playback is unchanged (muted),
-    // and the user can re-stack them with "Stack as Versions" if they want lanes.
-    if (hasKey(j, "versions") && j.find("versions")->is_array()) {
-        const uint64_t activeId = getOr<uint64_t>(j, "activeVersionId", 0);
-        for (const json& vj : *j.find("versions")) {
-            if (!vj.is_object())
-                continue;
-            if (getOr<uint64_t>(vj, "id", 0) == activeId)
-                continue; // the active entry is a name-only placeholder — its material is live
-            const std::string vname = getOr(vj, "name", "");
-            const auto adopt = [&](Clip& c) {
-                setClipMuted(c, true);
-                if (!vname.empty())
-                    setClipName(c, vname + " \xe2\x80\x94 " + clipName(c));
-                out.clips.push_back(std::move(c));
-            };
-            if (hasKey(vj, "clips") && vj.find("clips")->is_array())
-                for (const json& cj : *vj.find("clips")) {
-                    Clip c;
-                    if (fromJson(cj, c, nullptr))
-                        adopt(c);
-                }
-            // Parked take folders flatten to their lane clips: the folder itself carried
-            // only comp state, which no longer exists.
-            if (hasKey(vj, "takeFolders") && vj.find("takeFolders")->is_array())
-                for (const json& fj : *vj.find("takeFolders")) {
-                    TakeFolder f;
-                    if (!fromJson(fj, f, nullptr))
-                        continue;
-                    for (TakeLane& ln : f.lanes)
-                        for (Clip& c : ln.clips)
-                            adopt(c);
-                }
         }
     }
     return true;

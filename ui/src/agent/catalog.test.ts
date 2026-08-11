@@ -92,7 +92,6 @@ const REQUEST_TYPES = [
   "transport/locate",
   "transport/setMetronome",
   "transport/setAutomationWrite",
-  "transport/setKeepTakes",
   "engine/getDevices",
   "engine/setAudioConfig",
   "engine/getStatus",
@@ -300,9 +299,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(140);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(139);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(154);
+    expect(AGENT_CATALOG.operations).toHaveLength(153);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

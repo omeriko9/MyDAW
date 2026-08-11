@@ -51,7 +51,6 @@ json Settings::defaults() {
     return json{
         {"port", 8417},
         {"autosaveMinutes", 2},
-        {"recordKeepTakes", false},
         {"audio",
          json{{"driver", "wasapi"},
               {"deviceId", ""},
@@ -112,10 +111,6 @@ void Settings::set(const json& patch) {
 void Settings::save() const {
     if (!writeTextFileAtomic(filePath_, data_.dump(2)))
         Log::warn("Settings: failed to write %s", filePath_.c_str());
-}
-
-bool Settings::recordKeepTakes() const {
-    return getOr<bool>(data_, "recordKeepTakes", false);
 }
 
 int Settings::autosaveMinutes() const {

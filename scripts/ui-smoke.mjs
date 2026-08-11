@@ -503,26 +503,30 @@ export const checks = [
 
   {
     id: "keep-takes-toggle",
-    title: "the Keep Takes transport toggle arms the engine's record-to-lanes mode",
-    area: "transport",
-    guards: "Lanes feature 2026-08-11 — recording over existing material folds into take lanes only while this arm is on; the toggle must exist beside the automation pencil and be engine-authoritative",
+    title: "the per-track Versions toggle arms that track's record-to-lanes mode",
+    area: "track-headers",
+    guards: "Versions refactor 2026-08-11 (Omer): the record mode is PER-TRACK, not a transport arm — it lives in the header slot the old Track Version chip used to occupy, and must be engine-authoritative on the track itself.",
     run: async (s, tt) => {
+      const project = async () => (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const trackId = (await project()).tracks[0].id;
+      // Own precondition: force OFF over the wire, then click ON via the UI.
+      await s.probe("cmd/track.set", { trackId, patch: { keepTakes: false } });
+      await s.reload();
       const box = await s.eval(`(() => {
-        const el = [...document.querySelectorAll("button")]
-          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Keep takes"));
+        const row = document.querySelector(".tlh-row");
+        const el = [...row.querySelectorAll("button")]
+          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Versions"));
         if (!el) return null;
         const b = el.getBoundingClientRect();
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       })()`);
-      tt.ok(box, "the Keep Takes toggle renders in the transport bar");
-      // Own precondition: force OFF over the wire, then click ON via the UI.
-      await s.probe("transport/setKeepTakes", { enabled: false });
+      tt.ok(box, "the Versions toggle renders on the track header");
       await s.click(box.x, box.y);
-      await s.until("the engine arms Keep Takes", async () =>
-        (await s.probe("session/hello", { clientName: "smoke" })).payload.keepTakes === true);
-      tt.ok(true, "clicking the toggle arms the engine");
-      // RESTORE: the arm persists in engine settings — leave it off for later checks/slots.
-      await s.probe("transport/setKeepTakes", { enabled: false });
+      await s.until("the engine arms it on THAT track", async () =>
+        (await project()).tracks.find((t) => t.id === trackId)?.keepTakes === true);
+      tt.ok(true, "clicking the toggle arms the track");
+      // RESTORE: it persists in the project — leave it off for later checks.
+      await s.probe("cmd/track.set", { trackId, patch: { keepTakes: false } });
     },
   },
 
