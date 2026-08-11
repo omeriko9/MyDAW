@@ -276,18 +276,6 @@ export interface TakeFolder {
   comp: CompSegment[];
 }
 
-/**
- * Cubase-style track version (alternative playlist). The ACTIVE version's material lives
- * in Track.clips/Track.takeFolders as always — the entry whose id === Track.activeVersionId
- * is a name-only placeholder; only inactive entries carry parked clips/takeFolders.
- */
-export interface TrackVersion {
-  id: number;
-  name: string;
-  clips: Clip[];
-  takeFolders: TakeFolder[];
-}
-
 export interface Send {
   destTrackId: number;
   level: number;
@@ -414,10 +402,6 @@ export interface Track {
   clips: Clip[];
   /** comping: stacked takes + per-segment comp selection (optional, absent = none). */
   takeFolders?: TakeFolder[];
-  /** track versions (optional, absent = feature not engaged on this track). */
-  versions?: TrackVersion[];
-  /** id of the active version; present iff versions is non-empty. */
-  activeVersionId?: number;
 }
 
 /** Hardware CC → param mapping (SPEC §5.2). paramRef: "track:<id>:volume|pan" | "plugin:<id>:<pid>". */
@@ -2307,10 +2291,6 @@ export interface RequestMap {
     reply: EmptyObject;
   };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };
-  "cmd/version.add": { req: { trackId: number; name?: string; copy?: boolean }; reply: { versionId: number; track: Track } };
-  "cmd/version.switch": { req: { trackId: number; versionId: number }; reply: { track: Track } };
-  "cmd/version.rename": { req: { trackId: number; versionId: number; name: string }; reply: EmptyObject };
-  "cmd/version.delete": { req: { trackId: number; versionId: number }; reply: EmptyObject };
   "midimap/learn": { req: { paramRef: string }; reply: MidiMapsState };
   "midimap/remove": { req: { paramRef: string }; reply: MidiMapsState };
   "midimap/feedCc": { req: { cc: number; channel?: number; value: number }; reply: EmptyObject };

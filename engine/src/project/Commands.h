@@ -303,11 +303,6 @@ private:
     json takeSetLaneMuted(const json& p, CmdResult& r);
     json takeSetLanePlayAlong(const json& p, CmdResult& r);
     json takeFlatten(const json& p, CmdResult& r);
-    // §5.3 track versions
-    json versionAdd(const json& p, CmdResult& r);
-    json versionSwitch(const json& p, CmdResult& r);
-    json versionRename(const json& p, CmdResult& r);
-    json versionDelete(const json& p, CmdResult& r);
     // internal
     json recordingCommit(const json& p, CmdResult& r);
     json handleUndoRedo(bool isRedo, std::string& errCode, std::string& errMsg);

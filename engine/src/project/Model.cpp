@@ -87,15 +87,6 @@ void scanTrackIds(const Track& t, uint64_t& maxId) {
     // collide with a take-lane clip after load).
     for (const TakeFolder& f : t.takeFolders)
         scanTakeFolderIds(f, maxId);
-    // Parked track-version material keeps project-unique ids; skipping it would let
-    // a tolerant load pick a nextId that collides on the next version switch.
-    for (const TrackVersion& v : t.versions) {
-        maxId = std::max(maxId, v.id);
-        for (const Clip& c : v.clips)
-            scanClipIds(c, maxId);
-        for (const TakeFolder& f : v.takeFolders)
-            scanTakeFolderIds(f, maxId);
-    }
 }
 } // namespace
 

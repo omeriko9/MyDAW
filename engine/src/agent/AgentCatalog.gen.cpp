@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d98b6f69a72779f02dab18197c0d30802dcaed271a1a92ef3eb4a61e235c38b3";
+const char kAgentCatalogSha256[] = "4fe8b28d7d9af2b797f1bdddb22bf83003d2a340f9274e859980b96d9a5e593e";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4267,10 +4267,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "Track": {
       "additionalProperties": false,
       "properties": {
-        "activeVersionId": {
-          "description": "id of the active track version; present iff versions is non-empty.",
-          "type": "number"
-        },
         "automation": {
           "items": {
             "$ref": "#/schemas/AutomationLane"
@@ -4389,13 +4385,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "vcaId": {
           "description": "VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader.",
           "type": "number"
-        },
-        "versions": {
-          "description": "track versions (alternative playlists; optional, absent = feature not engaged).",
-          "items": {
-            "$ref": "#/schemas/TrackVersion"
-          },
-          "type": "array"
         },
         "volume": {
           "description": "linear, 1 = 0 dB",
@@ -4812,37 +4801,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "required": [
         "trackId"
-      ],
-      "type": "object"
-    },
-    "TrackVersion": {
-      "additionalProperties": false,
-      "description": "Cubase-style track version (alternative playlist). The entry whose id equals Track.activeVersionId is a name-only placeholder — the active material lives in Track.clips/Track.takeFolders; only inactive entries carry parked clips/takeFolders.",
-      "properties": {
-        "clips": {
-          "items": {
-            "$ref": "#/schemas/Clip"
-          },
-          "type": "array"
-        },
-        "id": {
-          "type": "number"
-        },
-        "name": {
-          "type": "string"
-        },
-        "takeFolders": {
-          "items": {
-            "$ref": "#/schemas/TakeFolder"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "clips",
-        "takeFolders"
       ],
       "type": "object"
     },
@@ -8430,230 +8388,6 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
-      "name": "cmd/version.add",
-      "category": "versions",
-      "description": "Create a new track version and switch to it; copy=true clones the current material.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track"
-      ],
-      "produces": [
-        "versionId"
-      ],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "copy": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "trackId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "additionalProperties": false,
-        "properties": {
-          "track": {
-            "$ref": "#/schemas/Track"
-          },
-          "versionId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "versionId",
-          "track"
-        ],
-        "type": "object"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "name": "Vocal take B"
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/version.delete",
-      "category": "versions",
-      "description": "Delete an inactive track version and its parked clips.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "version"
-      ],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "trackId": {
-            "type": "number"
-          },
-          "versionId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "versionId"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "$ref": "#/schemas/EmptyObject"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "versionId": 31
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/version.rename",
-      "category": "versions",
-      "description": "Rename a track version.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable",
-        "idempotent"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "version"
-      ],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "trackId": {
-            "type": "number"
-          },
-          "versionId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "versionId",
-          "name"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "$ref": "#/schemas/EmptyObject"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "versionId": 31,
-            "name": "Chorus alt"
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/version.switch",
-      "category": "versions",
-      "description": "Make another track version active; the current material parks into its version entry.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable",
-        "idempotent"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "version"
-      ],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "trackId": {
-            "type": "number"
-          },
-          "versionId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "versionId"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "additionalProperties": false,
-        "properties": {
-          "track": {
-            "$ref": "#/schemas/Track"
-          }
-        },
-        "required": [
-          "track"
-        ],
-        "type": "object"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "versionId": 31
-          }
-        }
-      ]
-    },
-    {
       "name": "dialog/importFiles",
       "category": "dialogs",
       "description": "Ask the user for one or more media files using the native picker.",
@@ -11978,10 +11712,6 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/vca.add",
     "cmd/vca.remove",
     "cmd/vca.set",
-    "cmd/version.add",
-    "cmd/version.delete",
-    "cmd/version.rename",
-    "cmd/version.switch",
 };
 } // namespace
 

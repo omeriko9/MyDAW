@@ -438,24 +438,6 @@ inline int compLaneAt(const TakeFolder& f, double beat) {
 }
 
 // ---------------------------------------------------------------------------
-// Track versions (Cubase-style): alternative clip sets for one track, exactly one
-// active. CLIPS-IN-PLACE representation: the ACTIVE version's material lives in
-// Track::clips/takeFolders (so playback, clip commands, recording and the UI need
-// no indirection); INACTIVE versions park their material here. The entry whose id
-// equals Track::activeVersionId is a NAME-ONLY placeholder (empty arrays) — its
-// content IS the track's live clips. versions.empty() = feature not engaged.
-// Parked clips keep their project-unique ids but are unaddressable by clipById —
-// inactive material is deliberately uneditable.
-// ---------------------------------------------------------------------------
-
-struct TrackVersion {
-    uint64_t id = 0;
-    std::string name;
-    std::vector<Clip> clips;             // empty on the active placeholder
-    std::vector<TakeFolder> takeFolders; // empty on the active placeholder
-};
-
-// ---------------------------------------------------------------------------
 // Track
 // ---------------------------------------------------------------------------
 
@@ -537,10 +519,7 @@ struct Track {
     std::vector<Send> sends;
     std::vector<AutomationLane> automation;
     std::vector<Clip> clips;
-    std::vector<TakeFolder> takeFolders; // comping: stacked takes + per-segment comp selection
-    // Track versions (see TrackVersion above): empty vector = feature not engaged.
-    std::vector<TrackVersion> versions;
-    uint64_t activeVersionId = 0;
+    std::vector<TakeFolder> takeFolders; // versions: stacked takes as sub-rows
 
     bool isBusLike() const { return kind == TrackKind::Bus || kind == TrackKind::Master; }
     bool canHoldClips() const {
@@ -846,7 +825,6 @@ json toJson(const ChordEvent& c);
 json toJson(const TransposeEvent& t);
 json toJson(const Asset& a);
 json toJson(const TakeFolder& f);
-json toJson(const TrackVersion& v);
 json toJson(const OutputTarget& o); // number | "master" | "none"
 
 bool fromJson(const json& j, Project& out, std::string* err = nullptr);
@@ -867,7 +845,6 @@ bool fromJson(const json& j, ChordEvent& out, std::string* err = nullptr);
 bool fromJson(const json& j, TransposeEvent& out, std::string* err = nullptr);
 bool fromJson(const json& j, Asset& out, std::string* err = nullptr);
 bool fromJson(const json& j, TakeFolder& out, std::string* err = nullptr);
-bool fromJson(const json& j, TrackVersion& out, std::string* err = nullptr);
 bool fromJson(const json& j, OutputTarget& out, std::string* err = nullptr);
 
 } // namespace mydaw

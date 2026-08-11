@@ -127,13 +127,6 @@ void freshTakeFolderIds(Model& m, TakeFolder& f) {
     }
 }
 
-TrackVersion* versionById(Track& t, uint64_t id) {
-    for (TrackVersion& v : t.versions)
-        if (v.id == id)
-            return &v;
-    return nullptr;
-}
-
 // Removes Track::sends[idx] and keeps "send:<n>" automation lanes consistent:
 // the removed index's lane is dropped and higher indices shift down by one.
 void eraseSendAndFixLanes(Track& t, int idx) {
@@ -1107,10 +1100,6 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/take.setLaneMuted") return takeSetLaneMuted(p, r);
     if (type == "cmd/take.setLanePlayAlong") return takeSetLanePlayAlong(p, r);
     if (type == "cmd/take.flatten")     return takeFlatten(p, r);
-    if (type == "cmd/version.add")      return versionAdd(p, r);
-    if (type == "cmd/version.switch")   return versionSwitch(p, r);
-    if (type == "cmd/version.rename")   return versionRename(p, r);
-    if (type == "cmd/version.delete")   return versionDelete(p, r);
     // internal
     if (type == "internal/recording.commit") return recordingCommit(p, r);
 
@@ -2378,8 +2367,8 @@ json CommandProcessor::midiExtractAutomation(const json& p, CmdResult& r) {
 
 // cmd/media.removeUnused {preview?, deleteFiles?} — Cubase "Remove Unused Media".
 // The reference scan covers EVERY asset consumer: flat clips (assetId + DOP
-// provenance), take-folder lanes, parked track versions (their clips AND their take
-// folders), frozen tracks, and sampler bindings. preview:true only reports.
+// provenance), take-folder lanes, frozen tracks, and sampler bindings. preview:true
+// only reports.
 // Removing records is a normal undoable edit (files stay on disk, so undo is fully
 // consistent). deleteFiles:true additionally deletes project-owned files (relative
 // "audio/…" entries of a SAVED project only — the shared fallback media dir is never
@@ -2409,11 +2398,6 @@ json CommandProcessor::mediaRemoveUnused(const json& p, CmdResult& r) {
         for (const Clip& c : t.clips)
             scanClip(c);
         scanFolders(t.takeFolders);
-        for (const TrackVersion& v : t.versions) {
-            for (const Clip& c : v.clips)
-                scanClip(c);
-            scanFolders(v.takeFolders);
-        }
         if (t.frozen && t.frozenAssetId != 0)
             used.insert(t.frozenAssetId);
         for (const PluginInstance& pi : t.inserts)
@@ -2552,20 +2536,10 @@ json CommandProcessor::trackDuplicate(const json& p, CmdResult& r) {
 
         for (Clip& c : copy.clips)
             freshClipIds(m, c); // assets are shared between source and copy
-        // Comping takes and parked track versions carry real clip/lane ids too
-        // (takeFolders were previously missed — the copy shared take ids with the source).
+        // Comping takes carry real clip/lane ids too (takeFolders were previously
+        // missed — the copy shared take ids with the source).
         for (TakeFolder& f : copy.takeFolders)
             freshTakeFolderIds(m, f);
-        for (TrackVersion& v : copy.versions) {
-            const uint64_t newVid = m.nextId();
-            if (copy.activeVersionId == v.id)
-                copy.activeVersionId = newVid;
-            v.id = newVid;
-            for (Clip& c : v.clips)
-                freshClipIds(m, c);
-            for (TakeFolder& f : v.takeFolders)
-                freshTakeFolderIds(m, f);
-        }
 
         // New plugin instances; transfer the live state from the source instance and
         // capture the copy's chunk for undo/redo + save (mirrors pluginAdd). A failed
@@ -6223,162 +6197,6 @@ json CommandProcessor::takeFlatten(const json& p, CmdResult& r) {
     return json{{"clipIds", clipIds}};
 }
 
-// ---------------------------------------------------------------------------
-// §5.3 — track versions (Cubase-style alternative playlists)
-// ---------------------------------------------------------------------------
-// Track::versions parks the INACTIVE versions' material; the active version's
-// clips/takeFolders always stay in Track::clips/Track::takeFolders and the entry whose
-// id == activeVersionId is a name-only placeholder. The graph, clip commands, recording
-// and rendering never look at versions — they only ever see the active material in place.
-
-// cmd/version.add {trackId, name?, copy?} — create a new version and switch to it. The
-// first add lazily names the existing material "v1". copy=true starts the new version as
-// a fresh-id deep copy of the current material; otherwise it starts empty. Returns
-// {versionId, track}.
-json CommandProcessor::versionAdd(const json& p, CmdResult& r) {
-    Model& m = model();
-    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
-    Track* t = m.trackById(trackId);
-    if (!t || !t->canHoldClips())
-        return r.fail("bad_request", "track cannot hold clips");
-    if (t->frozen)
-        return r.fail("bad_request", "track is frozen — unfreeze it to change versions");
-
-    if (t->versions.empty()) {
-        TrackVersion v1;
-        v1.id = m.nextId();
-        v1.name = "v1";
-        t->activeVersionId = v1.id;
-        t->versions.push_back(std::move(v1));
-    }
-
-    TrackVersion fresh;
-    fresh.id = m.nextId();
-    fresh.name = getOr(p, "name", "");
-    if (fresh.name.empty()) { // default: the lowest free "vN" (deletes leave gaps)
-        int k = static_cast<int>(t->versions.size()) + 1;
-        const auto taken = [&](const std::string& n) {
-            for (const TrackVersion& v : t->versions)
-                if (v.name == n)
-                    return true;
-            return false;
-        };
-        while (taken("v" + std::to_string(k)))
-            ++k;
-        fresh.name = "v" + std::to_string(k);
-    }
-
-    TrackVersion* cur = versionById(*t, t->activeVersionId);
-    if (cur) { // park the current material into the active placeholder
-        cur->clips = std::move(t->clips);
-        cur->takeFolders = std::move(t->takeFolders);
-    }
-    t->clips.clear();
-    t->takeFolders.clear();
-    if (getOr<bool>(p, "copy", false) && cur) {
-        t->clips = cur->clips;
-        t->takeFolders = cur->takeFolders;
-        for (Clip& c : t->clips)
-            freshClipIds(m, c);
-        for (TakeFolder& f : t->takeFolders)
-            freshTakeFolderIds(m, f);
-    }
-    t->activeVersionId = fresh.id;
-    t->versions.push_back(std::move(fresh));
-
-    r.label = "New Track Version";
-    r.structural = true;
-    r.scope = "track";
-    r.eventTrackIds.push_back(trackId);
-    return json{{"versionId", t->activeVersionId}, {"track", toJson(*t)}};
-}
-
-// cmd/version.switch {trackId, versionId} — park the active material and bring the target
-// version's parked material into place. Same-version switch is a mutation-free no-op.
-json CommandProcessor::versionSwitch(const json& p, CmdResult& r) {
-    Model& m = model();
-    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
-    const uint64_t versionId = getOr<uint64_t>(p, "versionId", 0);
-    Track* t = m.trackById(trackId);
-    if (!t)
-        return r.fail("not_found", "unknown trackId");
-    if (t->frozen)
-        return r.fail("bad_request", "track is frozen — unfreeze it to change versions");
-    TrackVersion* target = versionById(*t, versionId);
-    if (!target)
-        return r.fail("not_found", "unknown versionId");
-    if (versionId == t->activeVersionId) {
-        r.mutated = false; // already active — no undo entry, no events
-        return json{{"track", toJson(*t)}};
-    }
-
-    if (TrackVersion* cur = versionById(*t, t->activeVersionId)) {
-        cur->clips = std::move(t->clips);
-        cur->takeFolders = std::move(t->takeFolders);
-    }
-    t->clips = std::move(target->clips);
-    t->takeFolders = std::move(target->takeFolders);
-    target->clips.clear(); // the new active entry becomes the placeholder
-    target->takeFolders.clear();
-    t->activeVersionId = versionId;
-
-    r.label = "Switch Track Version";
-    r.structural = true;
-    r.scope = "track";
-    r.eventTrackIds.push_back(trackId);
-    return json{{"track", toJson(*t)}};
-}
-
-// cmd/version.rename {trackId, versionId, name} — model-only; allowed on frozen tracks.
-json CommandProcessor::versionRename(const json& p, CmdResult& r) {
-    Model& m = model();
-    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
-    const uint64_t versionId = getOr<uint64_t>(p, "versionId", 0);
-    Track* t = m.trackById(trackId);
-    if (!t)
-        return r.fail("not_found", "unknown trackId");
-    TrackVersion* v = versionById(*t, versionId);
-    if (!v)
-        return r.fail("not_found", "unknown versionId");
-    const std::string name = getOr(p, "name", "");
-    if (name.empty())
-        return r.fail("bad_request", "name is empty");
-    v->name = name;
-
-    r.label = "Rename Track Version";
-    r.scope = "track";
-    r.eventTrackIds.push_back(trackId);
-    return json::object();
-}
-
-// cmd/version.delete {trackId, versionId} — drop a parked version (the active one must be
-// switched away from first). Deleting the last inactive version disengages the feature.
-// Allowed on frozen tracks: parked material is not audible.
-json CommandProcessor::versionDelete(const json& p, CmdResult& r) {
-    Model& m = model();
-    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
-    const uint64_t versionId = getOr<uint64_t>(p, "versionId", 0);
-    Track* t = m.trackById(trackId);
-    if (!t)
-        return r.fail("not_found", "unknown trackId");
-    if (!versionById(*t, versionId))
-        return r.fail("not_found", "unknown versionId");
-    if (versionId == t->activeVersionId)
-        return r.fail("bad_request", "cannot delete the active version — switch away first");
-
-    t->versions.erase(std::remove_if(t->versions.begin(), t->versions.end(),
-                                     [&](const TrackVersion& v) { return v.id == versionId; }),
-                      t->versions.end());
-    if (t->versions.size() == 1) { // only the active placeholder left — feature disengaged
-        t->versions.clear();
-        t->activeVersionId = 0;
-    }
-
-    r.label = "Delete Track Version";
-    r.scope = "track";
-    r.eventTrackIds.push_back(trackId);
-    return json::object();
-}
 
 // ---------------------------------------------------------------------------
 // plugins/recreate (SPEC §5.6) — resolve dormant inserts against the registry

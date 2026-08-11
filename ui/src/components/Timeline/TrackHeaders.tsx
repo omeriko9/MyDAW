@@ -20,17 +20,13 @@ import {
   addPlugin,
   addSend,
   addTrack,
-  addTrackVersion,
   bounceTrack,
   renderTrackInPlace,
-  deleteTrackVersion,
   duplicateTrack,
   removePlugin,
-  renameTrackVersion,
   reorderTrack,
   setAutomation,
   setTrack,
-  switchTrackVersion,
   unfreezeTrack,
 } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
@@ -206,14 +202,12 @@ export interface TrackHeadersProps {
 }
 
 interface PopoverState {
-  kind: "color" | "rename" | "renameVersion";
+  kind: "color" | "rename";
   trackId: number;
   x: number;
   y: number;
   initial: string;
   current?: string;
-  /** renameVersion only */
-  versionId?: number;
 }
 
 interface ReorderVisual {
@@ -677,83 +671,6 @@ export default function TrackHeaders({
     });
   };
 
-  /* ------------------------------------------------------------ track versions */
-
-  const versionable = (t: Track): boolean =>
-    t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
-
-  const switchVersion = (t: Track, versionId: number): void => {
-    if (versionId === t.activeVersionId) return;
-    // the visible clips are about to be replaced by the parked set — a lingering
-    // clip/note selection would point at material that no longer exists on screen
-    setSelection({ clipIds: [], noteIds: [] });
-    fire(switchTrackVersion(t.id, versionId));
-  };
-
-  const versionMenuItems = (t: Track, x: number, y: number): MenuEntry[] => {
-    const versions = t.versions ?? [];
-    const frozen = !!t.frozen;
-    const items: MenuEntry[] = versions.map((v) => ({
-      label: v.name,
-      checked: v.id === t.activeVersionId,
-      disabled: frozen,
-      onClick: () => switchVersion(t, v.id),
-    }));
-    if (items.length > 0) items.push("separator");
-    items.push(
-      {
-        label: "New Version",
-        icon: "plus",
-        disabled: frozen,
-        title: frozen ? "Unfreeze the track to work with versions" : "Start an empty alternative version of this track",
-        onClick: () => {
-          setSelection({ clipIds: [], noteIds: [] });
-          fire(addTrackVersion(t.id));
-        },
-      },
-      {
-        label: "Duplicate Version",
-        disabled: frozen,
-        title: "New version starting as a copy of the current one",
-        onClick: () => {
-          setSelection({ clipIds: [], noteIds: [] });
-          fire(addTrackVersion(t.id, { copy: true }));
-        },
-      },
-    );
-    const active = versions.find((v) => v.id === t.activeVersionId);
-    if (active)
-      items.push({
-        label: "Rename Version…",
-        icon: "pencil",
-        onClick: () =>
-          setPopover({ kind: "renameVersion", trackId: t.id, versionId: active.id, x, y, initial: active.name }),
-      });
-    const inactive = versions.filter((v) => v.id !== t.activeVersionId);
-    if (inactive.length > 0)
-      items.push({
-        label: "Delete Version",
-        icon: "trash",
-        danger: true,
-        submenu: inactive.map((v) => ({
-          label: v.name,
-          danger: true,
-          onClick: () => {
-            const n = v.clips.length;
-            void confirmDialog({
-              title: "Delete track version",
-              message: `Delete version "${v.name}"${n > 0 ? ` and its ${n} clip${n === 1 ? "" : "s"}` : ""}? This can be undone.`,
-              confirmLabel: "Delete",
-              danger: true,
-            }).then((ok) => {
-              if (ok) fire(deleteTrackVersion(t.id, v.id));
-            });
-          },
-        })),
-      });
-    return items;
-  };
-
   /* ----------------------------------------------- instrument row (3rd row) */
 
   const isLiveInstrument = (uid: string): boolean => {
@@ -935,8 +852,6 @@ export default function TrackHeaders({
         },
       },
     ];
-    if (versionable(t))
-      items.push({ label: "Track Versions", icon: "layers", submenu: versionMenuItems(t, x, y) });
     if (freezable) {
       items.push("separator");
       if (t.frozen) {
@@ -997,7 +912,6 @@ export default function TrackHeaders({
     const showControls = row.height >= 44;
     const indent = 6 + row.depth * 14;
     const armable = t.kind === "audio" || t.kind === "midi" || t.kind === "instrument";
-    const activeVersion = t.versions?.find((v) => v.id === t.activeVersionId);
     // 3rd row: instrument picker — instrument tracks own an instrument; MIDI tracks
     // edit their HOST's instrument (routed) or assign one by creating + routing an
     // instrument track (unrouted). Needs the extra height to exist at all.
@@ -1077,21 +991,6 @@ export default function TrackHeaders({
           >
             {t.name}
           </span>
-          {activeVersion && (
-            <button
-              type="button"
-              className="tlh-version-chip"
-              title={`Track version: ${activeVersion.name} (${t.versions?.length ?? 0} total) — click to switch`}
-              onClick={(e) => {
-                e.stopPropagation();
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                openContextMenu(r.left, r.bottom + 3, versionMenuItems(t, r.left, r.bottom + 3));
-              }}
-            >
-              <Icon name="layers" size={10} />
-              <span className="tlh-version-chip-name">{activeVersion.name}</span>
-            </button>
-          )}
           {t.frozen && (
             <span className="tlh-badges" title="Frozen">
               <Icon name="snowflake" size={12} />
@@ -1549,23 +1448,6 @@ export default function TrackHeaders({
             const trimmed = name.trim();
             if (trimmed && trimmed !== popover.initial) {
               fire(setTrack(popover.trackId, { name: trimmed }));
-            }
-          }}
-          onCancel={() => setPopover(null)}
-        />
-      )}
-      {popover && popover.kind === "renameVersion" && popover.versionId !== undefined && (
-        <FloatingInput
-          x={popover.x}
-          y={popover.y}
-          width={160}
-          initial={popover.initial}
-          placeholder="Version name"
-          onCommit={(name) => {
-            setPopover(null);
-            const trimmed = name.trim();
-            if (trimmed && trimmed !== popover.initial) {
-              fire(renameTrackVersion(popover.trackId, popover.versionId!, trimmed));
             }
           }}
           onCancel={() => setPopover(null)}

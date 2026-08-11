@@ -263,34 +263,6 @@
   border-radius: var(--radius-sm);
 }
 
-/* active track-version chip (row 1, next to the name) — quiet pill, accent on hover */
-.tlh-version-chip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  max-width: 72px;
-  height: 15px;
-  padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 9.5px;
-  line-height: 1;
-  cursor: pointer;
-}
-.tlh-version-chip:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-.tlh-version-chip-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 3rd header row: instrument picker (instrument tracks / MIDI feeders, tall rows).
    Deliberately quieter than the M/S/R chrome — it reads as part of the row until
    hovered, then reveals itself as a dropdown. */

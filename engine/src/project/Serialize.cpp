@@ -347,40 +347,6 @@ bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
     return true;
 }
 
-json toJson(const TrackVersion& v) {
-    json clips = json::array();
-    for (const Clip& c : v.clips)
-        clips.push_back(toJson(c));
-    json folders = json::array();
-    for (const TakeFolder& f : v.takeFolders)
-        folders.push_back(toJson(f));
-    return json{{"id", v.id},
-                {"name", v.name},
-                {"clips", std::move(clips)},
-                {"takeFolders", std::move(folders)}};
-}
-
-bool fromJson(const json& j, TrackVersion& out, std::string* /*err*/) {
-    if (!j.is_object())
-        return false;
-    out = TrackVersion{};
-    out.id = getOr<uint64_t>(j, "id", 0);
-    out.name = getOr(j, "name", "");
-    if (hasKey(j, "clips") && j.find("clips")->is_array())
-        for (const json& cj : *j.find("clips")) {
-            Clip c;
-            if (fromJson(cj, c, nullptr))
-                out.clips.push_back(std::move(c));
-        }
-    if (hasKey(j, "takeFolders") && j.find("takeFolders")->is_array())
-        for (const json& fj : *j.find("takeFolders")) {
-            TakeFolder f;
-            if (fromJson(fj, f, nullptr))
-                out.takeFolders.push_back(std::move(f));
-        }
-    return true;
-}
-
 json toJson(const Track& t) {
     json inserts = json::array();
     for (const PluginInstance& pi : t.inserts)
@@ -454,16 +420,6 @@ json toJson(const Track& t) {
         for (const TakeFolder& f : t.takeFolders)
             folders.push_back(toJson(f));
         j["takeFolders"] = std::move(folders);
-    }
-    // Track versions: omitted when the feature is not engaged (old projects and old
-    // engines never see the field; an old engine loading a new project drops the
-    // inactive versions but keeps playing the active material — documented one-way loss).
-    if (!t.versions.empty()) {
-        j["activeVersionId"] = t.activeVersionId;
-        json versions = json::array();
-        for (const TrackVersion& v : t.versions)
-            versions.push_back(toJson(v));
-        j["versions"] = std::move(versions);
     }
     return j;
 }
@@ -955,46 +911,43 @@ bool fromJson(const json& j, Track& out, std::string* err) {
                 out.takeFolders.push_back(std::move(f));
         }
     }
+    // MIGRATION (2026-08-11): Track Versions were removed in favour of the single
+    // take-lane "versions" feature. A project written by an older engine may still park
+    // inactive material here, and dropping it would be silent data loss — so every parked
+    // clip is adopted onto the track as a MUTED clip, named after the version it came
+    // from. Nothing is lost, everything stays selectable, playback is unchanged (muted),
+    // and the user can re-stack them with "Stack as Versions" if they want lanes.
     if (hasKey(j, "versions") && j.find("versions")->is_array()) {
+        const uint64_t activeId = getOr<uint64_t>(j, "activeVersionId", 0);
         for (const json& vj : *j.find("versions")) {
-            TrackVersion v;
-            if (!fromJson(vj, v, nullptr))
+            if (!vj.is_object())
                 continue;
-            if (v.id == 0)
-                continue; // ids are load-bearing (switch/delete address by id)
-            bool dup = false;
-            for (const TrackVersion& ex : out.versions)
-                if (ex.id == v.id) {
-                    dup = true; // keep the first — a duplicate id would make
-                    break;      // versionDelete erase BOTH entries
+            if (getOr<uint64_t>(vj, "id", 0) == activeId)
+                continue; // the active entry is a name-only placeholder — its material is live
+            const std::string vname = getOr(vj, "name", "");
+            const auto adopt = [&](Clip& c) {
+                setClipMuted(c, true);
+                if (!vname.empty())
+                    setClipName(c, vname + " \xe2\x80\x94 " + clipName(c));
+                out.clips.push_back(std::move(c));
+            };
+            if (hasKey(vj, "clips") && vj.find("clips")->is_array())
+                for (const json& cj : *vj.find("clips")) {
+                    Clip c;
+                    if (fromJson(cj, c, nullptr))
+                        adopt(c);
                 }
-            if (dup)
-                continue;
-            out.versions.push_back(std::move(v));
-        }
-        out.activeVersionId = getOr<uint64_t>(j, "activeVersionId", 0);
-        // Invariant repair (tolerant load): the active entry must exist and be a
-        // name-only placeholder — its material lives in Track::clips/takeFolders.
-        if (out.versions.empty()) {
-            out.activeVersionId = 0; // zero valid entries parsed — feature disengaged
-        } else {
-            auto active =
-                std::find_if(out.versions.begin(), out.versions.end(),
-                             [&](const TrackVersion& v) { return v.id == out.activeVersionId; });
-            if (active == out.versions.end()) {
-                // Corrupt/hand-edited id: synthesize a placeholder for the in-place
-                // material instead of clearing a PARKED version (never drop data).
-                TrackVersion ph;
-                for (const TrackVersion& v : out.versions)
-                    ph.id = std::max(ph.id, v.id);
-                ph.id += 1; // unique within the track; scanTrackIds keeps nextId above it
-                ph.name = "v?";
-                out.activeVersionId = ph.id;
-                out.versions.push_back(std::move(ph));
-            } else {
-                active->clips.clear();
-                active->takeFolders.clear();
-            }
+            // Parked take folders flatten to their lane clips: the folder itself carried
+            // only comp state, which no longer exists.
+            if (hasKey(vj, "takeFolders") && vj.find("takeFolders")->is_array())
+                for (const json& fj : *vj.find("takeFolders")) {
+                    TakeFolder f;
+                    if (!fromJson(fj, f, nullptr))
+                        continue;
+                    for (TakeLane& ln : f.lanes)
+                        for (Clip& c : ln.clips)
+                            adopt(c);
+                }
         }
     }
     return true;
