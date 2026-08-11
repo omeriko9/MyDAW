@@ -598,6 +598,10 @@ export const setTakeActiveLane = (trackId: number, folderId: number, activeLane:
  *  versions usually mean muting all but one take, so the lane menu offers this directly). */
 export const setTakeLaneMuted = (trackId: number, folderId: number, lane: number, muted: boolean) =>
   ws.request("cmd/take.setLaneMuted", { trackId, folderId, lane, muted });
+/** Play a version ALONGSIDE the comp's pick — the comp selects exactly one lane per
+ *  segment, so hearing two takes at once needs this additive override. */
+export const setTakeLanePlayAlong = (trackId: number, folderId: number, lane: number, on: boolean) =>
+  ws.request("cmd/take.setLanePlayAlong", { trackId, folderId, lane, on });
 /** Set explicit per-segment comp boundaries (the swipe-comp result). */
 export const setTakeComp = (
   trackId: number,

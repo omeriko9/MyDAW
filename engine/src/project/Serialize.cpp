@@ -296,7 +296,10 @@ json toJson(const TakeFolder& f) {
         json clips = json::array();
         for (const Clip& c : ln.clips)
             clips.push_back(toJson(c));
-        lanes.push_back({{"id", ln.id}, {"name", ln.name}, {"clips", std::move(clips)}});
+        json lj{{"id", ln.id}, {"name", ln.name}, {"clips", std::move(clips)}};
+        if (ln.playAlong)
+            lj["playAlong"] = true; // omitted when off — keeps existing projects byte-identical
+        lanes.push_back(std::move(lj));
     }
     json comp = json::array();
     for (const CompSegment& s : f.comp)
@@ -324,6 +327,7 @@ bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
             TakeLane ln;
             ln.id = getOr<uint64_t>(lj, "id", 0);
             ln.name = getOr(lj, "name", "");
+            ln.playAlong = getOr<bool>(lj, "playAlong", false);
             if (hasKey(lj, "clips") && lj.find("clips")->is_array())
                 for (const json& cj : *lj.find("clips")) {
                     Clip c;

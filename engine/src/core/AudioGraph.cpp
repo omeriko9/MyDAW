@@ -534,11 +534,22 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                         }
                     }
                     for (const Seg& sg : segs) {
-                        if (sg.lane < 0 || sg.lane >= static_cast<int>(folder.lanes.size()))
-                            continue; // silent gap
                         const int64_t winS = map.beatsToSamples(sg.s);
                         const int64_t winE = map.beatsToSamples(sg.e);
-                        for (const Clip& c : folder.lanes[static_cast<size_t>(sg.lane)].clips) {
+                        // Which versions sound over this segment: the one the comp selects,
+                        // PLUS every lane flagged playAlong (SPEC §8.7 — the additive
+                        // override that lets two versions be heard at once, the way Cubase's
+                        // per-part mutes do). Deduped, so a playAlong lane that is also the
+                        // comp's pick never double-triggers. An out-of-range comp lane is a
+                        // silent gap, but playAlong lanes still sound through it.
+                        std::vector<int> sounding;
+                        if (sg.lane >= 0 && sg.lane < static_cast<int>(folder.lanes.size()))
+                            sounding.push_back(sg.lane);
+                        for (size_t li = 0; li < folder.lanes.size(); ++li)
+                            if (folder.lanes[li].playAlong && static_cast<int>(li) != sg.lane)
+                                sounding.push_back(static_cast<int>(li));
+                        for (int laneIdx : sounding)
+                        for (const Clip& c : folder.lanes[static_cast<size_t>(laneIdx)].clips) {
                             if (const AudioClip* a = asAudio(&c)) {
                                 if (a->muted || a->assetId == 0 || a->lengthSamples <= 0)
                                     continue;

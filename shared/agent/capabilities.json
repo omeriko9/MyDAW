@@ -4132,6 +4132,32 @@
       ],
       "type": "object"
     },
+    "TakeSetLanePlayAlongRequest": {
+      "additionalProperties": false,
+      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
+      "properties": {
+        "folderId": {
+          "type": "number"
+        },
+        "lane": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "on": {
+          "description": "true = also play this version alongside the comp's pick; false = back to comp-only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "trackId",
+        "folderId",
+        "lane",
+        "on"
+      ],
+      "type": "object"
+    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -7435,6 +7461,44 @@
             "folderId": 9,
             "lane": 1,
             "muted": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.setLanePlayAlong",
+      "category": "takes",
+      "description": "Play one take lane IN ADDITION to whichever the comp selects, so two versions sound at once. Clip mute still wins. Undoable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TakeSetLanePlayAlongRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "folderId": 9,
+            "lane": 1,
+            "on": true
           }
         }
       ]

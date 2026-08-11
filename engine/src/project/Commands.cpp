@@ -1105,6 +1105,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/take.create")      return takeCreate(p, r);
     if (type == "cmd/take.setComp")     return takeSetComp(p, r);
     if (type == "cmd/take.setLaneMuted") return takeSetLaneMuted(p, r);
+    if (type == "cmd/take.setLanePlayAlong") return takeSetLanePlayAlong(p, r);
     if (type == "cmd/take.flatten")     return takeFlatten(p, r);
     if (type == "cmd/version.add")      return versionAdd(p, r);
     if (type == "cmd/version.switch")   return versionSwitch(p, r);
@@ -6091,6 +6092,40 @@ json CommandProcessor::takeSetLaneMuted(const json& p, CmdResult& r) {
         return json::object();
     }
     r.label = muted ? "Mute Take" : "Unmute Take";
+    r.structural = true; // audibility changed — the plan must rebuild
+    r.scope = "track";
+    r.eventTrackIds.push_back(trackId);
+    return json::object();
+}
+
+// cmd/take.setLanePlayAlong {trackId, folderId, lane, on} — play this version IN ADDITION to
+// whichever one the comp selects (SPEC §8.7). The comp stays the "which take is THE take"
+// selector; this is the additive override that lets two versions sound at once, which the
+// comp alone cannot express (it picks exactly one lane per segment). Clip-level mute still
+// wins, so Mute Take silences a play-along lane too.
+json CommandProcessor::takeSetLanePlayAlong(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
+    const uint64_t folderId = getOr<uint64_t>(p, "folderId", 0);
+    Track* t = m.trackById(trackId);
+    if (!t)
+        return r.fail("not_found", "unknown trackId");
+    TakeFolder* f = nullptr;
+    for (TakeFolder& tf : t->takeFolders)
+        if (tf.id == folderId) { f = &tf; break; }
+    if (!f)
+        return r.fail("not_found", "unknown folderId");
+    const int lane = getOr<int>(p, "lane", -1);
+    if (lane < 0 || lane >= static_cast<int>(f->lanes.size()))
+        return r.fail("bad_request", "lane out of range");
+    const bool on = getOr<bool>(p, "on", true);
+    TakeLane& ln = f->lanes[static_cast<size_t>(lane)];
+    if (ln.playAlong == on) {
+        r.mutated = false;
+        return json::object();
+    }
+    ln.playAlong = on;
+    r.label = on ? "Play Version Along" : "Stop Playing Version Along";
     r.structural = true; // audibility changed — the plan must rebuild
     r.scope = "track";
     r.eventTrackIds.push_back(trackId);

@@ -256,6 +256,9 @@ export interface TakeLane {
   id: number;
   name: string;
   clips: Clip[];
+  /** play this version IN ADDITION to whichever the comp selects (SPEC §8.7) — the
+   *  additive override that lets two versions sound at once. Clip mute still wins. */
+  playAlong?: boolean;
 }
 export interface CompSegment {
   /** plays from here until the next segment's startBeat (or the folder end) */
@@ -2297,6 +2300,10 @@ export interface RequestMap {
   "cmd/take.setComp": { req: { trackId: number; folderId: number; activeLane?: number; comp?: CompSegment[] }; reply: EmptyObject };
   "cmd/take.setLaneMuted": {
     req: { trackId: number; folderId: number; lane: number; muted: boolean };
+    reply: EmptyObject;
+  };
+  "cmd/take.setLanePlayAlong": {
+    req: { trackId: number; folderId: number; lane: number; on: boolean };
     reply: EmptyObject;
   };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };

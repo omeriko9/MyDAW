@@ -404,6 +404,11 @@ struct TakeLane {
     uint64_t id = 0;
     std::string name;        // "Take 1", "Take 2", …
     std::vector<Clip> clips; // this take's material (audio or midi); loop-record: one clip per lap
+    // Play this version IN ADDITION to whichever one the comp selects (SPEC §8.7). The comp
+    // stays the "which take is THE take" selector; this is the additive override that lets
+    // two versions sound at once, the way Cubase's per-part mutes do. Clip-level `muted`
+    // still wins, so a muted clip stays silent here too.
+    bool playAlong = false;
 };
 
 struct CompSegment {

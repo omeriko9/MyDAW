@@ -64,6 +64,7 @@ import {
   flattenTake,
   setTakeActiveLane,
   setTakeLaneMuted,
+  setTakeLanePlayAlong,
   setTakeComp,
 } from "../../store/actions";
 import { compSegments, LANE_COLORS, paintComp } from "../../lib/comping";
@@ -2555,11 +2556,21 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       const laneMuted =
         folder.lanes[row.laneIndex].clips.length > 0 &&
         folder.lanes[row.laneIndex].clips.every((c) => c.muted === true);
+      const playAlong = folder.lanes[row.laneIndex].playAlong === true;
       openContextMenu(e.clientX, e.clientY, [
         {
           label: "Use This Take",
           title: "Select this take for the whole folder",
           onClick: () => fireLane(setTakeActiveLane(t.id, folder.id, row.laneIndex)),
+        },
+        {
+          label: playAlong ? "Stop Playing Along" : "Play This Version Too",
+          checked: playAlong,
+          title: playAlong
+            ? "Play only where the comp selects this version"
+            : "Play this version ALONGSIDE the selected one — the comp picks exactly one take per range, so hearing two at once needs this",
+          onClick: () =>
+            fireLane(setTakeLanePlayAlong(t.id, folder.id, row.laneIndex, !playAlong)),
         },
         {
           label: laneMuted ? "Unmute Take" : "Mute Take",

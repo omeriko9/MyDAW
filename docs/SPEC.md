@@ -1126,6 +1126,24 @@ in one lane (lane clips are deliberately unreachable by `cmd/clip.set` — `clip
 even where the comp selects it (buildPlan's per-clip muted skip). Plain clips keep their
 existing right-click "Mute" (shortcut **M**; `X` stays Crossfade).
 
+**Play along (additive versions, 2026-08-11)**: the comp selects exactly ONE lane per segment,
+so it cannot express "hear two versions at once" — which Cubase gets for free, because there the
+comp tool only sets per-part mutes and playback is the sum of everything unmuted.
+`cmd/take.setLanePlayAlong {trackId, folderId, lane, on}` is the additive override: a flagged
+lane (`TakeLane::playAlong`, omitted from JSON when false) is mixed IN ADDITION to the comp's
+pick, over the whole folder span, including across segments the comp leaves silent. buildPlan
+dedupes, so a flagged lane that is also the comp's pick never double-triggers, and clip-level
+`muted` still wins — Mute Take silences a play-along lane too. The comp remains the "which take
+is THE take" selector, so swipe-comping, flatten and `paintComp`'s UI↔engine parity are
+untouched. Menu: "Play This Version Too". Render-proved in `comping-test.mjs` (quiet-alone 2317
+→ both 13900 = quiet + loud, summed).
+
+**Seeing the versions**: lanes render inline as sub-rows under the track (the "T" toggle in the
+track header, shown only when the track has folders). A track that GAINS a lane auto-expands
+(`useRevealNewTakeLanes`) — without it a Keep Takes fold was invisible: the folder existed, the
+newest version played, and the arrangement still showed one clip. "Flatten Comp…" collapses the
+stack back into plain clips.
+
 ## 9. UI architecture
 
 - zustand store: `{connected, engine, project, registry, transport, meters (outside react —

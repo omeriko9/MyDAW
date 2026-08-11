@@ -1172,7 +1172,7 @@ export default function TrackHeaders({
                 on={takesExpanded.has(t.id)}
                 onChange={(v) => useTakesUi.getState().setExpanded(t.id, v)}
                 className="tlh-btn tlh-takes-toggle"
-                tooltip="Take lanes (comp inline)"
+                tooltip="Versions (T) — show every recorded version as sub-rows. Click one to make it the version that plays; right-click a version for Play This Version Too, Mute, or Flatten to collapse them back into one clip"
               >
                 T
               </Toggle>

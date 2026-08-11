@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "5748850b918e9579d0ca475e3423e754d982ca1881c9677686ec2f3753338430";
+const char kAgentCatalogSha256[] = "d98b6f69a72779f02dab18197c0d30802dcaed271a1a92ef3eb4a61e235c38b3";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4140,6 +4140,32 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "TakeSetLanePlayAlongRequest": {
+      "additionalProperties": false,
+      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
+      "properties": {
+        "folderId": {
+          "type": "number"
+        },
+        "lane": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "on": {
+          "description": "true = also play this version alongside the comp's pick; false = back to comp-only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "trackId",
+        "folderId",
+        "lane",
+        "on"
+      ],
+      "type": "object"
+    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -7443,6 +7469,44 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
             "folderId": 9,
             "lane": 1,
             "muted": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.setLanePlayAlong",
+      "category": "takes",
+      "description": "Play one take lane IN ADDITION to whichever the comp selects, so two versions sound at once. Clip mute still wins. Undoable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TakeSetLanePlayAlongRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "folderId": 9,
+            "lane": 1,
+            "on": true
           }
         }
       ]

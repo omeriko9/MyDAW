@@ -114,6 +114,25 @@ try {
   report("activeLane 1 plays the QUIET take (much lower)", quietRms > 10 && quietRms < loudRms * 0.5,
     `loud=${loudRms?.toFixed(1)} quiet=${quietRms?.toFixed(1)} (ratio ${(quietRms / loudRms).toFixed(3)})`);
 
+  // playAlong: the comp picks exactly ONE lane per segment, so hearing two versions at
+  // once needs the additive override (SPEC §8.7). Comp still on the quiet lane; flag the
+  // loud one to play along and the render must jump to roughly the loud level — proof the
+  // second lane is genuinely SUMMED in, not merely selected.
+  await req("cmd/take.setLanePlayAlong", { trackId: track.id, folderId: folder.id, lane: 0, on: true });
+  const bothRms = rmsFrac(await render(), 0, 1);
+  report("playAlong sums a second version on top of the comp's pick",
+    bothRms > loudRms * 0.9, `quietAlone=${quietRms?.toFixed(1)} both=${bothRms?.toFixed(1)} loudAlone=${loudRms?.toFixed(1)}`);
+  // Clip mute must still win over playAlong, or "Mute Take" would stop working.
+  await req("cmd/take.setLaneMuted", { trackId: track.id, folderId: folder.id, lane: 0, muted: true });
+  const mutedAlong = rmsFrac(await render(), 0, 1);
+  report("Mute Take still silences a play-along version",
+    mutedAlong < bothRms * 0.5, `both=${bothRms?.toFixed(1)} muted=${mutedAlong?.toFixed(1)}`);
+  await req("cmd/take.setLaneMuted", { trackId: track.id, folderId: folder.id, lane: 0, muted: false });
+  await req("cmd/take.setLanePlayAlong", { trackId: track.id, folderId: folder.id, lane: 0, on: false });
+  const backRms = rmsFrac(await render(), 0, 1);
+  report("clearing playAlong returns to the comp's pick alone",
+    Math.abs(backRms - quietRms) < Math.max(2, quietRms * 0.1), `quiet=${quietRms?.toFixed(1)} back=${backRms?.toFixed(1)}`);
+
   // Segmented comp: beats [0,2) = lane 0 (loud), [2,4) = lane 1 (quiet).
   await req("cmd/take.setComp", { trackId: track.id, folderId: folder.id, comp: [{ startBeat: 0, lane: 0 }, { startBeat: 2, lane: 1 }] });
   const segFile = await render();

@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "5748850b918e9579d0ca475e3423e754d982ca1881c9677686ec2f3753338430";
+export const AGENT_CATALOG_SHA256 = "d98b6f69a72779f02dab18197c0d30802dcaed271a1a92ef3eb4a61e235c38b3";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4160,6 +4160,32 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "TakeSetLanePlayAlongRequest": {
+      "additionalProperties": false,
+      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
+      "properties": {
+        "folderId": {
+          "type": "number"
+        },
+        "lane": {
+          "type": "number"
+        },
+        "trackId": {
+          "type": "number"
+        },
+        "on": {
+          "description": "true = also play this version alongside the comp's pick; false = back to comp-only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "trackId",
+        "folderId",
+        "lane",
+        "on"
+      ],
+      "type": "object"
+    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -7463,6 +7489,44 @@ export const AGENT_CATALOG: AgentCatalog = {
             "folderId": 9,
             "lane": 1,
             "muted": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.setLanePlayAlong",
+      "category": "takes",
+      "description": "Play one take lane IN ADDITION to whichever the comp selects, so two versions sound at once. Clip mute still wins. Undoable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TakeSetLanePlayAlongRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "folderId": 9,
+            "lane": 1,
+            "on": true
           }
         }
       ]
@@ -11779,6 +11843,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/take.flatten",
   "cmd/take.setComp",
   "cmd/take.setLaneMuted",
+  "cmd/take.setLanePlayAlong",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -12500,6 +12565,10 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/take.setLaneMuted"
   },
+  "cmd/take.setLanePlayAlong": {
+    "kind": "operation",
+    "operation": "cmd/take.setLanePlayAlong"
+  },
   "cmd/take.flatten": {
     "kind": "operation",
     "operation": "cmd/take.flatten"
@@ -12999,6 +13068,14 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "folderId": 9,
       "lane": 1,
       "muted": true
+    }
+  ],
+  "cmd/take.setLanePlayAlong": [
+    {
+      "trackId": 3,
+      "folderId": 9,
+      "lane": 1,
+      "on": true
     }
   ],
   "cmd/tempo.set": [
