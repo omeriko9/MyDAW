@@ -1139,10 +1139,19 @@ untouched. Menu: "Play This Version Too". Render-proved in `comping-test.mjs` (q
 → both 13900 = quiet + loud, summed).
 
 **Seeing the versions**: lanes render inline as sub-rows under the track (the "T" toggle in the
-track header, shown only when the track has folders). A track that GAINS a lane auto-expands
-(`useRevealNewTakeLanes`) — without it a Keep Takes fold was invisible: the folder existed, the
-newest version played, and the arrangement still showed one clip. "Flatten Comp…" collapses the
-stack back into plain clips.
+track header, shown only when the track has folders). They are shown **by default** wherever
+they exist — `useRevealNewTakeLanes` expands on FIRST SIGHT of a track with lanes and again on
+every lane gain. The stack is the feature, so hiding it by default hides the feature. A first
+attempt expanded only on a GAIN, which left folders opened from a project (or folded with
+`take.create`) collapsed and did not fix the report — browser-verified 2026-08-11: the T toggle
+read `aria-pressed=false` and 0 lane rows drew until it was clicked. A user collapse sticks for
+that session; a reload returns to versions-visible. "Flatten Comp…" collapses the stack back
+into plain clips.
+
+**Not to be confused with Track Versions** (`cmd/version.add`, the track header's "New Version"
+menu): those are whole-track playlists with exactly ONE active — alternatives you switch
+between, never seen side by side. Take lanes are the Cubase-lanes feature. Two features, and
+the one named "Versions" in the UI is the exclusive one.
 
 ## 9. UI architecture
 

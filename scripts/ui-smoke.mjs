@@ -2164,7 +2164,7 @@ export const checks = [
 
   {
     id: "take-lanes-inline-comp",
-    title: "take folders draw inline: T expands lanes, click picks a take, swipe comps a range",
+    title: "take folders draw inline: lanes show by default, click picks a take, swipe comps a range",
     area: "timeline-takes",
     guards:
       "SPEC §8.7 — cmd/take.create moves clips OFF Track.clips, so a take folder used to render " +
@@ -2205,8 +2205,17 @@ export const checks = [
         const b = row.querySelector(".tlh-takes-toggle").getBoundingClientRect();
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       })()`);
+      // Versions are visible BY DEFAULT (2026-08-11): a folder that already exists —
+      // opened from a project, or folded with take.create — must draw its lanes without
+      // anyone pressing T. This check used to press T to expand; that is now the wrong
+      // way round, and asserting it would re-hide the feature the user asked to see.
+      await s.untilEval("a folder's lanes are shown without pressing T", () =>
+        document.querySelectorAll(".tlh-takelane").length === 2);
       await s.click(tRect.x, tRect.y);
-      await s.untilEval("expanding shows one lane row per take", () =>
+      await s.untilEval("T collapses them", () =>
+        document.querySelectorAll(".tlh-takelane").length === 0);
+      await s.click(tRect.x, tRect.y);
+      await s.untilEval("T brings them back", () =>
         document.querySelectorAll(".tlh-takelane").length === 2);
 
       const geom = await s.eval(`(() => {

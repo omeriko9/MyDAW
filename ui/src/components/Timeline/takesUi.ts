@@ -30,18 +30,19 @@ export const useTakesUi = create<TakesUiState>((set) => ({
 }));
 
 /**
- * Show a track's versions the moment it gains one (SPEC §8.7).
+ * Versions are shown BY DEFAULT wherever they exist (SPEC §8.7).
  *
- * Without this, a Keep Takes fold is invisible: the take folder is created, the newest
- * version plays, and the arrangement still shows ONE clip — the older versions exist but
- * are collapsed behind the "T" toggle nobody pressed. Reported 2026-08-11: "the versions
- * cannot be seen simultaneously on the screen". Cubase shows lanes as sub-tracks, so the
- * stack IS the feature; hiding it by default hides the feature.
+ * Cubase draws lanes as sub-tracks; the stack IS the feature, so hiding it by default
+ * hides the feature. A first attempt only expanded on a GAIN — which meant a folder that
+ * already existed (opening a project, or folding clips with take.create) stayed collapsed,
+ * and the reported problem — "I still can't see all versions at once" — survived the fix.
+ * Verified in a browser 2026-08-11: after `cmd/take.create` the T toggle read
+ * aria-pressed=false and the arrangement drew 0 lane rows until it was clicked.
  *
- * Mirrors useRevealWrittenLanes: expand only on a GAIN (lane count grew for a folder, or
- * a first folder appeared), never on load — a track absent from `seen` has never been
- * compared, so a freshly loaded project stays as the user left it. Expansion is view
- * state, so the user can still collapse it back and it will not fight them afterwards.
+ * So: expand on FIRST SIGHT of a track that has lanes, and again whenever the lane count
+ * grows. A user collapse sticks, because `seen` already holds that track's count and only
+ * a genuine gain re-expands it. `seen` is per-mount, so a reload returns to
+ * versions-visible — the default the user asked for, not a preference being overridden.
  */
 export function useRevealNewTakeLanes(project: Project | null): void {
   const seen = useRef<Map<number, number>>(new Map());
@@ -54,7 +55,8 @@ export function useRevealNewTakeLanes(project: Project | null): void {
       const lanes = (t.takeFolders ?? []).reduce((n, f) => n + f.lanes.length, 0);
       next.set(t.id, lanes);
       const before = seen.current.get(t.id);
-      if (before !== undefined && lanes > before)
+      const firstSight = before === undefined && lanes > 0;
+      if (firstSight || (before !== undefined && lanes > before))
         useTakesUi.getState().setExpanded(t.id, true);
     }
     seen.current = next;
