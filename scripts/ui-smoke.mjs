@@ -2227,19 +2227,25 @@ export const checks = [
       await s.untilEval("and its versions are visible without pressing anything", () =>
         document.querySelectorAll(".tlh-takelane").length === 2);
 
-      // RESTORE: flatten back to plain clips and drop the duplicate, so later
-      // coordinate-driven checks see the fixture geometry they expect.
+      // RESTORE: pick the ORIGINAL clip first, because flatten now bounces only what is
+      // unmuted — then drop anything left at the duplicate's position. Later checks are
+      // coordinate-driven and expect the fixture geometry.
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      const origClip = t.takeFolders[0].lanes
+        .flatMap((l) => l.clips)
+        .find((c) => Math.abs(c.startBeat - src.startBeat) < 0.01);
+      if (origClip) await s.probe("cmd/take.pick", { trackId: mt.id, clipId: origClip.id });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: t.takeFolders[0].id });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       const extra = (t.clips ?? []).filter((c) => c.startBeat >= src.startBeat + 3.9).map((c) => c.id);
-      if (extra.length) await s.probe("cmd/clip.remove", { clipIds: extra });
+      if (extra.length) await s.probe("cmd/clip.delete", { clipIds: extra });
     },
   },
 
   {
     id: "take-lanes-inline-comp",
-    title: "take folders draw inline: lanes show by default, click picks a take, swipe comps a range",
+    title: "take folders draw inline: lanes show by default, clicking a version's clip picks it",
     area: "timeline-takes",
     guards:
       "SPEC §8.7 — cmd/take.create moves clips OFF Track.clips, so a take folder used to render " +
@@ -2303,30 +2309,27 @@ export const checks = [
       })()`);
       tt.eq(geom.lanes.length, 2, "located both take-lane bands");
 
-      // Click take 2's lane at beat 1 → that take plays for the whole folder.
-      await s.click(geom.left + 1 * ZOOM_X, geom.lanes[1]);
-      await s.until("clicking a lane picks that take whole-span", async () => {
-        const f = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
-        return !!f && f.comp.length === 1 && f.comp[0].lane === 1;
+      // Clicking a version's CLIP makes it the audible one and mutes its siblings —
+      // this is the whole pick interaction now (swipe-comping went away with the comp
+      // array on 2026-08-11; audibility is per-clip mute).
+      const clipOf = async (laneIdx) => {
+        const f0 = (await hello()).tracks.find((t) => t.id === mt.id).takeFolders[0];
+        return f0.lanes[laneIdx].clips[0];
+      };
+      const c1 = await clipOf(1);
+      await s.click(geom.left + (c1.startBeat + 0.5) * ZOOM_X, geom.lanes[1]);
+      await s.until("clicking version 2's clip makes it the audible one", async () => {
+        const f0 = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
+        return !!f0 && f0.lanes[1].clips[0].muted !== true && f0.lanes[0].clips[0].muted === true;
       });
-
-      // Swipe take 1's lane across beats 2→4 → only that range comps to lane 0,
-      // with take 2 restored after the range (paintComp semantics, engine-verified).
-      await s.drag(
-        [geom.left + 2 * ZOOM_X, geom.lanes[0]],
-        [geom.left + 4 * ZOOM_X, geom.lanes[0]],
-        12,
-      );
-      await s.until("the swipe comps [2,4) to take 1 and restores take 2 after", async () => {
-        const f = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
-        return (
-          !!f && f.comp.length === 3 &&
-          f.comp[0].lane === 1 && f.comp[1].lane === 0 && f.comp[2].lane === 1
-        );
+      const c0 = await clipOf(0);
+      await s.click(geom.left + (c0.startBeat + 0.5) * ZOOM_X, geom.lanes[0]);
+      await s.until("clicking version 1's clip flips the choice back", async () => {
+        const f0 = (await hello()).tracks.find((t) => t.id === mt.id)?.takeFolders?.[0];
+        return !!f0 && f0.lanes[0].clips[0].muted !== true && f0.lanes[1].clips[0].muted === true;
       });
       const f = (await hello()).tracks.find((t) => t.id === mt.id).takeFolders[0];
-      tt.near(f.comp[1].startBeat, 2, 0.1, "the swipe's press beat became the comp boundary");
-      tt.near(f.comp[2].startBeat, 4, 0.1, "the swipe's release beat closed the range");
+      tt.eq(f.comp, undefined, "no comp array survives — mute is the only selector");
 
       // Tidy: flatten so a later check (or re-run against a live slot) sees the
       // fixture track without a folder.

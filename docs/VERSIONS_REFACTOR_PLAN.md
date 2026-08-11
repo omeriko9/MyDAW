@@ -59,9 +59,9 @@ it out, do not silently keep a dead code path.
 
 ## Phases (each ends gate-green + committed)
 
-1. R1 removal (engine + UI + catalog).
-2. R2 per-track keepTakes.
-3. R3+comp removal: mute-based playback, `take.pick`, flatten off mutes.
+1. ~~R1 removal (engine + UI + catalog).~~ DONE f088683
+2. ~~R2 per-track keepTakes.~~ DONE 7b827ff
+3. ~~R3+comp removal: mute-based playback, `take.pick`, flatten off mutes.~~ DONE
 4. R4 mute tool.
 5. R5 lane clips addressable + marquee.
 6. R6 selection stickiness.

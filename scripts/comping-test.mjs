@@ -105,63 +105,54 @@ try {
   report("clips moved off the flat list into the folder", (tk.clips?.length ?? 0) === 0 && (tk.takeFolders?.length ?? 0) === 1,
     `clips=${tk.clips?.length} folders=${tk.takeFolders?.length}`);
 
-  // Whole-span lane 0 (loud) vs lane 1 (quiet).
-  await req("cmd/take.setComp", { trackId: track.id, folderId: folder.id, activeLane: 0 });
+  // MUTE IS THE SELECTOR (2026-08-11): take.create parks all but the newest version, and
+  // cmd/take.pick makes a version audible by CLIPS, muting the ones overlapping it.
+  const loudClip = folder.lanes[0].clips[0].id;
+  const quietClip = folder.lanes[1].clips[0].id;
+  await req("cmd/take.pick", { trackId: track.id, clipId: loudClip });
   const loudRms = rmsFrac(await render(), 0, 1);
-  await req("cmd/take.setComp", { trackId: track.id, folderId: folder.id, activeLane: 1 });
+  await req("cmd/take.pick", { trackId: track.id, clipId: quietClip });
   const quietRms = rmsFrac(await render(), 0, 1);
-  report("activeLane 0 plays the LOUD take", loudRms > 100, `rms=${loudRms?.toFixed(1)}`);
-  report("activeLane 1 plays the QUIET take (much lower)", quietRms > 10 && quietRms < loudRms * 0.5,
+  report("picking the loud version plays it", loudRms > 100, `rms=${loudRms?.toFixed(1)}`);
+  report("picking the quiet version plays THAT one (much lower)", quietRms > 10 && quietRms < loudRms * 0.5,
     `loud=${loudRms?.toFixed(1)} quiet=${quietRms?.toFixed(1)} (ratio ${(quietRms / loudRms).toFixed(3)})`);
 
-  // playAlong: the comp picks exactly ONE lane per segment, so hearing two versions at
-  // once needs the additive override (SPEC §8.7). Comp still on the quiet lane; flag the
-  // loud one to play along and the render must jump to roughly the loud level — proof the
-  // second lane is genuinely SUMMED in, not merely selected.
-  await req("cmd/take.setLanePlayAlong", { trackId: track.id, folderId: folder.id, lane: 0, on: true });
-  const bothRms = rmsFrac(await render(), 0, 1);
-  report("playAlong sums a second version on top of the comp's pick",
-    bothRms > loudRms * 0.9, `quietAlone=${quietRms?.toFixed(1)} both=${bothRms?.toFixed(1)} loudAlone=${loudRms?.toFixed(1)}`);
-  // Clip mute must still win over playAlong, or "Mute Take" would stop working.
-  await req("cmd/take.setLaneMuted", { trackId: track.id, folderId: folder.id, lane: 0, muted: true });
-  const mutedAlong = rmsFrac(await render(), 0, 1);
-  report("Mute Take still silences a play-along version",
-    mutedAlong < bothRms * 0.5, `both=${bothRms?.toFixed(1)} muted=${mutedAlong?.toFixed(1)}`);
-  await req("cmd/take.setLaneMuted", { trackId: track.id, folderId: folder.id, lane: 0, muted: false });
-  await req("cmd/take.setLanePlayAlong", { trackId: track.id, folderId: folder.id, lane: 0, on: false });
-  const backRms = rmsFrac(await render(), 0, 1);
-  report("clearing playAlong returns to the comp's pick alone",
-    Math.abs(backRms - quietRms) < Math.max(2, quietRms * 0.1), `quiet=${quietRms?.toFixed(1)} back=${backRms?.toFixed(1)}`);
+  // The pick is exclusive: the sibling it muted must really be silent, not merely unselected.
+  const tk2 = (await req("session/hello", { clientName: "comp" })).project.tracks.find((t) => t.id === track.id);
+  const f2 = tk2.takeFolders[0];
+  report("picking mutes the sibling version",
+    f2.lanes[0].clips[0].muted === true && f2.lanes[1].clips[0].muted !== true,
+    `lane0.muted=${f2.lanes[0].clips[0].muted} lane1.muted=${f2.lanes[1].clips[0].muted}`);
 
-  // Segmented comp: beats [0,2) = lane 0 (loud), [2,4) = lane 1 (quiet).
-  await req("cmd/take.setComp", { trackId: track.id, folderId: folder.id, comp: [{ startBeat: 0, lane: 0 }, { startBeat: 2, lane: 1 }] });
-  const segFile = await render();
-  const h1 = rmsFrac(segFile, 0.0, 0.45), h2 = rmsFrac(segFile, 0.55, 1.0);
-  report("comp switches take mid-span (loud first half, quiet second)", h1 > 100 && h2 < h1 * 0.5,
-    `firstHalf=${h1?.toFixed(1)} secondHalf=${h2?.toFixed(1)} (ratio ${(h2 / h1).toFixed(3)})`);
+  // Stacking parks everything but the newest, or a fold would leave both playing summed.
+  report("take.create left only the newest version audible",
+    quietRms < loudRms * 0.5, `quiet=${quietRms?.toFixed(1)}`);
 
-  // Persistence.
+  // Persistence: mute state is what carries the choice now, so that is what must survive.
   const projDir = path.join(TMP, "Comp.mydaw");
   await req("project/saveAs", { path: projDir });
   const saved = JSON.parse(readFileSync(path.join(projDir, "project.json"), "utf8"));
   const sf = saved.tracks.find((t) => t.id === track.id)?.takeFolders?.[0];
-  report("saveAs persists the take folder + comp", !!sf && sf.lanes?.length === 2 && sf.comp?.length === 2,
-    `lanes=${sf?.lanes?.length} comp=${sf?.comp?.length}`);
+  report("saveAs persists the folder and its per-clip mutes",
+    !!sf && sf.lanes?.length === 2 && sf.lanes[0].clips[0].muted === true && sf.comp === undefined,
+    `lanes=${sf?.lanes?.length} lane0.muted=${sf?.lanes?.[0]?.clips?.[0]?.muted} comp=${sf?.comp}`);
   await req("project/load", { path: projDir });
   await sleep(500);
-  const rf = rmsFrac(await render(), 0.0, 0.45), rl = rmsFrac(await render(), 0.55, 1.0);
-  report("reloaded project renders the comped result", rf > 100 && rl < rf * 0.5, `firstHalf=${rf?.toFixed(1)} secondHalf=${rl?.toFixed(1)}`);
+  const reRms = rmsFrac(await render(), 0, 1);
+  report("reloaded project still plays the picked (quiet) version",
+    Math.abs(reRms - quietRms) < Math.max(2, quietRms * 0.1), `before=${quietRms?.toFixed(1)} after=${reRms?.toFixed(1)}`);
 
-  // Flatten: comp -> plain clips, folder gone, same audio.
+  // Flatten keeps what you HEAR: the muted version is discarded with the folder.
   const lf = (await req("session/hello", { clientName: "comp" })).project.tracks.find((t) => t.id === track.id).takeFolders[0];
   const flat = await req("cmd/take.flatten", { trackId: track.id, folderId: lf.id });
-  report("cmd/take.flatten returns bounced clip ids", Array.isArray(flat.clipIds) && flat.clipIds.length >= 2, `n=${flat.clipIds?.length}`);
+  report("cmd/take.flatten returns the audible clip ids", Array.isArray(flat.clipIds) && flat.clipIds.length === 1, `n=${flat.clipIds?.length}`);
   const af = (await req("session/hello", { clientName: "comp" })).project.tracks.find((t) => t.id === track.id);
-  report("flatten removes the folder and adds clips", (af.takeFolders?.length ?? 0) === 0 && (af.clips?.length ?? 0) >= 2,
+  report("flatten removes the folder and leaves the audible clip",
+    (af.takeFolders?.length ?? 0) === 0 && (af.clips?.length ?? 0) === 1,
     `folders=${af.takeFolders?.length} clips=${af.clips?.length}`);
-  const ff = await render();
-  const ffa = rmsFrac(ff, 0.0, 0.45), ffb = rmsFrac(ff, 0.55, 1.0);
-  report("flattened clips render the same comped result", ffa > 100 && ffb < ffa * 0.5, `firstHalf=${ffa?.toFixed(1)} secondHalf=${ffb?.toFixed(1)}`);
+  const ffRms = rmsFrac(await render(), 0, 1);
+  report("flattened audio is unchanged",
+    Math.abs(ffRms - quietRms) < Math.max(2, quietRms * 0.1), `before=${quietRms?.toFixed(1)} after=${ffRms?.toFixed(1)}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   die(failed === 0 ? 0 : 1, failed === 0 ? "COMPING TEST: ALL PASS" : "COMPING TEST: FAILURES");

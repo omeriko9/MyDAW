@@ -296,20 +296,13 @@ json toJson(const TakeFolder& f) {
         json clips = json::array();
         for (const Clip& c : ln.clips)
             clips.push_back(toJson(c));
-        json lj{{"id", ln.id}, {"name", ln.name}, {"clips", std::move(clips)}};
-        if (ln.playAlong)
-            lj["playAlong"] = true; // omitted when off — keeps existing projects byte-identical
-        lanes.push_back(std::move(lj));
+        lanes.push_back(json{{"id", ln.id}, {"name", ln.name}, {"clips", std::move(clips)}});
     }
-    json comp = json::array();
-    for (const CompSegment& s : f.comp)
-        comp.push_back({{"startBeat", s.startBeat}, {"lane", s.lane}});
     return json{{"id", f.id},
                 {"name", f.name},
                 {"startBeat", f.startBeat},
                 {"endBeat", f.endBeat},
-                {"lanes", std::move(lanes)},
-                {"comp", std::move(comp)}};
+                {"lanes", std::move(lanes)}};
 }
 
 bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
@@ -327,7 +320,6 @@ bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
             TakeLane ln;
             ln.id = getOr<uint64_t>(lj, "id", 0);
             ln.name = getOr(lj, "name", "");
-            ln.playAlong = getOr<bool>(lj, "playAlong", false);
             if (hasKey(lj, "clips") && lj.find("clips")->is_array())
                 for (const json& cj : *lj.find("clips")) {
                     Clip c;
@@ -337,13 +329,6 @@ bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
             out.lanes.push_back(std::move(ln));
         }
     }
-    if (hasKey(j, "comp") && j.find("comp")->is_array())
-        for (const json& sj : *j.find("comp")) {
-            if (!sj.is_object())
-                continue;
-            out.comp.push_back(
-                CompSegment{getOr<double>(sj, "startBeat", 0.0), getOr<int>(sj, "lane", 0)});
-        }
     return true;
 }
 

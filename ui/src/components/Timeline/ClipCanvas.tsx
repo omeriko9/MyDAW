@@ -63,12 +63,9 @@ import {
   redo,
   createTakeFolder,
   flattenTake,
-  setTakeActiveLane,
-  setTakeLaneMuted,
-  setTakeLanePlayAlong,
-  setTakeComp,
+  pickTake,
 } from "../../store/actions";
-import { compSegments, LANE_COLORS, paintComp } from "../../lib/comping";
+import { LANE_COLORS } from "../../lib/comping";
 import { useTakesUi } from "./takesUi";
 import {
   CHORD_QUALITIES,
@@ -329,19 +326,6 @@ type Drag =
       startCy: number;
       origCurve: number;
       curve: number;
-      moved: boolean;
-    }
-  | {
-      /** Take-lane comp gesture (SPEC §8.7): click = use this take for the whole
-       *  folder; drag = swipe [b0,b1) into the comp. Local preview only — ONE
-       *  cmd/take.setComp on release (no transient path exists; each call is a
-       *  structural rebuild + an undo entry, so streaming would spam both). */
-      kind: "compSwipe";
-      trackId: number;
-      folderId: number;
-      laneIndex: number;
-      b0: number;
-      b1: number;
       moved: boolean;
     }
   | {
@@ -658,15 +642,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     drawGrid(ctx, w, h, v, proj.timeSigMap, proj.grid.division > 0 ? proj.grid.division : null, colors);
     drawLoopColumn(ctx, proj.loop, v, w, h, colors);
 
-    // Comp segments with any in-flight swipe applied (preview-locally, commit-on-release).
-    const previewedSegments = (folder: TakeFolder, trackId: number) => {
-      if (d && d.kind === "compSwipe" && d.moved && d.trackId === trackId && d.folderId === folder.id) {
-        const comp = paintComp(folder, Math.min(d.b0, d.b1), Math.max(d.b0, d.b1), d.laneIndex);
-        return compSegments({ ...folder, comp });
-      }
-      return compSegments(folder);
-    };
-
     // rows: separators + clips (virtualized: only visible rows / clips draw)
     for (const row of rws) {
       const ry = row.top - scrollY;
@@ -731,14 +706,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         for (const folder of track.takeFolders ?? []) {
           const lane = folder.lanes[row.laneIndex];
           if (!lane) continue;
-          for (const sg of previewedSegments(folder, track.id)) {
-            if (sg.lane !== row.laneIndex) continue;
-            const sx = beatToPx(sg.s, v);
-            const sw = (sg.e - sg.s) * v.zoomX;
-            if (sx + sw < -2 || sx > w + 2) continue;
-            ctx.fillStyle = withAlpha(laneColor, 0.2);
-            ctx.fillRect(sx, ry, sw, row.height);
-          }
           for (const clip of lane.clips) {
             const x = beatToPx(clip.startBeat, v);
             const cw = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate) * v.zoomX;
@@ -757,27 +724,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
               colors,
               onPeaksArrive: schedule,
             });
-          }
-          if (
-            d &&
-            d.kind === "compSwipe" &&
-            d.moved &&
-            d.trackId === track.id &&
-            d.folderId === folder.id &&
-            d.laneIndex === row.laneIndex
-          ) {
-            // Clamp to the folder span — paintComp clamps the commit the same way, and
-            // the preview must never promise a range the release won't deliver.
-            const lo = Math.max(folder.startBeat, Math.min(d.b0, d.b1));
-            const hi = Math.min(folder.endBeat, Math.max(d.b0, d.b1));
-            if (hi > lo) {
-              const sx = beatToPx(lo, v);
-              const sw = (hi - lo) * v.zoomX;
-              ctx.fillStyle = withAlpha(laneColor, 0.3);
-              ctx.fillRect(sx, ry, sw, row.height);
-              ctx.strokeStyle = laneColor;
-              ctx.strokeRect(sx + 0.5, ry + 0.5, Math.max(1, sw - 1), row.height - 1);
-            }
           }
         }
         continue;
@@ -901,19 +847,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         const fx = beatToPx(folder.startBeat, v);
         const fw = (folder.endBeat - folder.startBeat) * v.zoomX;
         if (fx + fw < -2 || fx > w + 2) continue;
-        for (const sg of previewedSegments(folder, track.id)) {
-          if (sg.lane < 0 || sg.lane >= folder.lanes.length) continue;
-          const sx = beatToPx(sg.s, v);
-          const sw = (sg.e - sg.s) * v.zoomX;
-          if (sx + sw < -2 || sx > w + 2) continue;
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(sx, ry, sw, row.height);
-          ctx.clip();
-          for (const clip of folder.lanes[sg.lane].clips) {
+        // Collapsed folder: draw the versions you can HEAR (unmuted clips), each with a
+        // thin strip in its lane colour so the stack is still legible when folded.
+        folder.lanes.forEach((lane, li) => {
+          for (const clip of lane.clips) {
+            if (clip.muted === true) continue;
             const x = beatToPx(clip.startBeat, v);
             const cw = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate) * v.zoomX;
-            if (x + cw < sx - 2 || x > sx + sw + 2) continue;
+            if (x + cw < -2 || x > w + 2) continue;
             drawClip(ctx, {
               clip,
               x,
@@ -928,12 +869,10 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
               colors,
               onPeaksArrive: schedule,
             });
+            ctx.fillStyle = withAlpha(LANE_COLORS[li % LANE_COLORS.length], 0.85);
+            ctx.fillRect(x, ry + row.height - 3, cw, 2);
           }
-          ctx.restore();
-          // segment's take color as a thin base strip (reads as the comp bar inline)
-          ctx.fillStyle = withAlpha(LANE_COLORS[sg.lane % LANE_COLORS.length], 0.85);
-          ctx.fillRect(sx, ry + row.height - 3, sw, 2);
-        }
+        });
         // dashed folder outline marks "this is a comp, expand with T"
         ctx.save();
         ctx.strokeStyle = withAlpha(colors.accent, 0.5);
@@ -1407,22 +1346,20 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
-    // take-lane rows (SPEC §8.7): click = use this take whole-span, drag = comp swipe.
+    // Take-lane rows (SPEC §8.7): clicking a version's CLIP makes it the one you hear
+    // (its overlapping siblings mute). That is the entire pick interaction — no swipe, no
+    // menu. Clicking empty lane space does nothing rather than guessing at a version.
     if (row && row.kind === "takelane") {
       const folder = (row.track.takeFolders ?? []).find(
         (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat && row.laneIndex < f.lanes.length,
       );
       if (!folder) return;
-      dragRef.current = {
-        kind: "compSwipe",
-        trackId: row.track.id,
-        folderId: folder.id,
-        laneIndex: row.laneIndex,
-        b0: rawBeat,
-        b1: rawBeat,
-        moved: false,
-      };
-      capture();
+      const lane = folder.lanes[row.laneIndex];
+      const hitClip = lane?.clips.find((c) => {
+        const len = clipLengthBeats(c, proj.tempoMap, proj.sampleRate);
+        return rawBeat >= c.startBeat && rawBeat < c.startBeat + len;
+      });
+      if (hitClip) fireLane(pickTake(row.track.id, hitClip.id));
       return;
     }
 
@@ -1661,21 +1598,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const grid = proj.grid;
 
     switch (d.kind) {
-      case "compSwipe": {
-        d.b1 = rawBeat;
-        if (!d.moved && Math.abs((d.b1 - d.b0) * st.vp.zoomX) > MOVE_THRESHOLD_PX) d.moved = true;
-        if (d.moved) {
-          const lo = Math.min(d.b0, d.b1);
-          const hi = Math.max(d.b0, d.b1);
-          showDragHud(
-            e.clientX,
-            e.clientY,
-            `Take ${d.laneIndex + 1} · ${formatBarsBeatsShort(lo, proj.timeSigMap)} → ${formatBarsBeatsShort(hi, proj.timeSigMap)}`,
-          );
-          draw();
-        }
-        return;
-      }
       case "viewItem": {
         const snapped = Math.max(0, snapB(rawBeat + d.grabOffset, grid, e.shiftKey));
         if (!d.moved && Math.abs((snapped - (d.mode === "end" ? (d.origEnd ?? d.origBeat) : d.origBeat)) * st.vp.zoomX) <= MOVE_THRESHOLD_PX
@@ -1923,21 +1845,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     }
 
     switch (d.kind) {
-      case "compSwipe": {
-        // Folder looked up FRESH (rows/objects churn on every projectChanged).
-        const track = proj.tracks.find((t) => t.id === d.trackId);
-        const folder = track?.takeFolders?.find((f) => f.id === d.folderId);
-        if (!folder) break;
-        if (!d.moved) {
-          // click = this take plays for the whole folder
-          fireLane(setTakeActiveLane(d.trackId, d.folderId, d.laneIndex));
-          break;
-        }
-        const lo = Math.min(d.b0, d.b1);
-        const hi = Math.max(d.b0, d.b1);
-        fireLane(setTakeComp(d.trackId, d.folderId, paintComp(folder, lo, hi, d.laneIndex)));
-        break;
-      }
       case "viewItem": {
         if (!d.moved) {
           // click without a drag: cycle markers / sections set the loop to their range;
@@ -2554,36 +2461,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat && row.laneIndex < f.lanes.length,
       );
       if (!folder) return;
-      const laneMuted =
-        folder.lanes[row.laneIndex].clips.length > 0 &&
-        folder.lanes[row.laneIndex].clips.every((c) => c.muted === true);
-      const playAlong = folder.lanes[row.laneIndex].playAlong === true;
+      // Picking is a plain CLICK on the version's clip and combining is the mute tool, so
+      // this menu is down to the structural actions only.
       openContextMenu(e.clientX, e.clientY, [
         {
-          label: "Use This Take",
-          title: "Select this take for the whole folder",
-          onClick: () => fireLane(setTakeActiveLane(t.id, folder.id, row.laneIndex)),
-        },
-        {
-          label: playAlong ? "Stop Playing Along" : "Play This Version Too",
-          checked: playAlong,
-          title: playAlong
-            ? "Play only where the comp selects this version"
-            : "Play this version ALONGSIDE the selected one — the comp picks exactly one take per range, so hearing two at once needs this",
-          onClick: () =>
-            fireLane(setTakeLanePlayAlong(t.id, folder.id, row.laneIndex, !playAlong)),
-        },
-        {
-          label: laneMuted ? "Unmute Take" : "Mute Take",
-          checked: laneMuted,
-          title: laneMuted
-            ? "Unmute every clip in this take lane"
-            : "Mute every clip in this take lane — it stays parked and silent even where the comp selects it",
-          onClick: () =>
-            fireLane(setTakeLaneMuted(t.id, folder.id, row.laneIndex, !laneMuted)),
-        },
-        {
-          label: "Flatten Comp…",
+          label: "Flatten Versions…",
           icon: "export",
           title: "Bounce the comp to plain clips and remove the folder",
           onClick: () => {
@@ -2695,14 +2577,9 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             title: "Toggle the folder's take lanes inline under the track (or use the T header toggle)",
             onClick: () => useTakesUi.getState().setExpanded(t.id, !expanded),
           },
-          ...folder.lanes.map((ln, li) => ({
-            label: `Use ${ln.name}`,
-            checked: compSegments(folder).every((sg) => sg.lane === li),
-            onClick: () => fireLane(setTakeActiveLane(t.id, folder.id, li)),
-          })),
           "separator" as const,
           {
-            label: "Flatten Comp…",
+            label: "Flatten Versions…",
             icon: "export" as const,
             title: "Bounce the comp to plain clips and remove the folder",
             onClick: () => {

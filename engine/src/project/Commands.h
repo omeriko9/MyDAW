@@ -299,9 +299,7 @@ private:
     json vcaSet(const json& p, bool transient, CmdResult& r);
     // §5.3 comping (take folders)
     json takeCreate(const json& p, CmdResult& r);
-    json takeSetComp(const json& p, CmdResult& r);
-    json takeSetLaneMuted(const json& p, CmdResult& r);
-    json takeSetLanePlayAlong(const json& p, CmdResult& r);
+    json takePick(const json& p, CmdResult& r);
     json takeFlatten(const json& p, CmdResult& r);
     // internal
     json recordingCommit(const json& p, CmdResult& r);

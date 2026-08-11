@@ -404,16 +404,6 @@ struct TakeLane {
     uint64_t id = 0;
     std::string name;        // "Take 1", "Take 2", …
     std::vector<Clip> clips; // this take's material (audio or midi); loop-record: one clip per lap
-    // Play this version IN ADDITION to whichever one the comp selects (SPEC §8.7). The comp
-    // stays the "which take is THE take" selector; this is the additive override that lets
-    // two versions sound at once, the way Cubase's per-part mutes do. Clip-level `muted`
-    // still wins, so a muted clip stays silent here too.
-    bool playAlong = false;
-};
-
-struct CompSegment {
-    double startBeat = 0.0;  // plays from here until the next segment's startBeat (or folder end)
-    int lane = 0;            // index into TakeFolder::lanes; -1 = silent gap
 };
 
 struct TakeFolder {
@@ -422,20 +412,7 @@ struct TakeFolder {
     double startBeat = 0.0;  // folder span on the timeline
     double endBeat = 0.0;
     std::vector<TakeLane> lanes;
-    // Sorted ascending by startBeat. Empty ⇒ lane 0 for the whole span. The first segment's
-    // startBeat is treated as the folder start regardless of its stored value.
-    std::vector<CompSegment> comp;
 };
-
-// The lane selected for `beat` given a folder's comp (‑1 = silent/none, or out of span).
-inline int compLaneAt(const TakeFolder& f, double beat) {
-    if (beat < f.startBeat || beat >= f.endBeat) return -1;
-    if (f.comp.empty()) return f.lanes.empty() ? -1 : 0;
-    int lane = f.comp.front().lane; // covers [start, first boundary)
-    for (const CompSegment& s : f.comp)
-        if (beat >= s.startBeat) lane = s.lane; else break;
-    return lane;
-}
 
 // ---------------------------------------------------------------------------
 // Track

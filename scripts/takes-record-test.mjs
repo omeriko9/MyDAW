@@ -9,13 +9,12 @@
  *   P1  cmd/track.set {keepTakes} round-trips on the track (per-track record mode)
  *   P2  a MIDI recording with zero notes and zero CC creates NO clip (unconditional)
  *   P3  with Keep Takes ON, recording over existing material folds into take lanes:
- *       - over a loose clip: folder{lane0 "Previous"=old clip, lane1=new}, comp plays the
- *         NEW lane inside the recorded range and lane 0 outside (partial overlap)
- *       - over that folder: a third pass APPENDS a lane, span = union, comp outside the
- *         new range preserved
+ *       - over a loose clip: folder{lane0 "Previous"=old clip, lane1=new}, and ONLY the
+ *         new version is unmuted — the old material parks silent on its own row
+ *       - over that folder: a third pass APPENDS a lane, span = union, newest audible
  *       - toggle OFF: two passes = two overlapping plain clips, zero folders (legacy)
- *   P4  cmd/take.setLaneMuted flips every clip in one lane (structural; the render-side
- *       effect of muted-in-lane is covered by comping-test + AudioGraph's muted skips)
+ *   P4  cmd/take.pick chooses a version by its CLIP (unmutes it, mutes the overlapping
+ *       siblings); the render-side proof lives in comping-test
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -70,14 +69,10 @@ const req = async (t, p = {}) => {
 };
 const trackOf = async (id) =>
   (await req("session/hello", { clientName: "takes" })).project.tracks.find((t) => t.id === id);
-/** Effective lane at `beat` — mirror of lib/comping.ts laneAt (LAST segment <= beat wins;
- *  paintComp may leave zero-width leading segments, so comp[0].lane alone is meaningless). */
-const laneAtBeat = (f, beat) => {
-  if (!f?.comp?.length) return 0;
-  let lane = f.comp[0].lane;
-  for (const s of f.comp) { if (beat >= s.startBeat) lane = s.lane; else break; }
-  return lane;
-};
+/** Which lanes have at least one clip you can HEAR — audibility is per-clip mute now. */
+const audibleLanes = (f) =>
+  (f?.lanes ?? []).map((l, i) => [i, l.clips.some((c) => c.muted !== true)])
+    .filter(([, on]) => on).map(([i]) => i);
 
 async function recordPass(ms) {
   await req("transport/locate", { beat: 0 });
@@ -149,13 +144,10 @@ try {
   report("lane 0 is the parked previous material",
     f?.lanes?.[0]?.name === "Previous" && (f?.lanes?.[0]?.clips?.length ?? 0) === 1,
     `lane0=${f?.lanes?.[0]?.name} clips=${f?.lanes?.[0]?.clips?.length}`);
-  // Comp: the NEW lane (1) plays from the fold start; pass 1 was LONGER, so past the new
-  // take's end the comp must fall back to lane 0 (the old material's tail stays audible).
-  // Effective audibility: new lane (1) at the fold start, old lane (0) past the new
-  // take's end (pass 1 was longer, so its tail must stay audible).
-  report("comp plays the new take inside its range and the old material outside",
-    laneAtBeat(f, 0.01) === 1 && laneAtBeat(f, f.endBeat - 0.01) === 0,
-    `comp=${JSON.stringify(f?.comp)}`);
+  // Audibility is MUTE now: the fresh take is the only unmuted version, the old material
+  // parks silent on lane 0 until the user clicks it.
+  report("only the new version is audible; the old material parks muted",
+    JSON.stringify(audibleLanes(f)) === "[1]", `audible=${JSON.stringify(audibleLanes(f))}`);
   const spanOk = f && Math.abs(f.startBeat - 0) < 0.1 &&
     f.endBeat >= Math.max(...(f.lanes.flatMap((l) => l.clips.map((c) => c.startBeat + 0.1))));
   report("folder span covers the union", Boolean(spanOk),
@@ -168,23 +160,23 @@ try {
   report("a pass over the folder appends a lane (no second folder)",
     t1.takeFolders?.length === 1 && f2?.lanes?.length === 3,
     `folders=${t1.takeFolders?.length} lanes=${f2?.lanes?.length}`);
-  report("the newest lane plays at the fold start; earlier comp is preserved after it",
-    laneAtBeat(f2, 0.01) === 2 && laneAtBeat(f2, f2.endBeat - 0.01) === 0,
-    `comp=${JSON.stringify(f2?.comp)}`);
+  report("the newest version is the only audible one after a third pass",
+    JSON.stringify(audibleLanes(f2)) === "[2]", `audible=${JSON.stringify(audibleLanes(f2))}`);
   await req("cmd/track.set", { trackId: trk.id, patch: { recordArm: false } });
 
-  /* ---- P4: setLaneMuted ---------------------------------------------------------------- */
-  await req("cmd/take.setLaneMuted", { trackId: trk.id, folderId: f2.id, lane: 0, muted: true });
+  /* ---- P4: take.pick chooses a version by its clip ------------------------------------ */
+  const oldClipId = f2.lanes[0].clips[0].id;
+  await req("cmd/take.pick", { trackId: trk.id, clipId: oldClipId });
   let tm = await trackOf(trk.id);
-  report("setLaneMuted mutes every clip in the lane",
-    tm.takeFolders[0].lanes[0].clips.every((c) => c.muted === true), "");
-  await req("cmd/take.setLaneMuted", { trackId: trk.id, folderId: f2.id, lane: 0, muted: false });
-  tm = await trackOf(trk.id);
-  report("setLaneMuted unmutes it again",
-    tm.takeFolders[0].lanes[0].clips.every((c) => c.muted !== true), "");
-  const badLane = await raw("cmd/take.setLaneMuted", { trackId: trk.id, folderId: f2.id, lane: 9, muted: true });
-  report("an out-of-range lane is refused",
-    badLane.ok === false && badLane.error?.code === "bad_request", `code=${badLane.error?.code}`);
+  report("take.pick makes the clicked version audible",
+    tm.takeFolders[0].lanes[0].clips[0].muted !== true,
+    `muted=${tm.takeFolders[0].lanes[0].clips[0].muted}`);
+  report("and mutes the versions overlapping it",
+    tm.takeFolders[0].lanes.slice(1).every((l) => l.clips.every((c) => c.muted === true)),
+    `audible=${JSON.stringify(audibleLanes(tm.takeFolders[0]))}`);
+  const badPick = await raw("cmd/take.pick", { trackId: trk.id, clipId: 999999 });
+  report("an unknown clipId is refused",
+    badPick.ok === false && badPick.error?.code === "not_found", `code=${badPick.error?.code}`);
 
   /* ---- P2: empty MIDI records nothing (toggle-independent) ----------------------------- */
   const midiT = (await req("cmd/track.add", { kind: "midi", name: "M" })).track;
@@ -210,8 +202,8 @@ try {
   report("a MIDI pass over an existing clip folds into lanes",
     (mt.clips?.length ?? 0) === 0 && mt.takeFolders?.length === 1 &&
       mf?.lanes?.length === 2 && mf?.lanes?.[0]?.name === "Previous" &&
-      laneAtBeat(mf, 0.01) === 1,
-    `clips=${mt.clips?.length} lanes=${mf?.lanes?.length} comp=${JSON.stringify(mf?.comp)}`);
+      JSON.stringify(audibleLanes(mf)) === "[1]",
+    `clips=${mt.clips?.length} lanes=${mf?.lanes?.length} audible=${JSON.stringify(audibleLanes(mf))}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   die(failed === 0 ? 0 : 1, failed === 0 ? "TAKES RECORD TEST: ALL PASS" : "TAKES RECORD TEST: FAILURES");

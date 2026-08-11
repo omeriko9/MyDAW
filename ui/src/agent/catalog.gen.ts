@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "5d847de17a88c334a9a166b34cf639ef37118c0a45c966865d4c134bd0a88258";
+export const AGENT_CATALOG_SHA256 = "3f472557d882ef1d1a1191b18c0f0bce3b8f465835e6a1f701ec51157f6c0c8d";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -1367,24 +1367,6 @@ export const AGENT_CATALOG: AgentCatalog = {
       "required": [
         "clipIds",
         "atBeat"
-      ],
-      "type": "object"
-    },
-    "CompSegment": {
-      "additionalProperties": false,
-      "properties": {
-        "lane": {
-          "description": "index into TakeFolder.lanes; -1 = silent gap",
-          "type": "number"
-        },
-        "startBeat": {
-          "description": "plays from here until the next segment's startBeat (or the folder end)",
-          "type": "number"
-        }
-      },
-      "required": [
-        "startBeat",
-        "lane"
       ],
       "type": "object"
     },
@@ -4076,13 +4058,6 @@ export const AGENT_CATALOG: AgentCatalog = {
     "TakeFolder": {
       "additionalProperties": false,
       "properties": {
-        "comp": {
-          "description": "sorted by startBeat; empty ⇒ lane 0 for the whole span",
-          "items": {
-            "$ref": "#/schemas/CompSegment"
-          },
-          "type": "array"
-        },
         "endBeat": {
           "type": "number"
         },
@@ -4107,8 +4082,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         "name",
         "startBeat",
         "endBeat",
-        "lanes",
-        "comp"
+        "lanes"
       ],
       "type": "object"
     },
@@ -4135,54 +4109,21 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
-    "TakeSetLaneMutedRequest": {
+    "TakePickRequest": {
       "additionalProperties": false,
-      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
       "properties": {
-        "folderId": {
+        "clipId": {
+          "description": "Clip in a take lane — the version to make audible.",
           "type": "number"
-        },
-        "lane": {
-          "type": "number"
-        },
-        "muted": {
-          "type": "boolean"
         },
         "trackId": {
+          "description": "Track that owns the take folder.",
           "type": "number"
         }
       },
       "required": [
         "trackId",
-        "folderId",
-        "lane",
-        "muted"
-      ],
-      "type": "object"
-    },
-    "TakeSetLanePlayAlongRequest": {
-      "additionalProperties": false,
-      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
-      "properties": {
-        "folderId": {
-          "type": "number"
-        },
-        "lane": {
-          "type": "number"
-        },
-        "trackId": {
-          "type": "number"
-        },
-        "on": {
-          "description": "true = also play this version alongside the comp's pick; false = back to comp-only.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "trackId",
-        "folderId",
-        "lane",
-        "on"
+        "clipId"
       ],
       "type": "object"
     },
@@ -7363,68 +7304,9 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
-      "name": "cmd/take.setComp",
+      "name": "cmd/take.pick",
       "category": "takes",
-      "description": "Choose a take lane or replace the comp segments of a take folder.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable",
-        "idempotent"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "take-folder"
-      ],
-      "produces": [],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "activeLane": {
-            "type": "number"
-          },
-          "comp": {
-            "items": {
-              "$ref": "#/schemas/CompSegment"
-            },
-            "type": "array"
-          },
-          "folderId": {
-            "type": "number"
-          },
-          "trackId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "folderId"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "$ref": "#/schemas/EmptyObject"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "folderId": 9,
-            "activeLane": 1
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/take.setLaneMuted",
-      "category": "takes",
-      "description": "Mute or unmute every clip in one take lane (the lane stays parked and silent even where the comp selects it). Undoable.",
+      "description": "Choose a version by its clip: unmute that clip and mute the ones overlapping it on the other lanes. One undo entry.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -7443,7 +7325,7 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "produces": [],
       "input": {
-        "$ref": "#/schemas/TakeSetLaneMutedRequest"
+        "$ref": "#/schemas/TakePickRequest"
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
@@ -7452,47 +7334,7 @@ export const AGENT_CATALOG: AgentCatalog = {
         {
           "input": {
             "trackId": 3,
-            "folderId": 9,
-            "lane": 1,
-            "muted": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/take.setLanePlayAlong",
-      "category": "takes",
-      "description": "Play one take lane IN ADDITION to whichever the comp selects, so two versions sound at once. Clip mute still wins. Undoable.",
-      "target": "engine",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable",
-        "idempotent"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "take-folder"
-      ],
-      "produces": [],
-      "input": {
-        "$ref": "#/schemas/TakeSetLanePlayAlongRequest"
-      },
-      "output": {
-        "$ref": "#/schemas/EmptyObject"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 3,
-            "folderId": 9,
-            "lane": 1,
-            "on": true
+            "clipId": 42
           }
         }
       ]
@@ -11547,9 +11389,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
-  "cmd/take.setComp",
-  "cmd/take.setLaneMuted",
-  "cmd/take.setLanePlayAlong",
+  "cmd/take.pick",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -11697,7 +11537,6 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/punch.set",
   "cmd/take.create",
   "cmd/take.flatten",
-  "cmd/take.setComp",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -12250,17 +12089,9 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/take.create"
   },
-  "cmd/take.setComp": {
+  "cmd/take.pick": {
     "kind": "operation",
-    "operation": "cmd/take.setComp"
-  },
-  "cmd/take.setLaneMuted": {
-    "kind": "operation",
-    "operation": "cmd/take.setLaneMuted"
-  },
-  "cmd/take.setLanePlayAlong": {
-    "kind": "operation",
-    "operation": "cmd/take.setLanePlayAlong"
+    "operation": "cmd/take.pick"
   },
   "cmd/take.flatten": {
     "kind": "operation",
@@ -12732,27 +12563,10 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "folderId": 9
     }
   ],
-  "cmd/take.setComp": [
-    {
-      "trackId": 7,
-      "folderId": 9,
-      "activeLane": 1
-    }
-  ],
-  "cmd/take.setLaneMuted": [
+  "cmd/take.pick": [
     {
       "trackId": 3,
-      "folderId": 9,
-      "lane": 1,
-      "muted": true
-    }
-  ],
-  "cmd/take.setLanePlayAlong": [
-    {
-      "trackId": 3,
-      "folderId": 9,
-      "lane": 1,
-      "on": true
+      "clipId": 42
     }
   ],
   "cmd/tempo.set": [

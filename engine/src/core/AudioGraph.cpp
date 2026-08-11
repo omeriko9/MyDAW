@@ -508,48 +508,21 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                     }
                 }
 
-                // ---- take folders / comping -----------------------------------------
-                // For each comp segment [segStart, segEnd) play ONLY the selected lane's
-                // material, windowed to the segment (sample-accurate for audio; a MIDI note
-                // plays if its onset falls in the segment, clamped to the segment end). Lane
-                // -1 (or out-of-range) is a silent gap.
+                // ---- take folders (versions) ----------------------------------------
+                // MUTE IS THE ONLY SELECTOR (2026-08-11 refactor): every UNMUTED clip in
+                // every lane sounds, exactly like a clip on the track itself. There is no
+                // comp array and no per-segment lane choice — "which version plays" is
+                // answered by which clips are unmuted, which is also what lets two versions
+                // be heard at once. The window is the whole folder span; per-clip bounds do
+                // the rest.
                 for (const TakeFolder& folder : t.takeFolders) {
                     if (folder.lanes.empty() || folder.endBeat <= folder.startBeat)
                         continue;
-                    // Segment boundaries: comp startBeats (clamped into the span) + folder end.
-                    struct Seg { double s, e; int lane; };
-                    std::vector<Seg> segs;
-                    if (folder.comp.empty()) {
-                        segs.push_back({folder.startBeat, folder.endBeat, 0});
-                    } else {
-                        for (size_t si = 0; si < folder.comp.size(); ++si) {
-                            double s = si == 0 ? folder.startBeat
-                                               : std::max(folder.comp[si].startBeat, folder.startBeat);
-                            double e = si + 1 < folder.comp.size()
-                                           ? std::max(folder.comp[si + 1].startBeat, s)
-                                           : folder.endBeat;
-                            e = std::min(e, folder.endBeat);
-                            if (e > s)
-                                segs.push_back({s, e, folder.comp[si].lane});
-                        }
-                    }
-                    for (const Seg& sg : segs) {
-                        const int64_t winS = map.beatsToSamples(sg.s);
-                        const int64_t winE = map.beatsToSamples(sg.e);
-                        // Which versions sound over this segment: the one the comp selects,
-                        // PLUS every lane flagged playAlong (SPEC §8.7 — the additive
-                        // override that lets two versions be heard at once, the way Cubase's
-                        // per-part mutes do). Deduped, so a playAlong lane that is also the
-                        // comp's pick never double-triggers. An out-of-range comp lane is a
-                        // silent gap, but playAlong lanes still sound through it.
-                        std::vector<int> sounding;
-                        if (sg.lane >= 0 && sg.lane < static_cast<int>(folder.lanes.size()))
-                            sounding.push_back(sg.lane);
-                        for (size_t li = 0; li < folder.lanes.size(); ++li)
-                            if (folder.lanes[li].playAlong && static_cast<int>(li) != sg.lane)
-                                sounding.push_back(static_cast<int>(li));
-                        for (int laneIdx : sounding)
-                        for (const Clip& c : folder.lanes[static_cast<size_t>(laneIdx)].clips) {
+                    {
+                        const int64_t winS = map.beatsToSamples(folder.startBeat);
+                        const int64_t winE = map.beatsToSamples(folder.endBeat);
+                        for (const TakeLane& lane : folder.lanes)
+                        for (const Clip& c : lane.clips) {
                             if (const AudioClip* a = asAudio(&c)) {
                                 if (a->muted || a->assetId == 0 || a->lengthSamples <= 0)
                                     continue;
@@ -595,10 +568,10 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                     if (note.startBeat < 0.0 || note.startBeat >= mc->lengthBeats)
                                         continue;
                                     const double onB = mc->startBeat + note.startBeat;
-                                    if (onB < sg.s || onB >= sg.e)
-                                        continue; // note belongs to the segment of its onset
-                                    const double offB =
-                                        std::min({onB + note.lengthBeats, clipEnd, sg.e});
+                                    if (onB < folder.startBeat || onB >= folder.endBeat)
+                                        continue; // onset outside the folder span
+                                    const double offB = std::min(
+                                        {onB + note.lengthBeats, clipEnd, folder.endBeat});
                                     if (offB <= onB)
                                         continue;
                                     const int64_t on = map.beatsToSamples(onB);

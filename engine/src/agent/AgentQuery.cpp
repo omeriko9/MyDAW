@@ -1102,7 +1102,6 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                     continue;
                 foundFolder = true;
                 budget.inspect(folder.lanes.size(), "take lanes");
-                budget.inspect(folder.comp.size(), "take comp segments");
                 json lanes = json::array();
                 std::size_t clipCount = 0;
                 for (const TakeLane& lane : folder.lanes) {
@@ -1115,14 +1114,11 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                     lanes.push_back(json{{"id", lane.id}, {"name", lane.name},
                                          {"clipIds", std::move(clipIds)}});
                 }
-                json comp = json::array();
-                for (const CompSegment& segment : folder.comp)
-                    comp.push_back(json{{"startBeat", segment.startBeat}, {"lane", segment.lane}});
                 items.push_back(json{{"id", folder.id}, {"trackId", track.id},
                                      {"trackName", track.name}, {"name", folder.name},
                                      {"startBeat", folder.startBeat}, {"endBeat", folder.endBeat},
                                      {"laneCount", folder.lanes.size()}, {"clipCount", clipCount},
-                                     {"lanes", std::move(lanes)}, {"comp", std::move(comp)}});
+                                     {"lanes", std::move(lanes)}});
             }
         });
         if (!foundFolder) {
@@ -1130,7 +1126,7 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
             return json();
         }
         fields = {"id", "trackId", "trackName", "name", "startBeat", "endBeat",
-                  "laneCount", "clipCount", "lanes", "comp"};
+                  "laneCount", "clipCount", "lanes"};
     } else if (args.view == "routing") {
         if (!validateWhereKeys(args.where, {"trackId", "type"}, errCode, errMsg))
             return json();

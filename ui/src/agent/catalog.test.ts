@@ -139,9 +139,7 @@ const REQUEST_TYPES = [
   "cmd/clip.processAudio",
   "cmd/clip.processChain",
   "cmd/take.create",
-  "cmd/take.setComp",
-  "cmd/take.setLaneMuted",
-  "cmd/take.setLanePlayAlong",
+  "cmd/take.pick",
   "cmd/take.flatten",
   "midimap/learn",
   "midimap/remove",
@@ -299,9 +297,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(139);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(137);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(153);
+    expect(AGENT_CATALOG.operations).toHaveLength(151);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

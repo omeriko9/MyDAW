@@ -256,15 +256,6 @@ export interface TakeLane {
   id: number;
   name: string;
   clips: Clip[];
-  /** play this version IN ADDITION to whichever the comp selects (SPEC §8.7) — the
-   *  additive override that lets two versions sound at once. Clip mute still wins. */
-  playAlong?: boolean;
-}
-export interface CompSegment {
-  /** plays from here until the next segment's startBeat (or the folder end) */
-  startBeat: number;
-  /** index into TakeFolder.lanes; -1 = silent gap */
-  lane: number;
 }
 export interface TakeFolder {
   id: number;
@@ -272,8 +263,6 @@ export interface TakeFolder {
   startBeat: number;
   endBeat: number;
   lanes: TakeLane[];
-  /** sorted by startBeat; empty ⇒ lane 0 for the whole span */
-  comp: CompSegment[];
 }
 
 export interface Send {
@@ -2279,15 +2268,7 @@ export interface RequestMap {
   "cmd/clip.processAudio": { req: ClipProcessAudioRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/clip.processChain": { req: ClipProcessChainRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/take.create": { req: { trackId: number; clipIds: number[]; name?: string }; reply: { folder: TakeFolder } };
-  "cmd/take.setComp": { req: { trackId: number; folderId: number; activeLane?: number; comp?: CompSegment[] }; reply: EmptyObject };
-  "cmd/take.setLaneMuted": {
-    req: { trackId: number; folderId: number; lane: number; muted: boolean };
-    reply: EmptyObject;
-  };
-  "cmd/take.setLanePlayAlong": {
-    req: { trackId: number; folderId: number; lane: number; on: boolean };
-    reply: EmptyObject;
-  };
+  "cmd/take.pick": { req: { trackId: number; clipId: number }; reply: EmptyObject };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };
   "midimap/learn": { req: { paramRef: string }; reply: MidiMapsState };
   "midimap/remove": { req: { paramRef: string }; reply: MidiMapsState };
