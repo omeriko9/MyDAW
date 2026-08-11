@@ -13,11 +13,14 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { PluginHealthFile, ProbeProgressEvent, ScanVerdict } from "../../protocol/types";
+import type { PluginHealthFile, PluginHealthPlugin, ProbeProgressEvent, ScanVerdict } from "../../protocol/types";
 import {
+  addPlugin,
+  addTrack,
   blacklistPlugin,
   cancelPluginProbe,
   getPluginHealth,
+  openPluginEditor,
   probePlugins,
   relocatePlugin,
   revealPluginFile,
@@ -163,6 +166,18 @@ export default function HealthPanel({ connected }: { connected: boolean }) {
   const problems =
     (summary.init_failed ?? 0) + (summary.scan_crashed ?? 0) + (summary.scan_timeout ?? 0);
   const benign = (summary.not_plugin ?? 0) + (summary.dep_missing ?? 0);
+
+  // "Start" = hear/see the plugin right now: a new track named after it (instrument track
+  // for instruments, audio track for effects), the plugin as its insert, editor open. This
+  // page has no store access (main.tsx constraint), so it cannot target the selection —
+  // a fresh track is the only honest destination, and it is plain to undo.
+  const startPlugin = (p: PluginHealthPlugin) =>
+    act(async () => {
+      const kind = p.isInstrument ? ("instrument" as const) : ("audio" as const);
+      const tr = await addTrack(kind, { name: p.name });
+      const added = await addPlugin(tr.track.id, p.uid);
+      await openPluginEditor(added.instance.instanceId);
+    }, `"${p.name}" started on a new ${p.isInstrument ? "instrument" : "audio"} track — its editor window is open`);
 
   const relocateFlow = (f: PluginHealthFile) => {
     // A text prompt is honest here: the engine validates existence and warns when the
@@ -346,6 +361,13 @@ export default function HealthPanel({ connected }: { connected: boolean }) {
                 {detail.plugins.map((p) => (
                   <div key={`${p.uid}|${p.bitness}`} className="pm-detail-plugin">
                     <b>{p.name}</b> <span className="pm-faint">{p.vendor} · {p.category || "—"}</span>
+                    {detail.verdict === "ok" && !detail.blacklisted && (
+                      <button type="button" className="pm-btn pm-btn-start" disabled={!actionable}
+                        title={`Add "${p.name}" on a new ${p.isInstrument ? "instrument" : "audio"} track and open its editor`}
+                        onClick={(e) => { e.stopPropagation(); startPlugin(p); }}>
+                        Start
+                      </button>
+                    )}
                     {p.runtime && (
                       <div className={p.runtime.verdict === "ok" ? "pm-ok-line" : "pm-bad-line"}>
                         last session load: {p.runtime.verdict}

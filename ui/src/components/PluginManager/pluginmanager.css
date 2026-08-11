@@ -368,6 +368,7 @@
 .pm-detail-grid .mono { font-family: var(--font-mono, monospace); font-size: 11px; word-break: break-all; }
 .pm-detail-plugins { margin-bottom: 12px; }
 .pm-detail-plugin { padding: 6px 0; border-top: 1px solid var(--border); }
+.pm-btn-start { float: right; margin-left: 8px; }
 .pm-ok-line { color: var(--ok); font-size: 11px; }
 .pm-bad-line { color: var(--danger); font-size: 11px; }
 .pm-detail-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
