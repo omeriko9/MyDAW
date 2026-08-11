@@ -55,8 +55,53 @@
  *   waitFor now reports, instead of blaming whatever you were waiting for.
  */
 
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import nodePath from "node:path";
 import { openSlot } from "./ui-drive.mjs";
+
+const SMOKE_ROOT = nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..");
+
+/** Newest mtime anywhere under `dir` (0 when it does not exist). */
+function newestMtime(dir) {
+  let newest = 0;
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = nodePath.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else {
+        const m = statSync(p).mtimeMs;
+        if (m > newest) newest = m;
+      }
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return newest;
+}
+
+/**
+ * `ui/dist` is GITIGNORED, so this suite tests whatever was last built — NOT `ui/src`.
+ *
+ * Paid for on 2026-08-10: a whole session's "ui-smoke is green" was testing an hours-old
+ * bundle. Rebuilding dist immediately exposed 7 real failures that had been sitting on
+ * main the entire time. A green run against a stale bundle is not weak evidence, it is a
+ * lie about current source — so refuse to run instead of printing a comforting number.
+ * `--allow-stale-dist` opts out when testing the old bundle is genuinely what you want.
+ */
+function refuseIfDistIsStale() {
+  const src = newestMtime(nodePath.join(SMOKE_ROOT, "ui", "src"));
+  const dist = newestMtime(nodePath.join(SMOKE_ROOT, "ui", "dist"));
+  if (dist === 0 || src <= dist) return;
+  const ageMin = Math.round((src - dist) / 60000);
+  console.log(
+    `ui-smoke: REFUSING TO RUN — ui/dist is ${ageMin} min older than ui/src.\n` +
+    `  This suite serves ui/dist, so it would test a bundle that predates your changes\n` +
+    `  and report green regardless of them.\n` +
+    `  Fix:  cd ui && npm run build     (retry on vite's emptyDir error — see BUILDING.md)\n` +
+    `  Override, if you really mean it:  --allow-stale-dist`,
+  );
+  process.exit(2);
+}
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -2028,13 +2073,19 @@ async function main() {
   // never kill a slot someone is debugging in.
   const slot = Number(arg("slot", "8"));
   const filter = arg("filter", "");
-  const picked = filter
-    ? checks.filter((c) => [c.id, c.title, c.area].some((f) => f.toLowerCase().includes(filter.toLowerCase())))
+  // Comma-separated: --filter a,b runs everything matching a OR b, in SUITE order. Order
+  // is the point — these checks share one slot, so reproducing an order-dependent failure
+  // means replaying a prefix of the suite, not one check in isolation.
+  const terms = filter.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  const picked = terms.length
+    ? checks.filter((c) => terms.some((t) => [c.id, c.title, c.area].some((f) => f.toLowerCase().includes(t))))
     : checks;
   if (picked.length === 0) {
     console.log(`no checks match --filter ${filter}`);
     process.exit(1);
   }
+
+  if (!flag("allow-stale-dist")) refuseIfDistIsStale();
 
   console.log(`ui-smoke: ${picked.length} check(s) on slot ${slot}${filter ? ` (filter "${filter}")` : ""}`);
   const t0 = Date.now();

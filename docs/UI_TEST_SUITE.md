@@ -8,7 +8,9 @@ file is the map — the mechanics of driving the browser live in
 ```bash
 node scripts/ui-smoke.mjs                     # unattended: every check, non-zero on failure
 node scripts/ui-smoke.mjs --filter transport  # by check id, title or area
+node scripts/ui-smoke.mjs --filter a,b        # comma list — runs matches in SUITE ORDER
 node scripts/ui-smoke.mjs --headful --keep    # watch it, and leave the slot up to poke at
+node scripts/ui-smoke.mjs --allow-stale-dist  # skip the ui/dist freshness refusal
 ```
 
 ## Status, honestly
@@ -203,6 +205,70 @@ so it waits exactly as long as the engine makes it.
 `transport` · `timeline-tracks` · `timeline-clips` · `mixer` · `pianoroll` ·
 `clipeditor` · `sheetmusic` · `browser-inspector` · `pluginmanager` ·
 `dialogs-modals` · `palette-keyboard` · `menus-layout` · `settings` · `agent-store`
+
+## Two ways this suite can lie to you
+
+The traps below are about individual checks giving a wrong answer. These two are worse:
+the suite as a whole reports a number that means nothing. Both were diagnosed on
+2026-08-10, and both had been silently in effect for an unknown length of time.
+
+### 1. A green run against a stale bundle
+
+`ui/dist` is **gitignored**, so this suite serves — and therefore tests — whatever was
+last built on that machine. It does not test `ui/src`. On 2026-08-10 the working tree's
+dist was hours old; ui-smoke reported 28/29 all session. Rebuilding it exposed **7 real
+failures that had been sitting on `main` the whole time**. The green number was not weak
+evidence, it was an assertion about code that was never loaded.
+
+`ui-smoke.mjs` now refuses to run when `ui/src` is newer than `ui/dist` (override with
+`--allow-stale-dist`). The generalisable lesson is the one worth keeping: **before
+believing a result, ask which artifact it exercised.** A build step between you and the
+test is a place where evidence goes stale.
+
+Related build trap: `npm run build` in `ui/` fails perhaps half the time at vite's
+`emptyDir` because Dropbox holds a lock on `ui/dist`. It is transient — retry in a loop —
+but a *failed* attempt can leave dist half-deleted, after which the app will not mount at
+all and every check dies at "app mount".
+
+### 2. The readiness race (fixed) — and how to find the next one like it
+
+Symptom: 6–8 checks failing in a cluster, three of them burning a full 15 s timeout,
+the rest failing on DOM that was never created. **Every one of them passed in isolation.**
+It was called flake twice. It was not flake.
+
+The chain, which is worth understanding because the shape will recur:
+
+1. The runner calls `s.reload()` between checks, so every check but the first starts on a
+   brand-new document.
+2. `READY_JS` in `ui-drive.mjs` treated "React mounted + status dot green" as ready. **A
+   green socket is not readiness**: `store.project` is filled by `session/hello`'s *reply*,
+   which lands later.
+3. In that window every project-gated control renders disabled — including all of
+   `buildProjectMenu`'s add-track rows ("No project — connect to the engine first").
+4. **Context menus are built once at open and never refresh.** So a check that opened a
+   menu inside that window held a permanently dead menu, clicked a disabled row, and waited
+   out the full timeout for a dialog that could never appear.
+
+Fix: `READY_JS` additionally requires `select[title="Snap grid"]` to be enabled — that
+control is `disabled={!project}`, making it a faithful DOM proxy for "the store has a
+project" without adding a test-only hook to the app. Result: 29/30 with zero failures, and
+the suite went from ~93 s to ~42 s once the three timeouts stopped happening.
+
+The method that found it, which is the reusable part:
+
+- **"Passes alone, fails in the suite" = order dependence.** Reproduce with a *prefix* of
+  the suite. `--filter` takes a comma list and preserves suite order specifically for this:
+  `--filter technique-master-glue,add-audio-track` reproduced it in 21 s instead of 90.
+- **Bisect the predecessor**, not the failing check — pair the victim with each earlier
+  candidate until one reproduces.
+- **Capture state at the failure**, not after. Wrapping the failing `untilEval` in a
+  `try/catch` that dumps DOM state named the cause in one run: the menu item was
+  `disabled: true` with the title spelling out why.
+- **`performance.now()` is a page-age clock.** ~15 s on a suite that had run far longer
+  proved the document had just been replaced — that is what pointed at the reload.
+- **Re-do the failed action fresh.** Re-opening the same menu after the failure gave
+  `disabled: false`, proving the dead menu was a stale *snapshot* rather than a lasting
+  state — which is what indicted "built once, never refreshes".
 
 ## Traps that produced false results
 

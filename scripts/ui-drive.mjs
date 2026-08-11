@@ -72,11 +72,28 @@ const CHROMES = [
 
 /** Anything painted by the app proper — proves React mounted, not just that HTML loaded. */
 const MOUNTED_JS = "!!document.querySelector('.tl-clipcanvas, .mixer-root, [class*=\"tlh\"]')";
-/** Mounted AND talking to the engine AND not mid-reload (see Slot.reload). */
+/**
+ * Mounted AND talking to the engine AND HOLDING A PROJECT AND not mid-reload (see
+ * Slot.reload).
+ *
+ * The project clause is load-bearing (2026-08-10). A green socket is NOT readiness: the
+ * store's `project` is filled by session/hello's REPLY, and until that lands every
+ * project-gated control renders disabled — including every Add-track row in the Project
+ * menu ("No project — connect to the engine first"). Context menus are built once at open
+ * and never refresh, so a check that opened a menu inside that window got a permanently
+ * dead menu and timed out 15 s later on a dialog that could never appear. Since the runner
+ * reloads between checks, that raced on every check but the first, cascading into a
+ * half-red suite on a slow/loaded machine while each check passed in isolation.
+ *
+ * The snap-grid select is `disabled={!project}` (TransportBar), which makes it a faithful
+ * DOM proxy for "the store has a project" without adding a test-only hook to the app.
+ */
 const READY_JS = `(() => {
   if (window.__uiDriveReloading) return false;
   if (!(${MOUNTED_JS})) return false;
-  return document.querySelector('.sb-dot')?.dataset.ok === 'true';
+  if (document.querySelector('.sb-dot')?.dataset.ok !== 'true') return false;
+  const snap = document.querySelector('select[title="Snap grid"]');
+  return !!snap && snap.disabled === false;
 })()`;
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

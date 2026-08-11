@@ -31,6 +31,18 @@ cmake --preset x64-release      && cmake --build --preset x64-release
 cmake --preset host32-release   && cmake --build --preset host32-release
 ```
 
+Two failures here are environmental, not your change:
+
+- `npm run build` dies at vite's `emptyDir` roughly half the time because Dropbox holds a
+  handle on `ui/dist`. Just retry — but note a *failed* attempt can leave dist
+  half-deleted, and then the app will not mount at all, which looks like a catastrophic
+  regression rather than a build that never finished.
+- The engine link fails `LNK1104: cannot open ... mydaw-engine.exe` when an engine is
+  running. **Rename the running exe** (`mydaw-engine.exe.inuse-<stamp>`) and rebuild —
+  never kill the process, it may be the user's live session. Delete the leftovers
+  afterwards; `rebuild.ps1` kills engines it did not start, which has cost a live session
+  before.
+
 ## Engine flags
 
 `--port N` (8417) · `--driver wasapi|null` (`asio` once enabled) · `--ui-root <dir>` ·
@@ -96,7 +108,15 @@ Three things the gate does that are easy to get wrong by hand:
   falls back to `--skip-corpus` when the gitignored corpus harness is absent. A runner
   that is red on every machine but one teaches people to ignore it.
 - **It builds nothing.** If `ui/dist` or the engine is stale the gate tests the stale
-  thing, so build first — and never while `ui-drive` slots are running.
+  thing, so build first — and never while `ui-drive` slots are running. This warning was
+  already here on 2026-08-10 and was still walked into for a whole session (ui-smoke
+  reported green all day against an hours-old bundle that was hiding 7 real failures), so
+  it is now **enforced**: `ui-smoke.mjs` refuses to start when `ui/src` is newer than
+  `ui/dist`. Nothing enforces it for the engine yet — rebuild it yourself.
+- **Never run two `gate.mjs` invocations at once.** The port collisions above are between
+  *processes*, so a second gate — or a gate started while you are running a suite by hand —
+  produces failures indistinguishable from flake. One cost half an hour chasing a
+  `recovery` failure that was only ever a background gate still running.
 
 ## Packaging a release (portable single exe)
 
