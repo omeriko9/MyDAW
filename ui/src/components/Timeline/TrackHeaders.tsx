@@ -1403,6 +1403,17 @@ export default function TrackHeaders({
       <div
         className="tl-headers"
         ref={headersRef}
+        onPointerDown={(e) => {
+          // Empty space in the TRACK LIST is the one place that clears the track
+          // selection (2026-08-11, Omer). The arrangement canvas deliberately no longer
+          // does it — clicking a clip or empty bar used to drop the selection, forcing a
+          // re-select after almost every click mid-session. Rows/lanes handle their own
+          // pointer-down and never reach here; Esc still clears everything.
+          if (e.button !== 0) return;
+          if ((e.target as HTMLElement).closest?.(".tlh-row, .tlh-lane, .tlh-takelane")) return;
+          if (useStore.getState().selection.trackIds.length === 0) return;
+          setSelection({ trackIds: [], clipIds: [], noteIds: [], scope: "none" });
+        }}
         onContextMenu={(e) => {
           // rows stopPropagation in their own handler — this is empty space / lane rows
           e.preventDefault();

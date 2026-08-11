@@ -65,8 +65,8 @@ it out, do not silently keep a dead code path.
 4. ~~R4 mute tool.~~ DONE
 5. ~~R5 lane clips addressable + marquee.~~ DONE (done BEFORE 4 — the mute tool is
    useless on version clips until `clipById`/`takeClip` reach them)
-6. ~~R6 selection stickiness.~~ DONE (canvas half; an empty click in the track LIST does
-   not clear the selection today — TrackHeaders has no such handler. Esc does.)
+6. ~~R6 selection stickiness.~~ DONE, both halves: the canvas keeps the track selection,
+   an empty click in the track list clears it, Esc clears everything.
 
 Catalog bookkeeping every time an op is added/removed: `capabilities.json` →
 `node scripts/generate-agent-catalog.mjs` → counts in `scripts/generate-agent-catalog.mjs`

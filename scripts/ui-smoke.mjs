@@ -2244,6 +2244,47 @@ export const checks = [
   },
 
   {
+    id: "track-selection-survives-canvas-clicks",
+    title: "a selected track stays selected when you click the arrangement, and the track list clears it",
+    area: "timeline-selection",
+    guards: "2026-08-11 (Omer): clicking empty canvas OR a clip inside a track's territory used to drop the track selection, so during a recording session the track had to be re-selected after almost every click. Only an empty click in the TRACK LIST clears it now, or Esc.",
+    run: async (s, tt) => {
+      const selCount = () => s.eval(`(() => {
+        const r = document.querySelectorAll('.tlh-row[data-selected="true"]').length;
+        return r;
+      })()`);
+      const geo = await s.eval(`(() => {
+        const row = document.querySelector(".tlh-row").getBoundingClientRect();
+        const hdr = document.querySelector(".tl-headers").getBoundingClientRect();
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({
+          // Top-right of the row: past the name (which owns its own pointerdown for
+          // rename) and above the M/S/R control strip.
+          rowX: row.right - 14, rowY: row.top + 8,
+          emptyListX: hdr.left + hdr.width / 2, emptyListY: hdr.bottom - 12,
+          canvasX: cb.left + cb.width / 2, canvasY: cb.top + cb.height - 24,
+        });
+      })()`);
+      const g = JSON.parse(geo);
+
+      await s.click(g.rowX, g.rowY);
+      await s.untilEval("clicking a track header selects it", () =>
+        document.querySelectorAll('.tlh-row[data-selected="true"]').length === 1);
+
+      // The regression: an empty click on the arrangement must NOT clear it.
+      await s.click(g.canvasX, g.canvasY);
+      await new Promise((r) => setTimeout(r, 200));
+      tt.eq(await selCount(), 1, "an empty canvas click leaves the track selected");
+
+      // And an empty click in the TRACK LIST is what clears it.
+      await s.click(g.emptyListX, g.emptyListY);
+      await s.untilEval("an empty click in the track list clears the selection", () =>
+        document.querySelectorAll('.tlh-row[data-selected="true"]').length === 0);
+      tt.ok(true, "the track list is the place that clears it");
+    },
+  },
+
+  {
     id: "versions-marquee-and-mute-tool",
     title: "a rubber band selects version clips like any other, and the X tool mutes anything",
     area: "timeline-takes",
