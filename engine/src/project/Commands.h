@@ -297,10 +297,6 @@ private:
     json vcaAdd(const json& p, CmdResult& r);
     json vcaRemove(const json& p, CmdResult& r);
     json vcaSet(const json& p, bool transient, CmdResult& r);
-    // §5.3 comping (take folders)
-    json takeCreate(const json& p, CmdResult& r);
-    json takePick(const json& p, CmdResult& r);
-    json takeFlatten(const json& p, CmdResult& r);
     // internal
     json recordingCommit(const json& p, CmdResult& r);
     json handleUndoRedo(bool isRedo, std::string& errCode, std::string& errMsg);

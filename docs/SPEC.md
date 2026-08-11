@@ -323,12 +323,6 @@ the entire drag.
   duplicate over selected NOTES (module-level clipboard, offsets relative to the earliest
   onset; paste lands at the grid-snapped playhead inside the active clip, else at clip start).
   Falls through to the timeline clip clipboard when no notes are selected.
-- **Versions / take folders** (see §8.7): `cmd/take.create {trackId, clipIds:[], name?}` →
-  `{folder}` moves the listed clips off the flat clip list into a new take folder (one lane per
-  clip; all but the newest arrive muted); `cmd/take.pick {trackId, clipId}` makes the clicked
-  version audible and mutes the clips overlapping it in the same folder;
-  `cmd/take.flatten {trackId, folderId}` → `{clipIds:[]}` collapses the folder keeping only
-  the UNMUTED clips. All three are structural (graph rebuild).
 - **MIDI Modifiers** (`Track.midiMod`, MIDI/Instrument tracks; Cubase-style, playback-only):
   `{transpose ±24, velocityShift ±63, velocityCompress 0.25..4, randomPitch 0..12,
   randomVelocity 0..63, velMin/velMax 1..127}` — random offsets re-roll on every graph rebuild
@@ -742,7 +736,6 @@ Track = {
   parentId?: number /*folder*/, channels: 1|2,
   volume: number /*linear, 1=0dB*/, pan: number /*-1..1*/, mute, solo, recordArm, monitor?: bool,
   automationWrite?: bool /*per-track "W" arm, §5.4; omitted when off*/,
-  keepTakes?: bool /*per-track versions record mode, §8.7; omitted when off*/,
   inputDevice?: string, inputChannel?: number, inputGainDb?: number /*audio only, -24..24,
   omitted at 0; recorded file stays RAW, §5.5*/, outputTarget: number|"master"|"none",
   frozen?: bool, frozenAssetId?: number,
@@ -755,12 +748,8 @@ Track = {
   eq?: {bypass: bool, bands: EqBand[]},            // per-track channel EQ; omitted when no bands && !bypass
   sends: [{destTrackId, level, pre, enabled}],
   automation: [{paramRef: string, points: [{id, beat, value, curve?: number /*-1..1 bend*/}]}],
-  clips: (AudioClip|MidiClip)[],
-  takeFolders?: TakeFolder[]        // versions; omitted when empty (§8.7)
+  clips: (AudioClip|MidiClip)[]
 }
-TakeFolder = {id, name, startBeat, endBeat,
-  lanes: [{id, name, clips: (AudioClip|MidiClip)[]}]}   // one lane per version; audibility is
-                                                        // per-clip `muted` (no comp array)
 EqBand = {enabled: bool, type: number /*0=peak 1=lowShelf 2=highShelf 3=highCut 4=lowCut 5=notch*/,
   freqHz: number /*20..20000*/, gainDb: number /*-24..+24, ignored for cut/notch*/, q: number /*0.1..18*/}
 PluginInstance = {instanceId, uid, format, path, bitness, name, version?: string /*exact
@@ -1075,52 +1064,22 @@ passes dry through).
   {patch:{sidechainSource}}` is **structural** (no RT param); the generic editor shows a source
   picker for `builtin:compressor`.
 
-### 8.7 Versions (take folders)
+### 8.7 Versions / take folders — REMOVED (2026-08-11)
 
-**Refactored 2026-08-11 (Omer): one versions feature, mute is the only selector.** The former
-comp-segment model (`TakeFolder.comp`, `cmd/take.setComp`, swipe-comping, `paintComp`,
-`TakeLane.playAlong`) and the separate Track Versions feature (`cmd/version.*`, whole-track
-playlists) were both REMOVED. History: docs/VERSIONS_REFACTOR_PLAN.md.
+MyDAW has **no** take-folder, lane, comping or track-version feature. Both attempts were
+removed at Omer's request ("the experience is horrible… I'll start from scratch later"):
+the comp-segment take folders and the mute-model versions that replaced them, plus the older
+whole-track `cmd/version.*` playlists. Gone from the model, the graph, the protocol, the
+catalog, the UI and the tests — `TakeFolder`, `TakeLane`, `Track.takeFolders`,
+`Track.keepTakes`, `cmd/take.*`, `cmd/version.*`.
 
-A track keeps alternative recordings of the same material as a `TakeFolder` (§6): a span
-`[startBeat,endBeat)` plus `lanes`, each lane one version (a small clip list) drawn as a
-sub-row under the track. **Audibility is per-clip `muted` and nothing else** — playback
-(`AudioGraph::buildPlan`) plays every UNMUTED clip in every lane, exactly like clips on the
-track itself. Hearing two versions together = unmuting both; there is no segment resolution
-anywhere.
+Recording therefore never folds: a pass over existing material simply overlaps it, and
+CYCLE recording stacks one plain clip per lap at the loop start (all audible). The recorder
+still SPLITS laps rather than merging them — `midi-lap-test` and `punch-test` pin that.
 
-**Recording into versions** is armed PER TRACK: `cmd/track.set {keepTakes}` (the layers toggle
-in the track header, beside W/A — the slot the old Track Version chip occupied). While on, a
-recording that overlaps existing material folds it into lanes (`foldRecordedUnit`): overlap
-with a folder appends the laps as new lanes and extends the span; overlap with loose clips
-moves them wholesale into lane 0 "Previous". Either way everything that was already there is
-MUTED and the newest lap stays audible. Off = plain overlap-and-sum (legacy). Cycle recording
-stacks laps the same way (newest audible). An all-empty MIDI take (zero notes AND zero cc)
-creates NO clip, unconditionally; CC-only takes are kept.
-
-**Choosing a version is a CLICK on its clip** — `cmd/take.pick {trackId, clipId}` unmutes that
-clip and mutes every clip overlapping it in the same folder (overlap, not whole-lane, so a
-folder holding several separate parts only re-picks the clicked part). One undo entry.
-Combinations are the **X (mute) tool**'s job (`Tool "mute"`, toolbar button, shortcut 5 — the
-X *key* stays Crossfade): it toggles `muted` on ANY clip anywhere via `cmd/clip.set`.
-
-**Lane clips are FIRST-CLASS**: `Model::clipById` walks folders' lanes and `takeClip` removes
-from them (an emptied lane, then an emptied folder, is cleaned up), so select / delete /
-process / move / multi-clip edits all reach version clips. The marquee spans track rows AND
-lane rows, so one rubber band grabs versioned and unversioned material together.
-
-**Other commands** (§5.3): `cmd/take.create {trackId, clipIds}` folds selected clips into a
-folder ("Stack as Versions" in the clip context menu; all but the newest arrive muted) AND
-sets `keepTakes` — stacking is choosing versions; `cmd/take.flatten {trackId, folderId}`
-collapses the folder keeping only the UNMUTED clips. Both structural.
-
-**UI — ONE switch** (2026-08-11, Omer: "why do I need two buttons?"): `Track.keepTakes` is the
-mode AND the visibility. The header layers toggle on = versions engaged: recordings fold into
-lanes and the sub-rows are shown; off = collapsed, normal track, recordings overlap. There is
-no separate view state (the former "T" toggle and `useRevealNewTakeLanes` were removed). The
-lane row's chevron and the right-click "Hide/Show Versions" drive the same flag. The
-Inspector's Versions section lists one strip per lane with muted clips faded; clicking a clip
-picks it there too.
+If versions are rebuilt, start from the design lesson rather than this code: the fatal
+confusion was two features owning the word "Versions", and a mode switch that was also a
+view switch. Backup of the last implementation: branch `backup/versions-feature-2026-08-11`.
 
 **Track selection is sticky** (same 2026-08-11 brief): clicking the arrangement — empty space
 or a clip — does NOT clear the selected track; only an empty click in the track LIST or Esc

@@ -394,27 +394,6 @@ inline void setClipColor(Clip& c, std::string color) {
 }
 
 // ---------------------------------------------------------------------------
-// Take folders / comping (SPEC §6 Comping)
-// ---------------------------------------------------------------------------
-// A take folder holds alternative recordings ("takes") of the same passage stacked in lanes,
-// plus a comp: an ordered list of segments that each select one lane to play. Loop-recording
-// appends one lane per lap. Playback (AudioGraph::buildPlan) emits, per comp segment, only the
-// selected lane's material clipped to the segment window — non-selected lanes stay silent.
-struct TakeLane {
-    uint64_t id = 0;
-    std::string name;        // "Take 1", "Take 2", …
-    std::vector<Clip> clips; // this take's material (audio or midi); loop-record: one clip per lap
-};
-
-struct TakeFolder {
-    uint64_t id = 0;
-    std::string name;
-    double startBeat = 0.0;  // folder span on the timeline
-    double endBeat = 0.0;
-    std::vector<TakeLane> lanes;
-};
-
-// ---------------------------------------------------------------------------
 // Track
 // ---------------------------------------------------------------------------
 
@@ -454,11 +433,6 @@ struct Track {
     // plugin-param moves while the transport rolls, WITHOUT arming the whole project —
     // the global transport arm stays a master switch that records every track.
     bool automationWrite = false;
-    // Per-track "Versions" record mode (SPEC §8.7): while on, a recording that overlaps
-    // this track's existing material folds into take lanes (newest version plays, older
-    // ones park in their own sub-rows) instead of overlapping and summing. Per-track
-    // because it is a property of how you are tracking THIS part, not of the transport.
-    bool keepTakes = false;
     bool monitor = false;          // optional
     std::string inputDevice;       // optional capture device id, "" = none/default
     int inputChannel = -1;         // optional, -1 = unset
@@ -501,7 +475,6 @@ struct Track {
     std::vector<Send> sends;
     std::vector<AutomationLane> automation;
     std::vector<Clip> clips;
-    std::vector<TakeFolder> takeFolders; // versions: stacked takes as sub-rows
 
     bool isBusLike() const { return kind == TrackKind::Bus || kind == TrackKind::Master; }
     bool canHoldClips() const {
@@ -646,23 +619,13 @@ public:
     }
 
     // --- clip lookups --------------------------------------------------------
-    // Take-lane clips are FIRST-CLASS (2026-08-11): a version's clip is addressable
-    // exactly like any other, so mute, select, delete, process and multi-clip edits all
-    // reach it. Before this they were deliberately unreachable and the whole versions
-    // workflow had to be driven through bespoke take.* commands.
     ClipRef clipById(uint64_t id) {
         if (id == 0)
             return {};
-        for (Track& t : project.tracks) {
+        for (Track& t : project.tracks)
             for (Clip& c : t.clips)
                 if (clipId(c) == id)
                     return ClipRef{&t, &c};
-            for (TakeFolder& f : t.takeFolders)
-                for (TakeLane& ln : f.lanes)
-                    for (Clip& c : ln.clips)
-                        if (clipId(c) == id)
-                            return ClipRef{&t, &c};
-        }
         return {};
     }
     ConstClipRef clipById(uint64_t id) const {
@@ -816,7 +779,6 @@ json toJson(const Arranger& a);
 json toJson(const ChordEvent& c);
 json toJson(const TransposeEvent& t);
 json toJson(const Asset& a);
-json toJson(const TakeFolder& f);
 json toJson(const OutputTarget& o); // number | "master" | "none"
 
 bool fromJson(const json& j, Project& out, std::string* err = nullptr);
@@ -836,7 +798,6 @@ bool fromJson(const json& j, Arranger& out, std::string* err = nullptr);
 bool fromJson(const json& j, ChordEvent& out, std::string* err = nullptr);
 bool fromJson(const json& j, TransposeEvent& out, std::string* err = nullptr);
 bool fromJson(const json& j, Asset& out, std::string* err = nullptr);
-bool fromJson(const json& j, TakeFolder& out, std::string* err = nullptr);
 bool fromJson(const json& j, OutputTarget& out, std::string* err = nullptr);
 
 } // namespace mydaw

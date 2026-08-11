@@ -64,15 +64,6 @@ void scanClipIds(const Clip& c, uint64_t& maxId) {
     }
 }
 
-void scanTakeFolderIds(const TakeFolder& f, uint64_t& maxId) {
-    maxId = std::max(maxId, f.id);
-    for (const TakeLane& l : f.lanes) {
-        maxId = std::max(maxId, l.id);
-        for (const Clip& c : l.clips)
-            scanClipIds(c, maxId);
-    }
-}
-
 void scanTrackIds(const Track& t, uint64_t& maxId) {
     maxId = std::max(maxId, t.id);
     maxId = std::max(maxId, t.frozenAssetId);
@@ -83,10 +74,6 @@ void scanTrackIds(const Track& t, uint64_t& maxId) {
             maxId = std::max(maxId, pt.id);
     for (const Clip& c : t.clips)
         scanClipIds(c, maxId);
-    // Comping takes hold real clip/lane ids too (previously missed — nextId could
-    // collide with a take-lane clip after load).
-    for (const TakeFolder& f : t.takeFolders)
-        scanTakeFolderIds(f, maxId);
 }
 } // namespace
 

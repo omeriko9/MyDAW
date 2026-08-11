@@ -328,7 +328,7 @@ void addTrackFields(FieldSet& fields) {
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
         "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiOutChannel",
         "midiOutDevice", "vcaId", "eq",
-        "clipCount", "insertCount", "sendCount", "automationLaneCount", "takeFolderCount",
+        "clipCount", "insertCount", "sendCount", "automationLaneCount",
     };
     fields.insert(std::begin(names), std::end(names));
 }
@@ -369,7 +369,6 @@ json trackSummary(const Track& track) {
     item["insertCount"] = track.inserts.size();
     item["sendCount"] = track.sends.size();
     item["automationLaneCount"] = track.automation.size();
-    item["takeFolderCount"] = track.takeFolders.size();
     return item;
 }
 
@@ -1081,52 +1080,6 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
             items.push_back(json{{"id", vca.id}, {"name", vca.name}, {"gain", vca.gain}});
         }
         fields = {"id", "name", "gain"};
-    } else if (args.view == "take_folders" || args.view == "takes") {
-        if (!validateWhereKeys(args.where, {"trackId", "folderId"}, errCode, errMsg))
-            return json();
-        uint64_t trackId = 0, folderId = 0;
-        bool hasTrackId = false, hasFolderId = false;
-        if (!readId(args.where, "trackId", false, false, trackId, hasTrackId, errCode, errMsg) ||
-            !readId(args.where, "folderId", false, false, folderId, hasFolderId, errCode, errMsg))
-            return json();
-        inspectTracks(app, budget);
-        if (hasTrackId && !ensureTrack(app, trackId, errCode, errMsg))
-            return json();
-        bool foundFolder = !hasFolderId;
-        forEachTrack(app, [&](Track& track) {
-            if (hasTrackId && track.id != trackId)
-                return;
-            budget.inspect(track.takeFolders.size(), "take folders");
-            for (const TakeFolder& folder : track.takeFolders) {
-                if (hasFolderId && folder.id != folderId)
-                    continue;
-                foundFolder = true;
-                budget.inspect(folder.lanes.size(), "take lanes");
-                json lanes = json::array();
-                std::size_t clipCount = 0;
-                for (const TakeLane& lane : folder.lanes) {
-                    budget.inspect(lane.clips.size(), "take-lane clips");
-                    json clipIds = json::array();
-                    for (const Clip& clip : lane.clips) {
-                        clipIds.push_back(clipId(clip));
-                        ++clipCount;
-                    }
-                    lanes.push_back(json{{"id", lane.id}, {"name", lane.name},
-                                         {"clipIds", std::move(clipIds)}});
-                }
-                items.push_back(json{{"id", folder.id}, {"trackId", track.id},
-                                     {"trackName", track.name}, {"name", folder.name},
-                                     {"startBeat", folder.startBeat}, {"endBeat", folder.endBeat},
-                                     {"laneCount", folder.lanes.size()}, {"clipCount", clipCount},
-                                     {"lanes", std::move(lanes)}});
-            }
-        });
-        if (!foundFolder) {
-            fail(errCode, errMsg, "not_found", "folderId not found: " + std::to_string(folderId));
-            return json();
-        }
-        fields = {"id", "trackId", "trackName", "name", "startBeat", "endBeat",
-                  "laneCount", "clipCount", "lanes"};
     } else if (args.view == "routing") {
         if (!validateWhereKeys(args.where, {"trackId", "type"}, errCode, errMsg))
             return json();

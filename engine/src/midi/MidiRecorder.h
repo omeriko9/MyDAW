@@ -95,7 +95,7 @@ public:
      * lap boundaries and no new detection is needed. Previously every lap was merged into
      * a single clip (docs/STUBS.md: "MIDI loop-record isn't lap-split"), which stacked
      * three passes of the same bar on top of each other with no way to choose between
-     * them; audio has produced one take per lap since comping shipped.
+     * them; audio has produced one clip per lap for longer.
      *
      * Always at least one entry when anything was recorded. A pass with no wrap yields
      * exactly one, identical to the previous single-take result.

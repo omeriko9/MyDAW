@@ -182,17 +182,20 @@ try {
   await req("cmd/loop.set", { startBeat: 0, endBeat: 4, enabled: true });
   await req("cmd/punch.set", { startBeat: 1, endBeat: 2, enabled: true });
   const lapFrames = 1 * framesPerBeat; // the punch window is one beat
-  const before = ((await req("session/hello", {})).payload.project.tracks
-    .find((t) => t.id === track.id).takeFolders ?? []).length;
+  // Identify the new clips by ID, not by index: clips are kept sorted by start beat, so
+  // a pass that records EARLIER than existing material lands mid-array, not at the tail.
+  const beforeIds = new Set((((await req("session/hello", {})).payload.project.tracks
+    .find((t) => t.id === track.id).clips) ?? []).map((c) => c.id));
   const r3 = await recordPass(PROJECT, track.id, 5200); // ~2.5 cycles
   const tr3 = (await req("session/hello", {})).payload.project.tracks.find((t) => t.id === track.id);
-  const folders = (tr3.takeFolders ?? []).slice(before);
-  report("cycle + punch stacks one take per lap", folders.length === 1 && folders[0].lanes.length >= 2,
-    `folders=${folders.length} lanes=${folders[0]?.lanes?.length}`);
+  // Take folders were removed on 2026-08-11 — laps land as plain clips. The point of this
+  // check is unchanged: the ledger must SPLIT the punch windows into one clip per lap.
+  const lapClips = (tr3.clips ?? []).filter((c) => !beforeIds.has(c.id));
+  report("cycle + punch records one clip per lap", lapClips.length >= 2,
+    `newClips=${lapClips.length}`);
 
-  if (folders.length === 1) {
-    const lanes = folders[0].lanes;
-    const clips = lanes.map((l) => l.clips[0]);
+  if (lapClips.length >= 2) {
+    const clips = lapClips;
     report("every lap is anchored at the punch-IN point",
       clips.every((c) => Math.abs(c.startBeat - 1) < 1e-9),
       JSON.stringify(clips.map((c) => c.startBeat)));

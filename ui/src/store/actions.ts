@@ -582,18 +582,6 @@ export const dragVcaGain = (id: number, gain: number) =>
 export const commitVcaGain = (id: number, gain: number) =>
   commitParam("cmd/vca.set", { id, patch: { gain } });
 
-/* ---- versions (take folders) ---- */
-export const createTakeFolder = (trackId: number, clipIds: number[], name?: string) =>
-  ws.request("cmd/take.create", { trackId, clipIds, ...(name ? { name } : {}) });
-/** Choose a version by clicking its clip: that clip is unmuted, its overlapping siblings
- *  on the other lanes are muted. Unmuting EXTRA versions (to hear combinations) is the
- *  mute tool's job — cmd/clip.set {muted} on whichever clips you want. */
-export const pickTake = (trackId: number, clipId: number) =>
-  ws.request("cmd/take.pick", { trackId, clipId });
-/** Collapse a folder back to plain clips: the UNMUTED clips move onto the track. */
-export const flattenTake = (trackId: number, folderId: number) =>
-  ws.request("cmd/take.flatten", { trackId, folderId });
-
 export const getPluginParams = (instanceId: number) =>
   ws.request("plugin/getParams", { instanceId });
 

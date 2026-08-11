@@ -48,19 +48,15 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
   pressed. UI: a sliver in the ruler's loop lane (Ctrl+Alt+drag) plus a transport toggle that
   seeds an empty region from the cycle. Tests: `scripts/punch-test.mjs` (15/15, boundaries
   asserted exactly — a 2-beat window yields exactly 48000 frames).
-- **Loop-record takes** — DONE (2026-07-31): audio lap stacking shipped with comping
-  (2026-07-03); MIDI now splits too. Placement comes from a SEGMENT LEDGER rather than
+- **Loop-record lap splitting** — DONE (2026-07-31): placement comes from a SEGMENT LEDGER rather than
   arithmetic — `AudioRecorder` records each contiguous run with both coordinates (timeline
   position and offset within the take file), and `recordingCommit` groups runs by start
-  position: shared position means laps and becomes take lanes, distinct positions become
-  separate clips. That replaced `laps = ceil(frames/loopLen)`, which assumed the take began at
+  position. (Laps used to become take lanes; take folders were REMOVED 2026-08-11, so every
+  lap is now a plain clip stacked at the loop start.) That replaced `laps = ceil(frames/loopLen)`, which assumed the take began at
   the loop start and ran without a gap — already wrong after any dropped block, since the file
   stayed contiguous and everything after the gap was attributed a block early. MIDI laps are
   bucketed by ARRIVAL, not position: a cycle re-enters the same span every lap, so all laps
   share a start beat. Tests: `punch-test.mjs` (multi-lap), `midi-lap-test.mjs` (7/7).
-  Take lanes drawn INLINE in the arrangement since 2026-08-01 ("T" header toggle →
-  per-lane rows, click = pick take, drag = comp swipe; shared comp math in
-  `ui/src/lib/comping.ts`). Browser check in `ui-smoke.mjs` (take-lanes-inline-comp).
 - **Input gain + input metering** — DONE (2026-08-01): `Track.inputGainDb` (−24..+24, audio
   only) is a PRE-INSERT stage covering clip playback and live input; **the recorded FILE is
   RAW** (SPEC §5.5 — the record tap reads the raw driver buffers upstream of the graph, so
@@ -202,20 +198,19 @@ to unity). Next: VST3 aux-input bus activation so out-of-process plugins can be 
 (engine: route the extra input tap through shm — extend `ShmHeader.numIn`); per-insert (not
 per-instance) UI in the mixer strip; sidechain HPF on the detector.
 
-## Comping (take folders) ✅ (2026-07-03)
+## Comping / take folders / versions — REMOVED (2026-08-11)
 
-`Track.takeFolders`: stacked takes (lanes) + a `comp` (per-segment `{startBeat,lane}` selection).
-Playback resolves at graph build — `AudioGraph::buildPlan` emits only the selected lane's material
-**windowed to each comp segment** (sample-accurate audio clipping; MIDI notes by onset), so stacked
-takes never sum. Loop-record slices a >1-lap continuous recording into one lane per lap in
-`recordingCommit` (same asset, increasing source offsets; comp defaults to the last lap). Commands:
-`cmd/take.create` (fold clips → folder), `cmd/take.pick` (click a version's clip),
-`cmd/take.flatten` (bounce to plain clips). UI: Inspector "Takes / Comp" — comp bar + per-take
-strips; click a strip to use that take, drag to swipe a range in. Test: `scripts/comping-test.mjs`
-(11/11 — a loud take and a quiet take, comp switches sample-accurately at the mid-span boundary
-[ratio 0.20 = exact amp split], round-trips save/load, flattens identically). Next: take lanes
-drawn inline in the arrangement (ClipCanvas) with on-timeline swipe; MIDI loop-record lap-splitting
-(audio-only today); quick-swap take hotkeys.
+Built 2026-07-03 (comp segments), refactored 2026-08-11 into a mute-only "versions" model,
+then removed entirely at Omer's request — along with the older whole-track `cmd/version.*`
+playlists. No take folders, lanes, comping or versions exist in MyDAW today.
+
+Recording never folds: a pass over existing material overlaps it, and cycle recording stacks
+one plain clip per lap (all audible). The lap-SPLITTING ledger survives and is still pinned by
+`midi-lap-test.mjs` and `punch-test.mjs`.
+
+If rebuilt, learn from the failure rather than the code: two features both called "Versions",
+and one switch that was both a record mode and a view toggle, is what made it unusable.
+Last implementation preserved on branch `backup/versions-feature-2026-08-11`.
 
 ## Phase 5 — Drivers, remote UI, distribution ⬜
 

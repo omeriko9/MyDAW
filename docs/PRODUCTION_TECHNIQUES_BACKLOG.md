@@ -113,7 +113,7 @@ the date, and add any new primitive gaps discovered. Do not start a third list.
 
 | Technique | Ingredients | Size |
 |---|---|---|
-| Comp-and-tighten helper | take lanes exist; mostly guidance stages over comping | M |
+| Comp-and-tighten helper | BLOCKED: take lanes/comping were removed 2026-08-11 | M |
 | Formant-preserving shifts | GAP: spectral stretch shifts formants too (chipmunk at big intervals — noted honestly in Harmony Stack) | L |
 | Whisper layer | needs a real recording — guidance-only candidate | S |
 

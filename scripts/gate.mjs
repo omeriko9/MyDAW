@@ -14,7 +14,7 @@
  *
  * SEQUENTIAL BY NECESSITY, not by caution. Each harness spawns an engine on its own
  * hard-coded default port and several of them collide: 8547 is shared by dop-vst and
- * export-formats, 8561 by midi-learn and sidechain, and 8562 by comping, midi-out-channel
+ * export-formats, 8561 by midi-learn and sidechain, and 8562 by midi-out-channel
  * AND timestretch. Running these concurrently produces failures that look like flaky
  * tests. The fast tier is about a minute anyway; wall clock is not the constraint.
  *
@@ -86,9 +86,6 @@ const SUITES = [
   { id: "track-types", tier: "fast", script: "track-types-test.mjs", requires: needsEngine },
   { id: "vca", tier: "fast", script: "vca-test.mjs", requires: needsEngine },
   { id: "sidechain", tier: "fast", script: "sidechain-test.mjs", requires: needsEngine },
-  { id: "comping", tier: "fast", script: "comping-test.mjs", requires: needsEngine },
-  { id: "takes-record", tier: "fast", script: "takes-record-test.mjs", requires: needsEngine,
-    note: "Keep Takes record-to-lanes: fold on overlap, empty-MIDI drop, lane mute, toggle persistence" },
   { id: "loudness", tier: "fast", script: "loudness-test.mjs", requires: needsEngine },
   { id: "timestretch", tier: "fast", script: "timestretch-test.mjs", requires: needsEngine },
   { id: "export-formats", tier: "fast", script: "export-formats-test.mjs", requires: needsEngine },

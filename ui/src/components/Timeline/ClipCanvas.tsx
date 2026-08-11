@@ -62,11 +62,7 @@ import {
   transientParam,
   undo,
   redo,
-  createTakeFolder,
-  flattenTake,
-  pickTake,
 } from "../../store/actions";
-import { LANE_COLORS } from "../../lib/comping";
 import {
   CHORD_QUALITIES,
   PITCH_NAMES,
@@ -142,10 +138,9 @@ import {
   withAlpha,
   type LaneRowL,
   type Row,
-  type TakeLaneRowL,
   type TrackRowL,
 } from "./layout";
-import type { AudioClip, AutomationPoint, Clip, ClipEdge, NormalizeMode, Project, StereoFlipMode, TakeFolder, Track } from "../../protocol/types";
+import type { AudioClip, AutomationPoint, Clip, ClipEdge, NormalizeMode, Project, StereoFlipMode, Track } from "../../protocol/types";
 
 const MIN_CLIP_BEATS = 1 / 16;
 const MOVE_THRESHOLD_PX = 3;
@@ -561,16 +556,8 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const ymax = Math.max(d.y0, d.y1);
     for (const row of rws) {
       if (row.top > ymax || row.top + row.height < ymin) continue;
-      // Version clips are ordinary clips (2026-08-11): a rubber band must pick them up
-      // exactly like clips on the track itself, so a multi-clip delete or process can
-      // span versioned and unversioned material in one gesture.
-      const inRow: Clip[] =
-        row.kind === "track"
-          ? row.track.clips
-          : row.kind === "takelane"
-            ? (row.track.takeFolders ?? []).flatMap((f) => f.lanes[row.laneIndex]?.clips ?? [])
-            : [];
-      for (const clip of inRow) {
+      if (row.kind !== "track") continue;
+      for (const clip of row.track.clips) {
         const len = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
         if (clip.startBeat <= bmax && clip.startBeat + len >= bmin) out.add(clip.id);
       }
@@ -699,43 +686,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         }
         continue;
       }
-      // Take-lane rows (SPEC §8.7): one version per row; muted clips draw dimmed
-      // (drawClip), so the audible version reads at a glance.
-      if (row.kind === "takelane") {
-        const track = row.track;
-        const laneColor = LANE_COLORS[row.laneIndex % LANE_COLORS.length];
-        ctx.fillStyle = withAlpha(colors.border, 0.12);
-        ctx.fillRect(0, ry, w, row.height);
-        ctx.strokeStyle = withAlpha(colors.border, 0.8);
-        ctx.beginPath();
-        ctx.moveTo(0, ry + row.height - 0.5);
-        ctx.lineTo(w, ry + row.height - 0.5);
-        ctx.stroke();
-        for (const folder of track.takeFolders ?? []) {
-          const lane = folder.lanes[row.laneIndex];
-          if (!lane) continue;
-          for (const clip of lane.clips) {
-            const x = beatToPx(clip.startBeat, v);
-            const cw = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate) * v.zoomX;
-            if (x + cw < -2 || x > w + 2) continue;
-            drawClip(ctx, {
-              clip,
-              x,
-              y: ry,
-              w: cw,
-              h: row.height,
-              canvasW: w,
-              color: laneColor,
-              selected: false,
-              project: proj,
-              zoomX: v.zoomX,
-              colors,
-              onPeaksArrive: schedule,
-            });
-          }
-        }
-        continue;
-      }
 
       const track = row.track;
       ctx.strokeStyle = withAlpha(colors.border, 0.8);
@@ -845,48 +795,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           });
         }
         if (track.frozen) drawFrozenBadge(ctx, x, ry, cw, row.height, colors);
-      }
-
-      // Take folders (SPEC §8.7): the COMP RESULT drawn inline — each segment shows its
-      // selected lane's clips clipped to the segment window. Without this a take folder
-      // renders as empty space (takeCreate moves the clips off Track.clips): the
-      // "my clips vanished" trap.
-      for (const folder of track.takeFolders ?? []) {
-        const fx = beatToPx(folder.startBeat, v);
-        const fw = (folder.endBeat - folder.startBeat) * v.zoomX;
-        if (fx + fw < -2 || fx > w + 2) continue;
-        // Collapsed folder: draw the versions you can HEAR (unmuted clips), each with a
-        // thin strip in its lane colour so the stack is still legible when folded.
-        folder.lanes.forEach((lane, li) => {
-          for (const clip of lane.clips) {
-            if (clip.muted === true) continue;
-            const x = beatToPx(clip.startBeat, v);
-            const cw = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate) * v.zoomX;
-            if (x + cw < -2 || x > w + 2) continue;
-            drawClip(ctx, {
-              clip,
-              x,
-              y: ry,
-              w: cw,
-              h: row.height,
-              canvasW: w,
-              color: clip.color ?? track.color,
-              selected: false,
-              project: proj,
-              zoomX: v.zoomX,
-              colors,
-              onPeaksArrive: schedule,
-            });
-            ctx.fillStyle = withAlpha(LANE_COLORS[li % LANE_COLORS.length], 0.85);
-            ctx.fillRect(x, ry + row.height - 3, cw, 2);
-          }
-        });
-        // dashed folder outline marks "this is a comp, expand with T"
-        ctx.save();
-        ctx.strokeStyle = withAlpha(colors.accent, 0.5);
-        ctx.setLineDash([4, 3]);
-        ctx.strokeRect(fx + 0.5, ry + 0.5, fw - 1, row.height - 1);
-        ctx.restore();
       }
     }
 
@@ -1354,37 +1262,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
-    // Take-lane rows (SPEC §8.7): clicking a version's CLIP makes it the one you hear
-    // (its overlapping siblings mute). That is the entire pick interaction — no swipe, no
-    // menu. Clicking empty lane space does nothing rather than guessing at a version.
-    if (row && row.kind === "takelane") {
-      const folder = (row.track.takeFolders ?? []).find(
-        (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat && row.laneIndex < f.lanes.length,
-      );
-      if (!folder) return;
-      const lane = folder.lanes[row.laneIndex];
-      const hitClip = lane?.clips.find((c) => {
-        const len = clipLengthBeats(c, proj.tempoMap, proj.sampleRate);
-        return rawBeat >= c.startBeat && rawBeat < c.startBeat + len;
-      });
-      if (!hitClip) return;
-      if (st.tool === "mute") {
-        // The mute tool toggles ANY clip anywhere — including several across several
-        // versions, which is how combinations are built.
-        fire(setClip(hitClip.id, { muted: !(hitClip.muted === true) }));
-        return;
-      }
-      if (st.tool === "erase") {
-        fire(deleteClips([hitClip.id]));
-        return;
-      }
-      // Select it as well as picking it: a version clip is an ordinary clip, so it has to
-      // be selectable for delete / process / multi-clip edits.
-      selectClips([hitClip.id], [row.track.id]);
-      fireLane(pickTake(row.track.id, hitClip.id));
-      return;
-    }
-
     // view-row lanes: drag items (marker/section/chord/transpose); erase deletes.
     if (track && isViewRowKind(track.kind) && row && row.kind === "track") {
       const vKind = track.kind as "marker" | "arranger" | "chord" | "transpose";
@@ -1481,8 +1358,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
-    // X (mute) tool: toggle ANY clip's mute, anywhere — not just versions. Combinations
-    // across take lanes are built by unmuting several clips with this.
+    // X (mute) tool: toggle ANY clip's mute, anywhere.
     if (st.tool === "mute") {
       if (hit) fire(setClip(hit.clip.id, { muted: !(hit.clip.muted === true) }));
       return;
@@ -2491,40 +2367,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       else openViewRowMenu(e.clientX, e.clientY, vKind, pasteBeat, cy, row.top, row.height);
       return;
     }
-    // take-lane rows (SPEC §8.7): whole-span pick / flatten. No folder under the
-    // cursor = no menu — a fallback to folder[0] would offer actions against a folder
-    // the user is not pointing at (and a lane index it may not even have).
-    if (row && row.kind === "takelane") {
-      const t = row.track;
-      const folder = (t.takeFolders ?? []).find(
-        (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat && row.laneIndex < f.lanes.length,
-      );
-      if (!folder) return;
-      // Picking is a plain CLICK on the version's clip and combining is the mute tool, so
-      // this menu is down to the structural actions only.
-      openContextMenu(e.clientX, e.clientY, [
-        {
-          label: "Flatten Versions…",
-          icon: "export",
-          title: "Bounce the comp to plain clips and remove the folder",
-          onClick: () => {
-            void confirmDialog({
-              title: "Flatten comp",
-              message: `Bounce "${folder.name}" to plain clips and remove its take lanes? This can be undone.`,
-              confirmLabel: "Flatten",
-            }).then((ok) => {
-              if (ok) fireLane(flattenTake(t.id, folder.id));
-            });
-          },
-        },
-        {
-          label: "Hide Versions",
-          title: "Turns Versions off for this track — sub-rows collapse and recordings overlap again",
-          onClick: () => fire(setTrack(t.id, { keepTakes: false })),
-        },
-      ]);
-      return;
-    }
     if (row && row.kind === "lane") {
       const pt = laneHitPoint(row, vx, cy, st.vp);
       const clearLane: MenuEntry = {
@@ -2602,42 +2444,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const mx = e.clientX;
     const my = e.clientY;
 
-    // Right-click on a take FOLDER in the track row (its clips live in the folder, so
-    // hitTest finds nothing there): take actions instead of the empty-space toolbox.
-    if (!hit && row && row.kind === "track") {
-      const t = row.track;
-      const folder = (t.takeFolders ?? []).find(
-        (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat,
-      );
-      if (folder) {
-        const versionsOn = t.keepTakes === true;
-        openContextMenu(mx, my, [
-          {
-            label: versionsOn ? "Hide Versions" : "Show Versions",
-            checked: versionsOn,
-            title: "The one Versions switch (also the layers toggle in the header): on = sub-rows shown and recordings become versions; off = collapsed, recordings overlap",
-            onClick: () => fire(setTrack(t.id, { keepTakes: !versionsOn })),
-          },
-          "separator" as const,
-          {
-            label: "Flatten Versions…",
-            icon: "export" as const,
-            title: "Bounce the comp to plain clips and remove the folder",
-            onClick: () => {
-              void confirmDialog({
-                title: "Flatten comp",
-                message: `Bounce "${folder.name}" to plain clips and remove its take lanes? This can be undone.`,
-                confirmLabel: "Flatten",
-              }).then((ok) => {
-                if (ok) fireLane(flattenTake(t.id, folder.id));
-              });
-            },
-          },
-        ]);
-        return;
-      }
-    }
-
     if (!hit) {
       // Cubase-style toolbox first: right-click on empty space is how DAW users switch
       // tools mid-gesture. Then creation/paste actions for the spot under the cursor.
@@ -2697,23 +2503,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         onClick: () => void pasteAt(pasteBeat).catch((err) => console.warn("[timeline] paste failed:", err)),
       },
       { label: "Duplicate", shortcut: "Ctrl+D", onClick: () => fire(duplicateClips(ids)) },
-      // Stacking existing clips as versions was reachable ONLY from the Inspector's
-      // "Takes / Comp" section, which hides itself until 2+ clips are already selected —
-      // so the feature was invisible to anyone who did not already know it existed
-      // (asked 2026-08-11: "how do I see the 2nd feature?"). The clips' own menu is where
-      // people look. Same-track only: a folder belongs to one track by construction.
-      ...(ids.length >= 2 &&
-      ids.every((id) => (hit.row.track.clips ?? []).some((c) => c.id === id))
-        ? ([
-            {
-              label: `Stack as Versions (${ids.length})`,
-              icon: "layers",
-              title:
-                "Fold the selected clips into one take folder — they become versions shown as sub-rows, with the last one playing",
-              onClick: () => fire(createTakeFolder(hit.row.track.id, ids)),
-            },
-          ] as MenuEntry[])
-        : []),
       "separator",
       {
         label: "Split at Playhead",

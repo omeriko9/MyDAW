@@ -251,20 +251,6 @@ export function isMidiClip(c: Clip): c is MidiClip {
   return c.type === "midi";
 }
 
-/* ---- comping: take folders (SPEC §6) ---- */
-export interface TakeLane {
-  id: number;
-  name: string;
-  clips: Clip[];
-}
-export interface TakeFolder {
-  id: number;
-  name: string;
-  startBeat: number;
-  endBeat: number;
-  lanes: TakeLane[];
-}
-
 export interface Send {
   destTrackId: number;
   level: number;
@@ -352,9 +338,6 @@ export interface Track {
   recordArm: boolean;
   /** Per-track automation-write arm ("W", SPEC §5.4) — absent/false when off. */
   automationWrite?: boolean;
-  /** Per-track versions record mode (SPEC §8.7): a recording that overlaps this track's
-   *  existing material folds into take lanes instead of overlapping and summing. */
-  keepTakes?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -392,8 +375,6 @@ export interface Track {
   sends: Send[];
   automation: AutomationLane[];
   clips: Clip[];
-  /** comping: stacked takes + per-segment comp selection (optional, absent = none). */
-  takeFolders?: TakeFolder[];
 }
 
 /** Hardware CC → param mapping (SPEC §5.2). paramRef: "track:<id>:volume|pan" | "plugin:<id>:<pid>". */
@@ -827,8 +808,6 @@ export interface TrackPatch {
   /** Per-track automation-write arm ("W", SPEC §5.4). The transport arm stays a master
    *  switch that records every track. */
   automationWrite?: boolean;
-  /** Per-track versions record mode (SPEC §8.7). */
-  keepTakes?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -2267,9 +2246,6 @@ export interface RequestMap {
   "cmd/clip.stretch": { req: { clipId: number; ratio: number; transpose?: boolean; tape?: boolean; algorithm?: "spectral" | "wsola" }; reply: { assetId: number; lengthSamples: number } };
   "cmd/clip.processAudio": { req: ClipProcessAudioRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/clip.processChain": { req: ClipProcessChainRequest; reply: { assetId: number; lengthSamples: number } };
-  "cmd/take.create": { req: { trackId: number; clipIds: number[]; name?: string }; reply: { folder: TakeFolder } };
-  "cmd/take.pick": { req: { trackId: number; clipId: number }; reply: EmptyObject };
-  "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };
   "midimap/learn": { req: { paramRef: string }; reply: MidiMapsState };
   "midimap/remove": { req: { paramRef: string }; reply: MidiMapsState };
   "midimap/feedCc": { req: { cc: number; channel?: number; value: number }; reply: EmptyObject };

@@ -100,7 +100,7 @@ Three things the gate does that are easy to get wrong by hand:
 
 - **It runs suites sequentially, and must.** Each harness spawns an engine on its own
   hard-coded default port, and several collide — 8547 is shared by `dop-vst` and
-  `export-formats`, 8561 by `midi-learn` and `sidechain`, and 8562 by `comping`,
+  `export-formats`, 8561 by `midi-learn` and `sidechain`, and 8562 by
   `midi-out-channel` *and* `timestretch`. Run concurrently they fail in ways that look
   like flakiness.
 - **A missing prerequisite is a SKIP, not a failure.** `vst-load` and `dop-vst` need a

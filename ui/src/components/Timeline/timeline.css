@@ -343,12 +343,6 @@
   overflow: hidden;
 }
 
-.tlh-takelane-chip {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
 .tlh-lane-label {
   flex: 1 1 auto;
   min-width: 0;

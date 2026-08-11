@@ -290,48 +290,6 @@ json toJson(const Asset& a) {
     return j;
 }
 
-json toJson(const TakeFolder& f) {
-    json lanes = json::array();
-    for (const TakeLane& ln : f.lanes) {
-        json clips = json::array();
-        for (const Clip& c : ln.clips)
-            clips.push_back(toJson(c));
-        lanes.push_back(json{{"id", ln.id}, {"name", ln.name}, {"clips", std::move(clips)}});
-    }
-    return json{{"id", f.id},
-                {"name", f.name},
-                {"startBeat", f.startBeat},
-                {"endBeat", f.endBeat},
-                {"lanes", std::move(lanes)}};
-}
-
-bool fromJson(const json& j, TakeFolder& out, std::string* /*err*/) {
-    if (!j.is_object())
-        return false;
-    out = TakeFolder{};
-    out.id = getOr<uint64_t>(j, "id", 0);
-    out.name = getOr(j, "name", "");
-    out.startBeat = getOr<double>(j, "startBeat", 0.0);
-    out.endBeat = getOr<double>(j, "endBeat", 0.0);
-    if (hasKey(j, "lanes") && j.find("lanes")->is_array()) {
-        for (const json& lj : *j.find("lanes")) {
-            if (!lj.is_object())
-                continue;
-            TakeLane ln;
-            ln.id = getOr<uint64_t>(lj, "id", 0);
-            ln.name = getOr(lj, "name", "");
-            if (hasKey(lj, "clips") && lj.find("clips")->is_array())
-                for (const json& cj : *lj.find("clips")) {
-                    Clip c;
-                    if (fromJson(cj, c, nullptr))
-                        ln.clips.push_back(std::move(c));
-                }
-            out.lanes.push_back(std::move(ln));
-        }
-    }
-    return true;
-}
-
 json toJson(const Track& t) {
     json inserts = json::array();
     for (const PluginInstance& pi : t.inserts)
@@ -369,8 +327,6 @@ json toJson(const Track& t) {
         j["parentId"] = t.parentId;
     if (t.monitor)
         j["monitor"] = true;
-    if (t.keepTakes)
-        j["keepTakes"] = true; // omitted when off (SPEC §8.7, per-track versions mode)
     if (t.automationWrite)
         j["automationWrite"] = true; // omitted when off (SPEC §5.4, per-track "W")
     if (!t.inputDevice.empty())
@@ -402,12 +358,6 @@ json toJson(const Track& t) {
     // track.eq: omit when there are no bands and EQ is not bypassed (SPEC §6).
     if (!t.eq.bands.empty() || t.eq.bypass)
         j["eq"] = toJson(t.eq);
-    if (!t.takeFolders.empty()) { // comping: omitted when the track has no take folders
-        json folders = json::array();
-        for (const TakeFolder& f : t.takeFolders)
-            folders.push_back(toJson(f));
-        j["takeFolders"] = std::move(folders);
-    }
     return j;
 }
 
@@ -458,7 +408,7 @@ json toJson(const Project& p) {
         {"midiMaps", std::move(midiMaps)},
         {"nextId", p.nextId},
     };
-    // View-row data (TRACK_TYPES_PLAN §3.6-3.8): omit-when-empty like takeFolders.
+    // View-row data (TRACK_TYPES_PLAN §3.6-3.8): omit-when-empty.
     if (!p.arranger.empty())
         j["arranger"] = toJson(p.arranger);
     if (!p.chordEvents.empty()) {
@@ -837,7 +787,6 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.solo = getOr<bool>(j, "solo", false);
     out.recordArm = getOr<bool>(j, "recordArm", false);
     out.automationWrite = getOr<bool>(j, "automationWrite", false);
-    out.keepTakes = getOr<bool>(j, "keepTakes", false);
     out.monitor = getOr<bool>(j, "monitor", false);
     out.inputDevice = getOr(j, "inputDevice", "");
     out.inputChannel = getOr<int>(j, "inputChannel", -1);
@@ -890,13 +839,6 @@ bool fromJson(const json& j, Track& out, std::string* err) {
             Clip c;
             if (fromJson(cj, c, nullptr)) // unparseable clips skipped (tolerant load)
                 out.clips.push_back(std::move(c));
-        }
-    }
-    if (hasKey(j, "takeFolders") && j.find("takeFolders")->is_array()) {
-        for (const json& fj : *j.find("takeFolders")) {
-            TakeFolder f;
-            if (fromJson(fj, f, nullptr))
-                out.takeFolders.push_back(std::move(f));
         }
     }
     return true;

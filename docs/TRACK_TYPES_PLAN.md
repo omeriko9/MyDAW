@@ -59,7 +59,7 @@ Checklist derived from the `bus`/`folder` precedents — every new `TrackKind` m
    meters). Non-audio kinds (marker/arranger/chord/…) must be *invisible* to the graph
    the way folders already are.
 3. **Serialization** — usually free (kind string), but new per-track payloads (marker
-   lists, arranger events, chord events) follow the `takeFolders`/`versions`
+   lists, arranger events, chord events) follow the `automation`
    omit-when-empty pattern in Serialize.cpp + tolerant `fromJson`.
 4. **Commands** — `cmd/track.add` validation; new content commands follow the
    `cmd/take.*` / `cmd/version.*` shape (label, `scope:"track"`, `eventTrackIds`,

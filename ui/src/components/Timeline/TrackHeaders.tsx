@@ -53,7 +53,6 @@ import { confirmRemoveTracks } from "../../lib/trackActions";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
-import { LANE_COLORS } from "../../lib/comping";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { openBestEditor } from "../PluginEditor/openEditor";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -74,7 +73,6 @@ import {
   trackKindIcon,
   type LaneRowL,
   type Row,
-  type TakeLaneRowL,
   type TrackRowL,
 } from "./layout";
 import type { AddableTrackKind, PluginInfo, Track } from "../../protocol/types";
@@ -897,7 +895,7 @@ export default function TrackHeaders({
       ? (project?.tracks.filter((x) => selection.trackIds.includes(x.id)) ?? [t])
       : [t];
     const groupToggle = (
-      key: "mute" | "solo" | "recordArm" | "monitor" | "automationWrite" | "keepTakes",
+      key: "mute" | "solo" | "recordArm" | "monitor" | "automationWrite",
       tracks: Track[],
     ) => {
       const compatible = key === "mute" || key === "solo"
@@ -1064,16 +1062,6 @@ export default function TrackHeaders({
             >
               A
             </Toggle>
-            {armable && (
-              <Toggle
-                on={t.keepTakes === true}
-                onChange={() => groupToggle("keepTakes", actionTracks.filter((x) => x.kind === "audio" || x.kind === "midi" || x.kind === "instrument"))}
-                variant="ok"
-                className="tlh-btn"
-                icon="layers"
-                tooltip="Versions — ON: this track works in versions; each new recording over existing material becomes a version on its own sub-row (newest plays; click a version to choose it, X tool to combine), and the sub-rows are shown. OFF: collapsed, normal track, recordings just overlap."
-              />
-            )}
           </div>
         )}
         {showInstRow && (
@@ -1242,39 +1230,6 @@ export default function TrackHeaders({
     );
   };
 
-  const renderTakeLane = (row: TakeLaneRowL) => {
-    const t = row.track;
-    // Label from the first folder that has this lane index ("Take N" fallback).
-    const named = (t.takeFolders ?? []).find((f) => f.lanes[row.laneIndex]);
-    const label = named?.lanes[row.laneIndex]?.name ?? `Take ${row.laneIndex + 1}`;
-    return (
-      <div
-        key={`${t.id}:take:${row.laneIndex}`}
-        className="tlh-lane tlh-takelane"
-        style={{ top: row.top, height: row.height, paddingLeft: 10 + row.depth * 14 }}
-      >
-        <span
-          className="tlh-takelane-chip"
-          style={{ background: LANE_COLORS[row.laneIndex % LANE_COLORS.length] }}
-        />
-        <span className="tlh-lane-label" title={label}>
-          {label}
-        </span>
-        <span className="grow" />
-        {/* One switch: collapsing the versions = turning the mode off (recordings
-            overlap again). Same engine flag the header layers toggle drives. */}
-        {row.laneIndex === 0 && (
-          <IconButton
-            icon="chevronUp"
-            size={18}
-            tooltip="Hide versions (turns Versions off — recordings overlap again)"
-            onClick={() => fire(setTrack(t.id, { keepTakes: false }))}
-          />
-        )}
-      </div>
-    );
-  };
-
   const popTrack = popover && project ? project.tracks.find((t) => t.id === popover.trackId) : null;
 
   return (
@@ -1398,7 +1353,7 @@ export default function TrackHeaders({
           // re-select after almost every click mid-session. Rows/lanes handle their own
           // pointer-down and never reach here; Esc still clears everything.
           if (e.button !== 0) return;
-          if ((e.target as HTMLElement).closest?.(".tlh-row, .tlh-lane, .tlh-takelane")) return;
+          if ((e.target as HTMLElement).closest?.(".tlh-row, .tlh-lane")) return;
           if (useStore.getState().selection.trackIds.length === 0) return;
           setSelection({ trackIds: [], clipIds: [], noteIds: [], scope: "none" });
         }}
@@ -1416,7 +1371,7 @@ export default function TrackHeaders({
       >
         <div className="tl-headers-inner" style={{ transform: `translateY(${-scrollY}px)` }}>
           {rows.map((r) =>
-            r.kind === "track" ? renderRow(r) : r.kind === "takelane" ? renderTakeLane(r) : renderLane(r),
+            r.kind === "track" ? renderRow(r) : renderLane(r),
           )}
         </div>
         {reorderVis && reorderVis.dropLineY !== null && (

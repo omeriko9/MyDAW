@@ -10,7 +10,6 @@ import type { Clip, Project, Track } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import { Section } from "./Section";
 import { TrackSection } from "./TrackSection";
-import { TakesSection } from "./TakesSection";
 import { ClipSection } from "./ClipSection";
 import { MarkersSection } from "./MarkersSection";
 import { ViewRowSection } from "./ViewRowSection";
@@ -64,9 +63,6 @@ export default function Inspector() {
         <ViewRowSection key={`v${track.id}`} track={track} project={project} />
       ) : track ? (
         <TrackSection key={`t${track.id}`} track={track} project={project} />
-      ) : null}
-      {track && track.kind !== "master" && track.kind !== "folder" && !isViewRowKind(track.kind) ? (
-        <TakesSection key={`tk${track.id}`} track={track} project={project} />
       ) : null}
       {clipHit ? (
         <ClipSection

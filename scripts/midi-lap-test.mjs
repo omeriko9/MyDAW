@@ -4,7 +4,7 @@
  *
  *   node scripts/midi-lap-test.mjs [--port 8568]
  *
- * Audio has produced one take per lap since comping shipped; MIDI merged every lap into a
+ * Audio has produced one clip per lap for longer; MIDI merged every lap into a
  * single clip (docs/STUBS.md: "MIDI loop-record isn't lap-split"), so three passes over the
  * same bar landed on top of each other with no way to choose between them.
  *
@@ -109,40 +109,37 @@ try {
 
   const hello = await req("session/hello", {});
   const t = hello.payload.project.tracks.find((x) => x.id === track.id);
-  const folders = t.takeFolders ?? [];
-  const clips = t.clips ?? [];
+  // Take folders were removed on 2026-08-11: every lap is now a plain clip stacked at
+  // the cycle start. What still matters — and what this suite exists for — is that the
+  // recorder SPLIT the laps at all instead of merging them into one long clip.
+  const lapClips = t.clips ?? [];
+  report("cycle-record produced one clip per lap, not one merged clip",
+    lapClips.length >= 2,
+    `clips=${lapClips.length} for ${LAPS} lap(s) played`);
+  if (lapClips.length < 2) die(1, "laps were merged");
 
-  report("cycle-record produced a take folder, not one merged clip",
-    folders.length === 1,
-    `folders=${folders.length} loose clips=${clips.length}`);
-  if (folders.length !== 1) die(1, "no take folder — laps were merged");
-
-  const lanes = folders[0].lanes ?? [];
-  report("one lane per lap", lanes.length >= 2,
-    `${lanes.length} lane(s) for ${LAPS} lap(s) played`);
-
-  // Each lane must hold its OWN note, not a copy of everything — that is the difference
+  // Each lap must hold its OWN note, not a copy of everything — that is the difference
   // between lap-splitting and merging.
-  const perLane = lanes.map((l) => (l.clips[0]?.notes ?? []).map((n) => n.pitch).sort());
-  report("each lane holds only the note played during that lap",
-    perLane.every((ps) => ps.length === 1),
-    JSON.stringify(perLane));
-  const flat = perLane.flat().sort((a, b) => a - b);
-  const wanted = pitches.slice(0, lanes.length).sort((a, b) => a - b);
-  report("the lanes together hold every note played, once each",
+  const perLap = lapClips.map((c) => (c.notes ?? []).map((n) => n.pitch).sort());
+  report("each lap holds only the note played during that lap",
+    perLap.every((ps) => ps.length === 1),
+    JSON.stringify(perLap));
+  const flat = perLap.flat().sort((a, b) => a - b);
+  const wanted = pitches.slice(0, lapClips.length).sort((a, b) => a - b);
+  report("the laps together hold every note played, once each",
     JSON.stringify(flat) === JSON.stringify(wanted),
     `got ${JSON.stringify(flat)}, played ${JSON.stringify(pitches)}`);
 
   // Notes are clip-relative to their OWN lap, so every lap starts near the cycle start
   // rather than accumulating an ever-growing offset.
-  const starts = lanes.map((l) => l.clips[0]?.notes?.[0]?.startBeat ?? -1);
+  const starts = lapClips.map((c) => c.notes?.[0]?.startBeat ?? -1);
   report("every lap's note is re-based to its own lap start",
     starts.every((s) => s >= 0 && s < 2),
     JSON.stringify(starts.map((s) => Number(s.toFixed(3)))));
 
-  report("all lanes are anchored at the cycle start",
-    lanes.every((l) => Math.abs((l.clips[0]?.startBeat ?? -1) - 0) < 1e-9),
-    JSON.stringify(lanes.map((l) => l.clips[0]?.startBeat)));
+  report("all laps are anchored at the cycle start",
+    lapClips.every((c) => Math.abs((c.startBeat ?? -1) - 0) < 1e-9),
+    JSON.stringify(lapClips.map((c) => c.startBeat)));
 } catch (e) {
   report("harness completed", false, e?.stack ?? String(e));
 }

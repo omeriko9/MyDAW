@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "3f472557d882ef1d1a1191b18c0f0bce3b8f465835e6a1f701ec51157f6c0c8d";
+export const AGENT_CATALOG_SHA256 = "63266538c892a1d560f1b4db796f185ef8c1a6f70d914c6464f50bc544d0e5b1";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4055,78 +4055,6 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
-    "TakeFolder": {
-      "additionalProperties": false,
-      "properties": {
-        "endBeat": {
-          "type": "number"
-        },
-        "id": {
-          "type": "number"
-        },
-        "lanes": {
-          "items": {
-            "$ref": "#/schemas/TakeLane"
-          },
-          "type": "array"
-        },
-        "name": {
-          "type": "string"
-        },
-        "startBeat": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "startBeat",
-        "endBeat",
-        "lanes"
-      ],
-      "type": "object"
-    },
-    "TakeLane": {
-      "additionalProperties": false,
-      "properties": {
-        "clips": {
-          "items": {
-            "$ref": "#/schemas/Clip"
-          },
-          "type": "array"
-        },
-        "id": {
-          "type": "number"
-        },
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "name",
-        "clips"
-      ],
-      "type": "object"
-    },
-    "TakePickRequest": {
-      "additionalProperties": false,
-      "properties": {
-        "clipId": {
-          "description": "Clip in a take lane — the version to make audible.",
-          "type": "number"
-        },
-        "trackId": {
-          "description": "Track that owns the take folder.",
-          "type": "number"
-        }
-      },
-      "required": [
-        "trackId",
-        "clipId"
-      ],
-      "type": "object"
-    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -4286,10 +4214,6 @@ export const AGENT_CATALOG: AgentCatalog = {
           },
           "type": "array"
         },
-        "keepTakes": {
-          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
-          "type": "boolean"
-        },
         "kind": {
           "$ref": "#/schemas/TrackKind"
         },
@@ -4339,13 +4263,6 @@ export const AGENT_CATALOG: AgentCatalog = {
         },
         "solo": {
           "type": "boolean"
-        },
-        "takeFolders": {
-          "description": "comping: stacked takes + per-segment comp selection (optional, absent = none).",
-          "items": {
-            "$ref": "#/schemas/TakeFolder"
-          },
-          "type": "array"
         },
         "vcaId": {
           "description": "VCA-group membership (0/absent = none); the VCA's gain multiplies this track's fader.",
@@ -4565,10 +4482,6 @@ export const AGENT_CATALOG: AgentCatalog = {
           "description": "Pre-insert input gain in dB (audio tracks only, -24..24). The recorded file stays raw.",
           "type": "number"
         },
-        "keepTakes": {
-          "description": "Per-track versions record mode: a recording that overlaps this track's existing material folds into take lanes instead of overlapping and summing.",
-          "type": "boolean"
-        },
         "kind": {
           "description": "Convert between midi and instrument in place (Cubase-style instrument tracks): midi→instrument clears the track's midiTarget; instrument→midi requires an empty insert chain and disconnects feeders.",
           "enum": [
@@ -4660,7 +4573,8 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "number"
         }
       },
-      "type": "object"
+      "type": "object",
+      "required": []
     },
     "TrackRemoveRequest": {
       "additionalProperties": false,
@@ -7168,173 +7082,6 @@ export const AGENT_CATALOG: AgentCatalog = {
             "startBeat": 8,
             "endBeat": 16,
             "enabled": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/take.create",
-      "category": "takes",
-      "description": "Group clips on a channel into a take folder.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "clip"
-      ],
-      "produces": [
-        "folder.id"
-      ],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "clipIds": {
-            "items": {
-              "type": "number"
-            },
-            "type": "array"
-          },
-          "name": {
-            "type": "string"
-          },
-          "trackId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "clipIds"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "additionalProperties": false,
-        "properties": {
-          "folder": {
-            "$ref": "#/schemas/TakeFolder"
-          }
-        },
-        "required": [
-          "folder"
-        ],
-        "type": "object"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "clipIds": [
-              21,
-              22
-            ],
-            "name": "Lead takes"
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/take.flatten",
-      "category": "takes",
-      "description": "Flatten a take folder's comp into ordinary clips.",
-      "target": "command",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "take-folder"
-      ],
-      "produces": [
-        "clipIds[]"
-      ],
-      "input": {
-        "additionalProperties": false,
-        "properties": {
-          "folderId": {
-            "type": "number"
-          },
-          "trackId": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "trackId",
-          "folderId"
-        ],
-        "type": "object"
-      },
-      "output": {
-        "additionalProperties": false,
-        "properties": {
-          "clipIds": {
-            "items": {
-              "type": "number"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "clipIds"
-        ],
-        "type": "object"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 7,
-            "folderId": 9
-          }
-        }
-      ]
-    },
-    {
-      "name": "cmd/take.pick",
-      "category": "takes",
-      "description": "Choose a version by its clip: unmute that clip and mute the ones overlapping it on the other lanes. One undo entry.",
-      "target": "engine",
-      "mode": "write",
-      "traits": [
-        "mutating",
-        "undoable",
-        "idempotent"
-      ],
-      "supports": [
-        "batch",
-        "dryRun"
-      ],
-      "requires": [
-        "project",
-        "track",
-        "take-folder"
-      ],
-      "produces": [],
-      "input": {
-        "$ref": "#/schemas/TakePickRequest"
-      },
-      "output": {
-        "$ref": "#/schemas/EmptyObject"
-      },
-      "examples": [
-        {
-          "input": {
-            "trackId": 3,
-            "clipId": 42
           }
         }
       ]
@@ -11387,9 +11134,6 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
   "cmd/punch.set",
-  "cmd/take.create",
-  "cmd/take.flatten",
-  "cmd/take.pick",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -11535,8 +11279,6 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
   "cmd/punch.set",
-  "cmd/take.create",
-  "cmd/take.flatten",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -12085,18 +11827,6 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/clip.processChain"
   },
-  "cmd/take.create": {
-    "kind": "operation",
-    "operation": "cmd/take.create"
-  },
-  "cmd/take.pick": {
-    "kind": "operation",
-    "operation": "cmd/take.pick"
-  },
-  "cmd/take.flatten": {
-    "kind": "operation",
-    "operation": "cmd/take.flatten"
-  },
   "midimap/learn": {
     "kind": "operation",
     "operation": "midimap/learn"
@@ -12545,28 +12275,6 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "startBeat": 8,
       "endBeat": 16,
       "enabled": true
-    }
-  ],
-  "cmd/take.create": [
-    {
-      "trackId": 7,
-      "clipIds": [
-        21,
-        22
-      ],
-      "name": "Lead takes"
-    }
-  ],
-  "cmd/take.flatten": [
-    {
-      "trackId": 7,
-      "folderId": 9
-    }
-  ],
-  "cmd/take.pick": [
-    {
-      "trackId": 3,
-      "clipId": 42
     }
   ],
   "cmd/tempo.set": [

@@ -943,8 +943,6 @@ double contentEndBeats(const Project& p, double bpm) {
     };
     for (const Track& t : p.tracks) {
         scanClips(t.clips);
-        for (const TakeFolder& f : t.takeFolders)
-            end = std::max(end, f.endBeat);
     }
     return end;
 }
