@@ -52,6 +52,7 @@ import {
   setAutomation,
   setChord,
   setClip,
+  setTrack,
   setLoop,
   setMarker,
   setTranspose,
@@ -66,7 +67,6 @@ import {
   pickTake,
 } from "../../store/actions";
 import { LANE_COLORS } from "../../lib/comping";
-import { useTakesUi } from "./takesUi";
 import {
   CHORD_QUALITIES,
   PITCH_NAMES,
@@ -2518,8 +2518,9 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           },
         },
         {
-          label: "Hide Take Lanes",
-          onClick: () => useTakesUi.getState().setExpanded(t.id, false),
+          label: "Hide Versions",
+          title: "Turns Versions off for this track — sub-rows collapse and recordings overlap again",
+          onClick: () => fire(setTrack(t.id, { keepTakes: false })),
         },
       ]);
       return;
@@ -2609,12 +2610,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat,
       );
       if (folder) {
-        const expanded = useTakesUi.getState().expanded.has(t.id);
+        const versionsOn = t.keepTakes === true;
         openContextMenu(mx, my, [
           {
-            label: expanded ? "Hide Take Lanes" : "Show Take Lanes",
-            title: "Toggle the folder's take lanes inline under the track (or use the T header toggle)",
-            onClick: () => useTakesUi.getState().setExpanded(t.id, !expanded),
+            label: versionsOn ? "Hide Versions" : "Show Versions",
+            checked: versionsOn,
+            title: "The one Versions switch (also the layers toggle in the header): on = sub-rows shown and recordings become versions; off = collapsed, recordings overlap",
+            onClick: () => fire(setTrack(t.id, { keepTakes: !versionsOn })),
           },
           "separator" as const,
           {

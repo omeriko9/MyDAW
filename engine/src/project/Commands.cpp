@@ -6039,6 +6039,10 @@ json CommandProcessor::takeCreate(const json& p, CmdResult& r) {
         for (Clip& c : folder.lanes[li].clips)
             setClipMuted(c, true);
     t->takeFolders.push_back(std::move(folder));
+    // Stacking clips IS choosing versions: the per-track flag is the ONE switch (2026-08-11,
+    // Omer: "why do I need two buttons?") — it arms record-to-lanes AND shows the sub-rows,
+    // so creating a folder engages it. Turning it off collapses the view and records normally.
+    t->keepTakes = true;
 
     r.label = "Create Take Folder";
     r.structural = true;

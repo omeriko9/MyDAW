@@ -53,7 +53,6 @@ import { confirmRemoveTracks } from "../../lib/trackActions";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
-import { useTakesUi } from "./takesUi";
 import { LANE_COLORS } from "../../lib/comping";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { openBestEditor } from "../PluginEditor/openEditor";
@@ -250,7 +249,6 @@ export default function TrackHeaders({
   const setSelection = useStore((s) => s.setSelection);
   const registry = useStore((s) => s.registry);
   const lanesExpanded = useAutomationUi((s) => s.expanded);
-  const takesExpanded = useTakesUi((s) => s.expanded);
   // "Is this track's instrument loading right now" — one hook for every row.
   const instrumentBusy = useInstrumentBusyCheck();
 
@@ -1073,18 +1071,8 @@ export default function TrackHeaders({
                 variant="ok"
                 className="tlh-btn"
                 icon="layers"
-                tooltip="Versions — while on, recording over this track's existing material keeps BOTH: each pass becomes a version on its own sub-row (the newest plays). Off = one track, clips just overlap."
+                tooltip="Versions — ON: this track works in versions; each new recording over existing material becomes a version on its own sub-row (newest plays; click a version to choose it, X tool to combine), and the sub-rows are shown. OFF: collapsed, normal track, recordings just overlap."
               />
-            )}
-            {(t.takeFolders?.length ?? 0) > 0 && (
-              <Toggle
-                on={takesExpanded.has(t.id)}
-                onChange={(v) => useTakesUi.getState().setExpanded(t.id, v)}
-                className="tlh-btn tlh-takes-toggle"
-                tooltip="Versions (T) — show every recorded version as sub-rows. Click one to make it the version that plays; right-click a version for Play This Version Too, Mute, or Flatten to collapse them back into one clip"
-              >
-                T
-              </Toggle>
             )}
           </div>
         )}
@@ -1273,14 +1261,14 @@ export default function TrackHeaders({
           {label}
         </span>
         <span className="grow" />
-        {/* Fixed-height lane rows keep their own collapse — a short track row hides
-            the "T" toggle with the controls (same rationale as automation lanes). */}
+        {/* One switch: collapsing the versions = turning the mode off (recordings
+            overlap again). Same engine flag the header layers toggle drives. */}
         {row.laneIndex === 0 && (
           <IconButton
             icon="chevronUp"
             size={18}
-            tooltip="Collapse take lanes"
-            onClick={() => useTakesUi.getState().setExpanded(t.id, false)}
+            tooltip="Hide versions (turns Versions off — recordings overlap again)"
+            onClick={() => fire(setTrack(t.id, { keepTakes: false }))}
           />
         )}
       </div>

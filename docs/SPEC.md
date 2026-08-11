@@ -1110,14 +1110,17 @@ process / move / multi-clip edits all reach version clips. The marquee spans tra
 lane rows, so one rubber band grabs versioned and unversioned material together.
 
 **Other commands** (§5.3): `cmd/take.create {trackId, clipIds}` folds selected clips into a
-folder ("Stack as Versions" in the clip context menu; all but the newest arrive muted);
-`cmd/take.flatten {trackId, folderId}` collapses the folder keeping only the UNMUTED clips.
-Both structural.
+folder ("Stack as Versions" in the clip context menu; all but the newest arrive muted) AND
+sets `keepTakes` — stacking is choosing versions; `cmd/take.flatten {trackId, folderId}`
+collapses the folder keeping only the UNMUTED clips. Both structural.
 
-**UI**: lanes are shown BY DEFAULT wherever they exist (`useRevealNewTakeLanes` expands on
-first sight and on every lane gain; a user collapse sticks for the session). The "T" header
-toggle shows/hides the stack. The Inspector's Versions section lists one strip per lane with
-muted clips faded; clicking a clip picks it there too.
+**UI — ONE switch** (2026-08-11, Omer: "why do I need two buttons?"): `Track.keepTakes` is the
+mode AND the visibility. The header layers toggle on = versions engaged: recordings fold into
+lanes and the sub-rows are shown; off = collapsed, normal track, recordings overlap. There is
+no separate view state (the former "T" toggle and `useRevealNewTakeLanes` were removed). The
+lane row's chevron and the right-click "Hide/Show Versions" drive the same flag. The
+Inspector's Versions section lists one strip per lane with muted clips faded; clicking a clip
+picks it there too.
 
 **Track selection is sticky** (same 2026-08-11 brief): clicking the arrangement — empty space
 or a clip — does NOT clear the selected track; only an empty click in the track LIST or Esc

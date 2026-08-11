@@ -133,7 +133,6 @@ export interface RowsOptions {
   /** locally added (still point-less) lanes per trackId */
   extraLanes: ReadonlyMap<number, readonly string[]>;
   /** tracks with their take-folder lanes expanded (SPEC §8.7) */
-  takesExpanded?: ReadonlySet<number>;
   /** live height preview during a header height drag (display px) */
   heightOverride?: { trackId: number; height: number } | null;
   vScale: number;
@@ -189,7 +188,9 @@ export function computeRows(project: Project | null, o: RowsOptions): Row[] {
     top += h;
     // Take lanes come FIRST (directly under the material they stack), automation after.
     const folders = t.takeFolders ?? [];
-    if (folders.length > 0 && o.takesExpanded?.has(t.id)) {
+    // ONE switch (2026-08-11, Omer): versions engaged = sub-rows shown. No separate
+    // view state — Track.keepTakes is the mode AND the visibility.
+    if (folders.length > 0 && t.keepTakes === true) {
       const nLanes = folders.reduce((m, f) => Math.max(m, f.lanes.length), 0);
       for (let li = 0; li < nLanes; li++) {
         rows.push({ kind: "takelane", track: t, laneIndex: li, top, height: TAKE_LANE_H, depth });

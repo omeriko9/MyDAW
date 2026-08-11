@@ -2237,6 +2237,7 @@ export const checks = [
       if (origClip) await s.probe("cmd/take.pick", { trackId: mt.id, clipId: origClip.id });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: t.takeFolders[0].id });
+      await s.probe("cmd/track.set", { trackId: mt.id, patch: { keepTakes: false } });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       const extra = (t.clips ?? []).filter((c) => c.startBeat >= src.startBeat + 3.9).map((c) => c.id);
       if (extra.length) await s.probe("cmd/clip.delete", { clipIds: extra });
@@ -2370,6 +2371,7 @@ export const checks = [
       if (keep) await s.probe("cmd/take.pick", { trackId: mt.id, clipId: keep.id });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: t.takeFolders[0].id });
+      await s.probe("cmd/track.set", { trackId: mt.id, patch: { keepTakes: false } });
       t = (await hello()).tracks.find((x) => x.id === mt.id);
       const extra = (t.clips ?? []).slice(1).map((c) => c.id);
       if (extra.length) await s.probe("cmd/clip.delete", { clipIds: extra });
@@ -2409,28 +2411,25 @@ export const checks = [
       tt.eq(folder.lanes.length, 2, "the folder stacked them as two lanes");
       await s.reload();
 
-      // The header grows a T toggle only for tracks WITH folders; expanding it adds
-      // one .tlh-takelane header row per lane (the DOM half of the canvas rows).
-      await s.untilEval("the takes toggle appears on the folder's track", () =>
-        [...document.querySelectorAll(".tlh-row")].some(
-          (r) => r.textContent.includes("MIDI 1") && r.querySelector(".tlh-takes-toggle"),
-        ));
+      // ONE switch (2026-08-11, Omer: "why do I need two buttons?"): take.create engages
+      // versions on the track, so the sub-rows must show with nothing pressed; toggling
+      // the layers button off collapses them AND disarms record-to-lanes (same flag).
+      await s.untilEval("stacking engages versions — sub-rows show with nothing pressed", () =>
+        document.querySelectorAll(".tlh-takelane").length === 2);
       const tRect = await s.eval(`(() => {
         const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.includes("MIDI 1"));
-        const b = row.querySelector(".tlh-takes-toggle").getBoundingClientRect();
+        const el = [...row.querySelectorAll("button")]
+          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Versions"));
+        const b = el.getBoundingClientRect();
         return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
       })()`);
-      // Versions are visible BY DEFAULT (2026-08-11): a folder that already exists —
-      // opened from a project, or folded with take.create — must draw its lanes without
-      // anyone pressing T. This check used to press T to expand; that is now the wrong
-      // way round, and asserting it would re-hide the feature the user asked to see.
-      await s.untilEval("a folder's lanes are shown without pressing T", () =>
-        document.querySelectorAll(".tlh-takelane").length === 2);
       await s.click(tRect.x, tRect.y);
-      await s.untilEval("T collapses them", () =>
+      await s.untilEval("the Versions toggle collapses them", () =>
         document.querySelectorAll(".tlh-takelane").length === 0);
+      await s.until("and it really disarmed the record mode too", async () =>
+        (await hello()).tracks.find((t) => t.id === mt.id)?.keepTakes !== true);
       await s.click(tRect.x, tRect.y);
-      await s.untilEval("T brings them back", () =>
+      await s.untilEval("toggling again brings them back", () =>
         document.querySelectorAll(".tlh-takelane").length === 2);
 
       const geom = await s.eval(`(() => {
@@ -2468,6 +2467,7 @@ export const checks = [
       // Tidy: flatten so a later check (or re-run against a live slot) sees the
       // fixture track without a folder.
       await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: f.id });
+      await s.probe("cmd/track.set", { trackId: mt.id, patch: { keepTakes: false } });
     },
   },
 
