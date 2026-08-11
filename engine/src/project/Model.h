@@ -486,6 +486,10 @@ struct Track {
     bool mute = false;
     bool solo = false;
     bool recordArm = false;
+    // Per-track automation-write arm ("W", SPEC §5.4). Records this track's fader/knob/
+    // plugin-param moves while the transport rolls, WITHOUT arming the whole project —
+    // the global transport arm stays a master switch that records every track.
+    bool automationWrite = false;
     bool monitor = false;          // optional
     std::string inputDevice;       // optional capture device id, "" = none/default
     int inputChannel = -1;         // optional, -1 = unset

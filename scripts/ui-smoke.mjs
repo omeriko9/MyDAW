@@ -443,6 +443,65 @@ export const checks = [
   },
 
   {
+    id: "track-w-arms-and-reveals",
+    title: "the track's W button arms automation write and the recorded lane reveals itself",
+    area: "track-headers",
+    guards: "SPEC §5.4 — the reported confusion (2026-08-10) was pressing 'A' (which only SHOWS lanes) and getting nothing: W must arm THIS track with the transport pencil off, and a written lane must open its track so the move is visible without hunting for it",
+    run: async (s, tt) => {
+      const project = async () => (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const laneRows = () => s.eval(`document.querySelectorAll("[data-lane-ref], .tlh-lane").length`);
+      const trackId = (await project()).tracks[0].id;
+
+      // Own preconditions: global (master) arm OFF, this track un-armed, stopped at 0.
+      await s.probe("transport/setAutomationWrite", { enabled: false });
+      await s.probe("cmd/track.set", { trackId, patch: { automationWrite: false } });
+      await s.probe("transport/stop", {});
+      await s.probe("transport/locate", { beat: 0 });
+      const lanesBefore = await laneRows();
+
+      const wBox = await s.eval(`(() => {
+        const el = [...document.querySelectorAll(".tlh-btn")].find((b) => b.textContent.trim() === "W");
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      })()`);
+      if (!wBox) throw new AssertionError("no W button in the track headers");
+      await s.click(wBox.x, wBox.y);
+      await s.until("W arms the track in the engine", async () =>
+        (await project()).tracks.find((t) => t.id === trackId)?.automationWrite === true);
+
+      // With ONLY the per-track arm on, a fader move must record.
+      await s.probe("transport/play", {});
+      for (const v of [0.4, 0.7]) {
+        await s.probe("cmd/track.set", { trackId, patch: { volume: v } });
+        await new Promise((r) => setTimeout(r, 220));
+      }
+      await s.probe("transport/stop", {});
+      await s.until("the volume lane got points", async () => {
+        const t = (await project()).tracks.find((x) => x.id === trackId);
+        return (t?.automation?.find((l) => l.paramRef === "volume")?.points?.length ?? 0) >= 2;
+      });
+      await s.until("the written lane revealed itself", async () => (await laneRows()) > lanesBefore);
+      tt.ok(true, "W armed one track with the master arm off, and its lane opened on its own");
+
+      // RESTORE. This check is unusual: succeeding CHANGES THE LAYOUT (a revealed lane adds
+      // a row, shifting every track below it). Left behind, it silently broke every later
+      // coordinate-driven check in the suite — so put the rig back exactly as it was found.
+      await s.probe("cmd/track.set", { trackId, patch: { automationWrite: false, volume: 1.0 } });
+      await s.probe("cmd/automation.clear", { trackId, paramRef: "volume" });
+      const aBox = await s.eval(`(() => {
+        const el = [...document.querySelectorAll(".tlh-btn")].find((b) => b.textContent.trim() === "A");
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      })()`);
+      if (aBox) await s.click(aBox.x, aBox.y); // collapse the lanes this check revealed
+      await s.until("the rig is back to its original row layout",
+        async () => (await laneRows()) === lanesBefore);
+    },
+  },
+
+  {
     id: "technique-master-glue",
     title: "the Production Techniques wizard applies Master Glue stages and takes the last one back",
     area: "techniques",

@@ -147,6 +147,7 @@ const REQUEST_TYPES = [
   "plugin/savePreset",
   "plugin/openEditor",
   "plugin/closeEditor",
+  "plugin/feedParamEdit",
   "settings/get",
   "settings/set",
 ] as const;
@@ -293,9 +294,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(133);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(134);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(147);
+    expect(AGENT_CATALOG.operations).toHaveLength(148);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

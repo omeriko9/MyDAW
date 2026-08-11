@@ -983,7 +983,10 @@ export default function TrackHeaders({
     const actionTracks = selected && selection.trackIds.length > 1
       ? (project?.tracks.filter((x) => selection.trackIds.includes(x.id)) ?? [t])
       : [t];
-    const groupToggle = (key: "mute" | "solo" | "recordArm" | "monitor", tracks: Track[]) => {
+    const groupToggle = (
+      key: "mute" | "solo" | "recordArm" | "monitor" | "automationWrite",
+      tracks: Track[],
+    ) => {
       const compatible = key === "mute" || key === "solo"
         ? tracks.filter((x) => !isViewRowKind(x.kind))
         : tracks;
@@ -1143,11 +1146,24 @@ export default function TrackHeaders({
                 tooltip="Input monitoring"
               />
             )}
+            {!isViewRowKind(t.kind) && (
+              <Toggle
+                on={t.automationWrite === true}
+                onChange={() =>
+                  groupToggle("automationWrite", actionTracks.filter((x) => !isViewRowKind(x.kind)))
+                }
+                variant="danger"
+                className="tlh-btn"
+                tooltip="Write automation (W) — while the transport rolls, this track's fader, pan and plugin knobs (including the plugin's own editor window) record automation at the playhead"
+              >
+                W
+              </Toggle>
+            )}
             <Toggle
               on={lanesExpanded.has(t.id)}
               onChange={() => toggleLanes(t)}
               className="tlh-btn"
-              tooltip="Automation lanes"
+              tooltip="Show automation lanes (A) — this only reveals the lanes; use W to record into them"
             >
               A
             </Toggle>

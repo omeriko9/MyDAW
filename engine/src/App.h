@@ -24,6 +24,7 @@
 #include <string>
 #include <thread>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "EngineContext.h"
@@ -109,6 +110,16 @@ public:
     json midiMapsJson() const;
     // Feed one CC through the control path (real MIDI callback + midimap/feedCc test/OSC hook).
     void feedMidiCc(int cc, int channel, int value) { handleMidiControl(cc, channel, value); }
+    /** A parameter value the PLUGIN itself already applied — reported by its own native
+     *  editor (HostProcessManager's paramEdited) or injected by an equivalent external
+     *  source (plugin/feedParamEdit). Mirrors the value into the model, records it into the
+     *  param's automation lane while write is armed and playing (SPEC §5.4), and broadcasts
+     *  event/pluginParams. Deliberately does NOT send the value back to the plugin — it
+     *  already has it, and the host reports edits at ~30 Hz, so echoing would shove a stale
+     *  value at a knob the user is still dragging. Main thread. */
+    void onPluginParamEdited(uint64_t instanceId, uint32_t paramId, double value,
+                             const std::string& valueText);
+
     /** Inject a channel-voice MIDI message (software control surface / on-screen keyboard
      *  / test). Enters MidiInput's mirror ring, so it RECORDS exactly like hardware. */
     void feedMidiEvent(int status, int data1, int data2) {
@@ -303,6 +314,14 @@ private:
     void prepareGraphFormat(const AudioConfig& actual); // configure graph + deps
     void recreatePluginInstances();
     void wireHostCallbacks();
+    // Native-editor automation write (SPEC §5.4): a plugin's own GUI reports knob moves
+    // through paramEdited with no gesture boundaries — VST2's audioMasterBeginEdit/EndEdit
+    // is answered but not relayed, and plenty of plugins never send it at all — so a
+    // gesture is closed by SILENCE: no further edit for kNativeParamGestureIdle (App.cpp),
+    // or the next transport state change, whichever comes first. Keyed per (instanceId,
+    // paramId) so two knobs moved at once stay independent gestures. `force` closes every
+    // pending gesture regardless of its deadline. Main thread only.
+    void commitNativeParamGestures(bool force);
     void broadcastMeters();
     // event/recordingNotes — throttled in-progress MIDI take (armed track ids + live notes)
     // for real-time timeline feedback while recording. Main thread.
@@ -355,6 +374,13 @@ private:
     std::atomic<bool> pluginLoadCancelRequested_{false};
 
     std::atomic<bool> pendingRebuild_{false};
+
+    // In-flight native-editor knob moves (see commitNativeParamGestures). Main thread only.
+    struct NativeParamGesture {
+        double value = 0.0;
+        std::chrono::steady_clock::time_point deadline{};
+    };
+    std::map<std::pair<uint64_t, uint32_t>, NativeParamGesture> nativeParamGestures_;
 
     // cpu meter
     uint64_t lastCpuProc_ = 0;

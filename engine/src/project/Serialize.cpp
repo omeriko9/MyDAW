@@ -414,6 +414,8 @@ json toJson(const Track& t) {
         j["parentId"] = t.parentId;
     if (t.monitor)
         j["monitor"] = true;
+    if (t.automationWrite)
+        j["automationWrite"] = true; // omitted when off (SPEC §5.4, per-track "W")
     if (!t.inputDevice.empty())
         j["inputDevice"] = t.inputDevice;
     if (t.inputChannel >= 0)
@@ -887,6 +889,7 @@ bool fromJson(const json& j, Track& out, std::string* err) {
     out.mute = getOr<bool>(j, "mute", false);
     out.solo = getOr<bool>(j, "solo", false);
     out.recordArm = getOr<bool>(j, "recordArm", false);
+    out.automationWrite = getOr<bool>(j, "automationWrite", false);
     out.monitor = getOr<bool>(j, "monitor", false);
     out.inputDevice = getOr(j, "inputDevice", "");
     out.inputChannel = getOr<int>(j, "inputChannel", -1);

@@ -1262,6 +1262,22 @@ json Api::handlePluginInstance(const std::string& type, const json& p, std::stri
     BuiltinEffectManager* builtin = app_.builtin.get();
     // Built-in effects are in-engine: params come from the effect, no native editor/presets.
     const bool isBuiltin = builtin && builtin->has(iid);
+    // Report a value the plugin ALREADY holds, exactly as its own native editor does
+    // (SPEC §5.4 automation write). Not a setter: nothing is sent to the plugin — use
+    // cmd/plugin.setParam for that. Same shape as midi/feedEvent: an injection point for a
+    // source the engine cannot observe directly (an out-of-process editor, a surface, a test).
+    if (type == "plugin/feedParamEdit") {
+        if (!app_.model.pluginByInstanceId(iid)) {
+            ec = "not_found";
+            em = "unknown instanceId";
+            return json();
+        }
+        app_.onPluginParamEdited(iid,
+                                 static_cast<uint32_t>(getOr<uint64_t>(p, "paramId", 0)),
+                                 std::clamp(getOr<double>(p, "value", 0.0), 0.0, 1.0),
+                                 getOr(p, "valueText", std::string()));
+        return json::object();
+    }
     if (type == "plugin/getParams") {
         if (isBuiltin)
             return json{{"params", builtin->getParams(iid)}, {"hasEditor", false}};

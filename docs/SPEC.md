@@ -411,13 +411,38 @@ the entire drag.
   `metronome` and `automationWrite`), so the state is readable — the UI seeds its mirror from
   `session/hello`, reconciles it from every transport event/reply carrying the field, and keeps
   user toggles optimistic.
-- **Automation write** (`transport/setAutomationWrite {enabled}`): while armed AND playing, a
+- **Automation write** has TWO arms, and a move is captured when either says yes (both still
+  require the transport to be rolling — recording counts, not just playing):
+  * **per-track "W"** (`cmd/track.set {automationWrite}`, the W button beside M/S/R) — arms just
+    that track. This is the arm the track header exposes and the one users reach for.
+  * **global** (`transport/setAutomationWrite {enabled}`, the transport's pencil toggle) — a
+    MASTER switch: on, every track writes. Pre-dates per-track arming and is unchanged.
+  `CommandProcessor::automationArmed(trackId)` is the single owner of that rule; every capture
+  path asks it. The UI reveals the result: writing into a lane a track did not have expands that
+  track's lanes automatically (`useRevealWrittenLanes`), so a recorded move is visible as it
+  lands instead of hiding until someone presses "A" (which only SHOWS lanes — it never arms).
+- While armed AND playing, a
   fader/knob drag records automation points into that param's lane at the playhead. Captured
   targets: `volume`, `pan`, `send:<n>`, `plugin:<instanceId>:<paramId>` — the handlers
   (`CommandProcessor::captureAutomation`) reuse `Model::automationLane(…, createIfMissing)`,
   thin to one point per ~1/96 note, and defer the baking graph rebuild to the gesture commit
   (the live value already rides the RT param ring). v1 is a single write arm (records what you
   move); per-mode touch/latch overwrite-of-untouched-regions needs a continuous writer (future).
+- **Native-editor knobs** record too: a knob turned in the plugin's OWN editor window arrives as
+  a host `paramEdited` push (§8.2) and lands in the same `plugin:<instanceId>:<paramId>` lane via
+  `App::onPluginParamEdited` → `CommandProcessor::captureNativeEditorParam`. Two differences from
+  the command path, both deliberate:
+  * **No echo.** The plugin already holds the value, and edits surface at the host notifier's
+    ~30 Hz, so sending it back would shove a stale value at a knob the user is still dragging.
+    Only the model mirror and the lane are written — no `ParamMsg`, no `setParamRt`.
+  * **The gesture is closed by silence**, not by a commit message: VST2's `audioMasterBeginEdit`/
+    `EndEdit` is answered but not relayed, and many plugins never send it, so `App::
+    commitNativeParamGestures` ends a gesture after 300 ms with no further edit for that
+    (instance, param) — or at the next transport state change, whichever comes first. One knob
+    move is therefore still exactly one undo entry, and two knobs moved at once stay independent.
+  `plugin/feedParamEdit {instanceId, paramId, value, valueText?}` (§5.6) is the same entry point
+  for a source the engine cannot observe directly (an external editor, a control surface, a test).
+  It REPORTS a value the plugin already has — it is not a setter; `cmd/plugin.setParam` sets.
 - `event/transport {state:"stopped"|"playing"|"recording", beat, timeSec, loop:{...},
   punch:{startBeat,endBeat,enabled}, metronome:{enabled:bool, countInBars:0|1|2},
   automationWrite:bool} ` ~20 Hz while playing + on change. `punch` is derived from the
@@ -612,6 +637,11 @@ the entire drag.
   not in-browser). Browser generic editor is always available regardless. Failure replies carry
   the host's real reason in `error.message` (e.g. "plugin has no native editor", attach
   failures), not a generic string.
+- `plugin/feedParamEdit {instanceId, paramId, value, valueText?}` → `{}` — report a value the
+  plugin ALREADY holds, exactly as its native editor reports one (mirrors it into the model,
+  records automation per §5.4, broadcasts `event/pluginParams`). NOT a setter: nothing is sent to
+  the plugin — `cmd/plugin.setParam` does that. The injection point for a source the engine
+  cannot observe directly, mirroring `midi/feedEvent`'s role for MIDI.
 - `event/pluginState {instanceId, state:"ok"|"loading"|"crashed"|"timeout"|"restarting"|"failed",
   message?, restartCount}` — UI must surface a clear error indicator on the insert slot.
 - `project/getUnresolvedPlugins {}` → `{plugins:[{instanceId, name, uid, format:"vst2"|"vst3",

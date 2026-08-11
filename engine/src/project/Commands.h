@@ -140,6 +140,20 @@ public:
     // load/recover and internally after undo/redo.
     void syncEngineFromModel();
 
+    // Automation write for a knob the user moved in the plugin's OWN (native) editor —
+    // SPEC §5.4, the counterpart of the cmd/plugin.setParam capture. The plugin already
+    // holds the value (it moved its own knob) and E9 has mirrored it into PluginInstance::
+    // paramValues, so this records the automation point ONLY: deliberately no ParamMsg /
+    // setParamRt echo back to the plugin — those arrive via the host notifier at ~30 Hz,
+    // so echoing would push a stale value at a knob the user is still dragging.
+    // `transient` mirrors execute(): true for every edit inside the gesture (lane only,
+    // no undo entry / rebuild / broadcast), false for the closing commit. The commit runs
+    // even when the arm has since gone (transport stopped mid-gesture) so points already
+    // written are baked and pushed onto the undo stack instead of stranded in the model.
+    // Returns false when nothing was recorded. Main thread only.
+    bool captureNativeEditorParam(uint64_t instanceId, uint32_t paramId, double value,
+                                  bool transient);
+
     // plugins/recreate (SPEC §5.6): resolve dormant inserts against the registry and spawn
     // live hosts. A successful resolve mutates the model (inserts gain a path + a live node),
     // so it is UNDOABLE: it pushes one undo entry mirroring cmd/plugin.add (before/after
@@ -322,6 +336,10 @@ private:
     // manager and everything else to the out-of-process host. False + err on failure.
     bool createInsertNode(const PluginInstance& pi, std::string& err);
     void destroyInsertNode(uint64_t instanceId);
+
+    // True when `trackId`'s moves should be recorded right now: the transport is rolling AND
+    // either the global transport arm (master — every track) or that track's own "W" is on.
+    bool automationArmed(uint64_t trackId);
 
     // Automation write (SPEC §5.4): if the transport is armed + playing, record `value` into
     // trackId's `paramRef` lane at the playhead (thinning to one point per small beat window).

@@ -98,6 +98,90 @@ try {
   const lane3 = laneOf(proj3, trk2.id, "volume");
   report("armed but stopped captures nothing", !lane3 || (lane3.points?.length ?? 0) === 0, `points=${lane3?.points?.length ?? 0}`);
 
+  /* ---- native-editor knob moves (plugin/feedParamEdit) --------------------------------
+     A knob turned in the plugin's OWN editor reaches the engine as a paramEdited push with
+     no gesture boundaries — the engine closes the gesture on silence. plugin/feedParamEdit
+     is that same entry point, so this drives the real path (App::onPluginParamEdited ->
+     CommandProcessor::captureNativeEditorParam -> the idle commit) without a plugin GUI. */
+  const PID = 1; // builtin:utility param 1
+  const fx = (await req("cmd/plugin.add", { trackId: trk2.id, uid: "builtin:utility" })).instance;
+  const fxRef = `plugin:${fx.instanceId}:${PID}`;
+  const paramOf = async (instanceId, id) =>
+    (await req("plugin/getParams", { instanceId })).params?.find((q) => q.id === id)?.value;
+
+  await req("transport/locate", { beat: 0 });
+  await req("transport/play", {});
+  const knob = [0.3, 0.45, 0.6, 0.75];
+  for (const v of knob) { await req("plugin/feedParamEdit", { instanceId: fx.instanceId, paramId: PID, value: v }); await sleep(150); }
+  // The gesture is still OPEN here (transient): nothing may be on the undo stack yet.
+  const midProj = (await req("session/hello", { clientName: "auto" })).project;
+  const midPts = laneOf(midProj, trk2.id, fxRef)?.points ?? [];
+  report("native-editor knob writes points while the gesture is still open",
+    midPts.length >= 3, `points=${midPts.length}`);
+
+  await sleep(600); // > the 300 ms idle timer: the gesture commits
+  await req("transport/stop", {});
+  const fxProj = (await req("session/hello", { clientName: "auto" })).project;
+  const fxPts = laneOf(fxProj, trk2.id, fxRef)?.points ?? [];
+  const fxBeatsIncrease = fxPts.every((p, i) => i === 0 || p.beat >= fxPts[i - 1].beat);
+  report("native-editor knob recorded into its plugin lane at advancing beats",
+    fxPts.length >= 3 && fxBeatsIncrease && fxPts.some((p) => p.value >= 0.55),
+    `points=${fxPts.length} beats=[${fxPts.map((p) => p.beat.toFixed(2)).join(",")}] vals=[${fxPts.map((p) => p.value.toFixed(2)).join(",")}]`);
+
+  // The value must NOT be echoed back at the plugin — feedParamEdit reports, it does not set.
+  // (The model still mirrors it, so getParams reflects the last reported value.)
+  report("reported value mirrors into the instance without a set-back",
+    Math.abs((await paramOf(fx.instanceId, PID)) - 0.75) < 1e-6,
+    `param=${await paramOf(fx.instanceId, PID)}`);
+
+  // ONE undo entry for the whole knob move: undo must clear the lane, not peel off a point.
+  await req("edit/undo", {});
+  const undoneProj = (await req("session/hello", { clientName: "auto" })).project;
+  const undonePts = laneOf(undoneProj, trk2.id, fxRef)?.points ?? [];
+  report("one undo takes back the whole native-editor gesture",
+    undonePts.length === 0, `points after undo=${undonePts.length}`);
+
+  // write OFF → a native-editor knob records nothing
+  await req("transport/setAutomationWrite", { enabled: false });
+  await req("transport/play", {});
+  for (const v of [0.1, 0.2]) { await req("plugin/feedParamEdit", { instanceId: fx.instanceId, paramId: PID, value: v }); await sleep(120); }
+  await sleep(500);
+  await req("transport/stop", {});
+  const offProj = (await req("session/hello", { clientName: "auto" })).project;
+  const offPts = laneOf(offProj, trk2.id, fxRef)?.points ?? [];
+  report("write OFF ignores native-editor knob moves", offPts.length === 0, `points=${offPts.length}`);
+
+  /* ---- per-track "W" arm, with the GLOBAL transport arm OFF -------------------------
+     The transport pencil is a master switch; a track's own W arms just that track. This
+     is the arm the track header exposes, so it is the one most users actually press. */
+  await req("transport/setAutomationWrite", { enabled: false });
+  const wOn = (await req("cmd/track.add", { kind: "audio", name: "W-On" })).track;
+  const wOff = (await req("cmd/track.add", { kind: "audio", name: "W-Off" })).track;
+  await req("cmd/track.set", { trackId: wOn.id, patch: { automationWrite: true } });
+
+  const armState = (await req("session/hello", { clientName: "auto" })).project
+    .tracks.find((t) => t.id === wOn.id)?.automationWrite;
+  report("per-track W round-trips through the project", armState === true, `automationWrite=${armState}`);
+
+  await req("transport/locate", { beat: 0 });
+  await req("transport/play", {});
+  for (const v of [0.3, 0.55, 0.8]) {
+    await send("cmd/track.set", { trackId: wOn.id, patch: { volume: v } }, true);
+    await send("cmd/track.set", { trackId: wOff.id, patch: { volume: v } }, true);
+    await sleep(150);
+  }
+  await send("cmd/track.set", { trackId: wOn.id, patch: { volume: 1.0 } }, false);
+  await send("cmd/track.set", { trackId: wOff.id, patch: { volume: 1.0 } }, false);
+  await req("transport/stop", {});
+
+  const wProj = (await req("session/hello", { clientName: "auto" })).project;
+  const wOnPts = laneOf(wProj, wOn.id, "volume")?.points ?? [];
+  const wOffPts = laneOf(wProj, wOff.id, "volume")?.points ?? [];
+  report("a track's own W records with the global arm OFF", wOnPts.length >= 3,
+    `points=${wOnPts.length} vals=[${wOnPts.map((p) => p.value.toFixed(2)).join(",")}]`);
+  report("an un-armed track stays untouched in the same pass", wOffPts.length === 0,
+    `points=${wOffPts.length}`);
+
   console.log(`\n${passed} passed, ${failed} failed`);
   die(failed === 0 ? 0 : 1, failed === 0 ? "AUTOMATION WRITE TEST: ALL PASS" : "AUTOMATION WRITE TEST: FAILURES");
 } catch (e) {

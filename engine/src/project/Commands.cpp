@@ -1280,9 +1280,21 @@ json CommandProcessor::trackReorder(const json& p, CmdResult& r) {
     return json::object();
 }
 
+bool CommandProcessor::automationArmed(uint64_t trackId) {
+    // Rolling is required either way (isPlaying() covers recording too).
+    if (!ctx_.transport || !ctx_.transport->isPlaying())
+        return false;
+    // The transport arm is the MASTER switch — on, every track writes (the behaviour that
+    // predates per-track arming). Otherwise only tracks with their own "W" lit write.
+    if (ctx_.transport->automationWrite())
+        return true;
+    const Track* t = model().trackById(trackId);
+    return t && t->automationWrite;
+}
+
 void CommandProcessor::captureAutomation(uint64_t trackId, const std::string& paramRef,
                                          double value, bool transient, CmdResult& r) {
-    if (!ctx_.transport || !ctx_.transport->automationWrite() || !ctx_.transport->isPlaying())
+    if (!automationArmed(trackId))
         return;
     const double beat = std::max(0.0, ctx_.transport->playheadBeats());
     AutomationLane* lane = model().automationLane(trackId, paramRef, /*createIfMissing=*/true);
@@ -1308,6 +1320,54 @@ void CommandProcessor::captureAutomation(uint64_t trackId, const std::string& pa
     // ParamMsg ring during the drag, so a rebuild per transient message is unnecessary.
     if (!transient)
         r.structural = true;
+}
+
+bool CommandProcessor::captureNativeEditorParam(uint64_t instanceId, uint32_t paramId,
+                                                double value, bool transient) {
+    if (!ctx_.model)
+        return false;
+    Track* owner = nullptr;
+    if (!model().pluginByInstanceId(instanceId, &owner) || !owner)
+        return false;
+    // Arm is resolved against the OWNING track (global master arm or that track's own W).
+    if (transient && !automationArmed(owner->id))
+        return false; // nothing to record; the commit path still runs (see the header)
+    const std::string paramRef =
+        "plugin:" + std::to_string(instanceId) + ":" + std::to_string(paramId);
+
+    if (transient) {
+        // Same gesture baseline as execute(): the FIRST edit of the drag snapshots the
+        // project so the closing commit's undo entry reverts the whole knob move.
+        if (!gestureBefore_)
+            gestureBefore_ = toJson(model().project);
+        CmdResult r;
+        captureAutomation(owner->id, paramRef, value, /*transient=*/true, r);
+        return true;
+    }
+
+    json before = gestureBefore_ ? *gestureBefore_ : toJson(model().project);
+    CmdResult r;
+    r.label = "Edit Plugin Parameter";
+    r.scope = "track";
+    r.eventTrackIds.push_back(owner->id);
+    captureAutomation(owner->id, paramRef, value, /*transient=*/false, r);
+    json after = toJson(model().project);
+    gestureBefore_.reset();
+    if (after == before)
+        return false; // the arm was never live during this gesture — nothing was written
+    // Unconditional (not r.structural): captureAutomation only sets that flag while armed,
+    // and a gesture the user ended by hitting Stop still left points that must be baked.
+    rebuildGraph();
+    if (ctx_.undoStack) {
+        UndoEntry e;
+        e.label = r.label;
+        e.before = std::move(before);
+        e.after = std::move(after);
+        ctx_.undoStack->push(std::move(e));
+    }
+    markDirty();
+    broadcastChanges(r);
+    return true;
 }
 
 json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
@@ -1463,6 +1523,14 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         t->solo = getOr<bool>(patch, "solo", t->solo);
         muteSolo = true;
         any = true;
+    }
+    if (hasKey(patch, "automationWrite")) {
+        // Per-track automation-write arm ("W", SPEC §5.4). Pure model state read by
+        // CommandProcessor::automationArmed — nothing in the graph depends on it, so no
+        // rebuild and no ParamMsg.
+        t->automationWrite = getOr<bool>(patch, "automationWrite", t->automationWrite);
+        any = true;
+        mixerOnly = false;
     }
     bool inputChanged = false;
     if (hasKey(patch, "recordArm")) {

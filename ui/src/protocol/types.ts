@@ -370,6 +370,8 @@ export interface Track {
   mute: boolean;
   solo: boolean;
   recordArm: boolean;
+  /** Per-track automation-write arm ("W", SPEC §5.4) — absent/false when off. */
+  automationWrite?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -775,6 +777,9 @@ export interface TrackPatch {
   mute?: boolean;
   solo?: boolean;
   recordArm?: boolean;
+  /** Per-track automation-write arm ("W", SPEC §5.4). The transport arm stays a master
+   *  switch that records every track. */
+  automationWrite?: boolean;
   monitor?: boolean;
   inputDevice?: string;
   inputChannel?: number;
@@ -1765,6 +1770,19 @@ export interface PluginCloseEditorRequest {
   instanceId: number;
 }
 
+/** Report a value the plugin ALREADY holds, as its own native editor does — NOT a setter
+ *  (nothing is sent to the plugin; use cmd/plugin.setParam for that). While automation
+ *  write is armed and the transport plays, the value records into the param's automation
+ *  lane; the gesture closes on its own once the reports stop. */
+export interface PluginFeedParamEditRequest {
+  instanceId: number;
+  paramId: number;
+  /** normalized 0..1 */
+  value: number;
+  /** the plugin's display text for `value`, when the source knows it */
+  valueText?: string;
+}
+
 /* ============================================================================
  * §5.7 — Settings
  * ========================================================================= */
@@ -2135,6 +2153,7 @@ export interface RequestMap {
   "plugin/savePreset": { req: PluginSavePresetRequest; reply: EmptyObject };
   "plugin/openEditor": { req: PluginOpenEditorRequest; reply: EmptyObject };
   "plugin/closeEditor": { req: PluginCloseEditorRequest; reply: EmptyObject };
+  "plugin/feedParamEdit": { req: PluginFeedParamEditRequest; reply: EmptyObject };
 
   // §5.7 misc
   // NOTE(spec): SPEC §5.7 does not state the settings/get reply shape; pinned here as the
@@ -2339,6 +2358,7 @@ export const PluginMsg = {
   savePreset: "plugin/savePreset",
   openEditor: "plugin/openEditor",
   closeEditor: "plugin/closeEditor",
+  feedParamEdit: "plugin/feedParamEdit",
 } as const satisfies Record<string, RequestType>;
 
 export const SettingsMsg = {

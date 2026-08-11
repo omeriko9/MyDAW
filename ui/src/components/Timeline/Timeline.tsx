@@ -18,7 +18,7 @@ import Ruler from "./Ruler";
 import TrackHeaders from "./TrackHeaders";
 import ClipCanvas from "./ClipCanvas";
 import Minimap, { MINIMAP_H } from "./Minimap";
-import { useAutomationUi } from "./automationUi";
+import { useAutomationUi, useRevealWrittenLanes } from "./automationUi";
 import { useTakesUi } from "./takesUi";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
@@ -199,6 +199,8 @@ export default function Timeline() {
 
   const autoExpanded = useAutomationUi((s) => s.expanded);
   const extraLanes = useAutomationUi((s) => s.extraLanes);
+  // Writing into a new lane opens that track, so recorded moves are visible as they land.
+  useRevealWrittenLanes(project);
   const takesExpanded = useTakesUi((s) => s.expanded);
 
   const vScale = vScaleOf(viewport.zoomY);

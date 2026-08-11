@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "3cfdf2bb2e8c3a00a9806d52173ee0dff90f9ac43e2db6724f0c875ca2df9239";
+const char kAgentCatalogSha256[] = "e8ba0b08a3bad7a0800e49be47cbddb142b4a66ac4f45da5019de14b92858968";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -2817,6 +2817,30 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "PluginFeedParamEditRequest": {
+      "additionalProperties": false,
+      "description": "A value the plugin ALREADY holds, reported as its own native editor reports one. Not a setter: nothing is sent to the plugin. value is normalized 0..1.",
+      "properties": {
+        "instanceId": {
+          "type": "number"
+        },
+        "paramId": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        },
+        "valueText": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instanceId",
+        "paramId",
+        "value"
+      ],
+      "type": "object"
+    },
     "PluginFormat": {
       "enum": [
         "vst2",
@@ -3975,6 +3999,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           },
           "type": "array"
         },
+        "automationWrite": {
+          "description": "Per-track automation-write arm (\"W\"): this track records fader/knob/plugin-param moves while the transport rolls. Omitted when off.",
+          "type": "boolean"
+        },
         "channels": {
           "enum": [
             1,
@@ -4277,6 +4305,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
     "TrackPatch": {
       "additionalProperties": false,
       "properties": {
+        "automationWrite": {
+          "description": "Per-track automation-write arm (\"W\"). The transport-level arm stays a master switch that records every track.",
+          "type": "boolean"
+        },
         "channels": {
           "description": "Mono (1) / stereo (2) — audio tracks only; structural (capture and recording follow).",
           "enum": [
@@ -9027,6 +9059,37 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         {
           "input": {
             "instanceId": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugin/feedParamEdit",
+      "category": "plugins",
+      "description": "Report a value the plugin already holds, as its native editor does (not a setter — use cmd/plugin.setParam). Records automation while armed and playing.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project",
+        "plugin-instance"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginFeedParamEditRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "instanceId": 31,
+            "paramId": 4,
+            "value": 0.62
           }
         }
       ]

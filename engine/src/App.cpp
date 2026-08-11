@@ -722,6 +722,11 @@ void App::requestGraphRebuild() {
 // host process callback relays (foreign threads -> job queue, SPEC §5.6 events)
 // ---------------------------------------------------------------------------
 
+// Silence that ends a native-editor knob gesture (see commitNativeParamGestures). Well
+// clear of the host notifier's ~30 ms per-param push throttle, so an unbroken drag never
+// splits, and short enough that the undo entry lands while the move still feels current.
+static constexpr auto kNativeParamGestureIdle = std::chrono::milliseconds(300);
+
 void App::wireHostCallbacks() {
     host->setStateCallback([this](uint64_t instanceId, PluginRuntimeState state,
                                   const std::string& message, int restartCount) {
@@ -738,18 +743,46 @@ void App::wireHostCallbacks() {
     host->setParamEditedCallback([this](uint64_t instanceId, uint32_t paramId, double value,
                                         const std::string& valueText) {
         post([this, instanceId, paramId, value, valueText] {
-            if (PluginInstance* pi = model.pluginByInstanceId(instanceId))
-                pi->paramValues[paramId] = value; // mirror native-editor edits
-            broadcastEvent("event/pluginParams",
-                           json{{"instanceId", instanceId},
-                                {"changed", json::array({json{{"id", paramId},
-                                                              {"value", value},
-                                                              {"valueText", valueText}}})}});
+            onPluginParamEdited(instanceId, paramId, value, valueText);
         });
     });
     host->setLatencyCallback([this](uint64_t, int) {
         requestGraphRebuild(); // PDC delay lines recomputed at rebuild (SPEC §7)
     });
+}
+
+void App::onPluginParamEdited(uint64_t instanceId, uint32_t paramId, double value,
+                              const std::string& valueText) {
+    if (PluginInstance* pi = model.pluginByInstanceId(instanceId))
+        pi->paramValues[paramId] = value; // mirror native-editor edits
+    // Automation write (SPEC §5.4): a knob moved in the plugin's OWN editor records exactly
+    // like a MyDAW fader drag. Every edit is transient; the gesture is closed later by
+    // commitNativeParamGestures, once the edits stop arriving.
+    if (cmd && cmd->captureNativeEditorParam(instanceId, paramId, value, /*transient=*/true))
+        nativeParamGestures_[{instanceId, paramId}] = NativeParamGesture{
+            value, std::chrono::steady_clock::now() + kNativeParamGestureIdle};
+    broadcastEvent("event/pluginParams",
+                   json{{"instanceId", instanceId},
+                        {"changed", json::array({json{{"id", paramId},
+                                                      {"value", value},
+                                                      {"valueText", valueText}}})}});
+}
+
+void App::commitNativeParamGestures(bool force) {
+    if (nativeParamGestures_.empty() || !cmd)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = nativeParamGestures_.begin(); it != nativeParamGestures_.end();) {
+        if (!force && now < it->second.deadline) {
+            ++it;
+            continue;
+        }
+        const uint64_t instanceId = it->first.first;
+        const uint32_t paramId = it->first.second;
+        const double value = it->second.value;
+        it = nativeParamGestures_.erase(it); // before the commit: it broadcasts and rebuilds
+        cmd->captureNativeEditorParam(instanceId, paramId, value, /*transient=*/false);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -920,6 +953,9 @@ void App::stopRecordingAndCommit() {
 
 void App::prepareForModelReplace() {
     ++modelEpoch_; // drop posted asset-reconcile jobs that belong to the outgoing model
+    // Pending knob gestures name instances of the OUTGOING project; committing them
+    // against the incoming one would write into a stranger (or nothing at all).
+    nativeParamGestures_.clear();
     transport.stop();
     transport.locate(0.0);
     if (recordingActive_) { // discard an in-flight take
@@ -1337,6 +1373,9 @@ int App::run() {
         if (st != lastState) {
             lastState = st;
             lastTransport = now;
+            // Stopping (or starting) ends any native-editor knob gesture right here rather
+            // than one idle timeout later, so Stop leaves the undo stack already settled.
+            commitNativeParamGestures(/*force=*/true);
             broadcastTransportEvent(); // "+ on change" (§5.4)
         } else if (st != TransportState::Stopped && now - lastTransport >= 50ms) {
             lastTransport = now;
@@ -1352,6 +1391,10 @@ int App::run() {
             lastPump = now;
             host->pump();
         }
+
+        // Close native-editor knob gestures whose edits stopped arriving (§5.4). Checked
+        // every 5 ms tick, not at the pump, so the deadline means what it says.
+        commitNativeParamGestures(/*force=*/false);
 
         // Cycle wrap / arranger jump: the RT thread moved the playhead BACKWARDS, and the
         // recorder times everything off that playhead. Split the take at the seam before

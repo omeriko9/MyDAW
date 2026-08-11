@@ -7,9 +7,11 @@
  * per plugin (uid).
  */
 
+import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { getPluginParams } from "../../store/actions";
-import type { PluginInstance, PluginParam } from "../../protocol/types";
+import { useStore } from "../../store/store";
+import type { PluginInstance, PluginParam, Project } from "../../protocol/types";
 import { cachePluginParamName } from "./layout";
 
 interface AutomationUiState {
@@ -55,6 +57,46 @@ export const useAutomationUi = create<AutomationUiState>((set) => ({
       return { extraLanes };
     }),
 }));
+
+/* ============================================================================
+ * reveal-on-write
+ * ========================================================================= */
+
+/**
+ * Expand a track's lanes the moment automation is WRITTEN into a lane it did not have
+ * (SPEC §5.4). Without this, arming W and moving a fader — or a knob in a plugin's own
+ * editor window — produced no visible feedback whatsoever: the lane existed in the model
+ * but stayed hidden until someone thought to press "A", which is exactly how the feature
+ * read as broken.
+ *
+ * Deliberately narrow: it only fires while the transport is ROLLING and that track is
+ * actually armed (its own W, or the transport's master arm). Loading a project, undo, or
+ * any ordinary edit therefore never force-expands anything — a track is only opened at
+ * the moment the user's own gesture put something new in it.
+ */
+export function useRevealWrittenLanes(project: Project | null): void {
+  const rolling = useStore((s) => s.transport.state !== "stopped");
+  const masterArm = useStore((s) => s.automationWrite);
+  // Per-track lane refs as of the previous project we saw. A track absent from this map
+  // has never been compared (fresh load / newly created), so it can't count as "gained".
+  const seen = useRef<Map<number, ReadonlySet<string>>>(new Map());
+
+  useEffect(() => {
+    const next = new Map<number, ReadonlySet<string>>();
+    for (const t of project?.tracks ?? []) {
+      const refs = new Set((t.automation ?? []).map((l) => l.paramRef));
+      next.set(t.id, refs);
+      const before = seen.current.get(t.id);
+      if (!before || !rolling || !(masterArm || t.automationWrite === true)) continue;
+      for (const ref of refs) {
+        if (before.has(ref)) continue;
+        useAutomationUi.getState().setExpanded(t.id, true);
+        break;
+      }
+    }
+    seen.current = next;
+  }, [project, rolling, masterArm]);
+}
 
 /* ============================================================================
  * plugin/getParams cache — lane picker submenus & param display names
