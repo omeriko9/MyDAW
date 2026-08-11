@@ -180,6 +180,28 @@ bool takeClip(Track& t, uint64_t id, Clip& out) {
             return true;
         }
     }
+    // Version clips are ordinary clips (2026-08-11), so removal has to reach into the
+    // lanes too — otherwise deleting a marquee selection that spans versions silently
+    // dropped the lane clips from the request and left them on screen.
+    for (size_t fi = 0; fi < t.takeFolders.size(); ++fi) {
+        TakeFolder& f = t.takeFolders[fi];
+        for (size_t li = 0; li < f.lanes.size(); ++li) {
+            std::vector<Clip>& cl = f.lanes[li].clips;
+            for (size_t i = 0; i < cl.size(); ++i) {
+                if (clipId(cl[i]) != id)
+                    continue;
+                out = std::move(cl[i]);
+                cl.erase(cl.begin() + static_cast<ptrdiff_t>(i));
+                // Empty containers are noise: an emptied lane is a row with nothing in
+                // it, and a folder with no lanes left is not a version stack any more.
+                if (cl.empty())
+                    f.lanes.erase(f.lanes.begin() + static_cast<ptrdiff_t>(li));
+                if (f.lanes.empty())
+                    t.takeFolders.erase(t.takeFolders.begin() + static_cast<ptrdiff_t>(fi));
+                return true;
+            }
+        }
+    }
     return false;
 }
 

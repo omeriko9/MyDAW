@@ -646,13 +646,23 @@ public:
     }
 
     // --- clip lookups --------------------------------------------------------
+    // Take-lane clips are FIRST-CLASS (2026-08-11): a version's clip is addressable
+    // exactly like any other, so mute, select, delete, process and multi-clip edits all
+    // reach it. Before this they were deliberately unreachable and the whole versions
+    // workflow had to be driven through bespoke take.* commands.
     ClipRef clipById(uint64_t id) {
         if (id == 0)
             return {};
-        for (Track& t : project.tracks)
+        for (Track& t : project.tracks) {
             for (Clip& c : t.clips)
                 if (clipId(c) == id)
                     return ClipRef{&t, &c};
+            for (TakeFolder& f : t.takeFolders)
+                for (TakeLane& ln : f.lanes)
+                    for (Clip& c : ln.clips)
+                        if (clipId(c) == id)
+                            return ClipRef{&t, &c};
+        }
         return {};
     }
     ConstClipRef clipById(uint64_t id) const {

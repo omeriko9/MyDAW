@@ -526,6 +526,8 @@ const TOOLS: Array<{ tool: Tool; icon: IconName; tip: string }> = [
   { tool: "draw", icon: "pencil", tip: "Draw (2)" },
   { tool: "erase", icon: "eraser", tip: "Erase (3)" },
   { tool: "split", icon: "scissors", tip: "Split (4)" },
+  // X = mute anything. Not bound to the X KEY: that is Crossfade and stays that way.
+  { tool: "mute", icon: "x", tip: "Mute (5) — click any clip to mute/unmute it; unmute several across versions to hear them together" },
 ];
 
 const SIZING_MODES: Array<{ mode: SizingMode; label: string; title: string }> = [

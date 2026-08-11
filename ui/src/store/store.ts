@@ -121,7 +121,9 @@ export const recordingPeaksBus: Bus<RecordingPeaksEvent> = makeBus<RecordingPeak
  * ========================================================================= */
 
 /** Timeline tools: select(1) / draw(2) / erase(3) / split(4) (SPEC §9). */
-export type Tool = "select" | "draw" | "erase" | "split";
+/** "mute" is the X tool: click any clip anywhere to toggle its mute. It is what makes
+ *  version combinations possible (unmute several clips across several lanes). */
+export type Tool = "select" | "draw" | "erase" | "split" | "mute";
 
 /** Clip-edge resize behavior (Cubase sizing modes): normal trim, contents ride with
  *  the dragged edge, or the content time-stretches to the new duration. */

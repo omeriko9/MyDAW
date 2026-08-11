@@ -560,9 +560,17 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const ymin = Math.min(d.y0, d.y1);
     const ymax = Math.max(d.y0, d.y1);
     for (const row of rws) {
-      if (row.kind !== "track") continue;
       if (row.top > ymax || row.top + row.height < ymin) continue;
-      for (const clip of row.track.clips) {
+      // Version clips are ordinary clips (2026-08-11): a rubber band must pick them up
+      // exactly like clips on the track itself, so a multi-clip delete or process can
+      // span versioned and unversioned material in one gesture.
+      const inRow: Clip[] =
+        row.kind === "track"
+          ? row.track.clips
+          : row.kind === "takelane"
+            ? (row.track.takeFolders ?? []).flatMap((f) => f.lanes[row.laneIndex]?.clips ?? [])
+            : [];
+      for (const clip of inRow) {
         const len = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
         if (clip.startBeat <= bmax && clip.startBeat + len >= bmin) out.add(clip.id);
       }
@@ -1359,7 +1367,21 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         const len = clipLengthBeats(c, proj.tempoMap, proj.sampleRate);
         return rawBeat >= c.startBeat && rawBeat < c.startBeat + len;
       });
-      if (hitClip) fireLane(pickTake(row.track.id, hitClip.id));
+      if (!hitClip) return;
+      if (st.tool === "mute") {
+        // The mute tool toggles ANY clip anywhere — including several across several
+        // versions, which is how combinations are built.
+        fire(setClip(hitClip.id, { muted: !(hitClip.muted === true) }));
+        return;
+      }
+      if (st.tool === "erase") {
+        fire(deleteClips([hitClip.id]));
+        return;
+      }
+      // Select it as well as picking it: a version clip is an ordinary clip, so it has to
+      // be selectable for delete / process / multi-clip edits.
+      selectClips([hitClip.id], [row.track.id]);
+      fireLane(pickTake(row.track.id, hitClip.id));
       return;
     }
 
@@ -1456,6 +1478,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
     if (st.tool === "erase") {
       if (hit) fire(deleteClips([hit.clip.id]));
+      return;
+    }
+
+    // X (mute) tool: toggle ANY clip's mute, anywhere — not just versions. Combinations
+    // across take lanes are built by unmuting several clips with this.
+    if (st.tool === "mute") {
+      if (hit) fire(setClip(hit.clip.id, { muted: !(hit.clip.muted === true) }));
       return;
     }
 
@@ -1568,13 +1597,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
-    // empty area — left-drag rubber-band selects (plain replaces the selection; Shift/Ctrl
-    // adds to it). Panning the grid is a right-button drag now (see onPointerDown). A plain
-    // left-click with no drag collapses to an empty marquee, which clears tracks as well as
-    // clips. Clearing on press also gives a plain marquee true replace-selection semantics.
+    // Empty area — left-drag rubber-band selects (plain replaces the selection; Shift/Ctrl
+    // adds to it). Panning the grid is a right-button drag now (see onPointerDown).
+    //
+    // The TRACK selection deliberately SURVIVES (2026-08-11, Omer): clicking empty canvas
+    // inside a track's own territory used to clear it, so during a recording session the
+    // track had to be re-selected after almost every click. A track stays selected until
+    // another track is selected, an empty click in the TRACK LIST clears it, or Esc.
+    // Clip/note selection still clears here, which is what gives a plain marquee its
+    // replace-selection semantics.
     const base = additive ? [...st.selection.clipIds] : [];
     if (!additive)
-      setSelection({ trackIds: [], clipIds: [], noteIds: [], scope: "none" });
+      setSelection({
+        trackIds: st.selection.trackIds,
+        clipIds: [],
+        noteIds: [],
+        scope: st.selection.trackIds.length > 0 ? "tracks" : "none",
+      });
     marqueeIdsRef.current = base;
     dragRef.current = { kind: "marquee", b0: rawBeat, y0: cy, b1: rawBeat, y1: cy, base, additive };
     capture();

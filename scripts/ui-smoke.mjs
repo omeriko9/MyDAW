@@ -2244,6 +2244,99 @@ export const checks = [
   },
 
   {
+    id: "versions-marquee-and-mute-tool",
+    title: "a rubber band selects version clips like any other, and the X tool mutes anything",
+    area: "timeline-takes",
+    guards: "Versions refactor 2026-08-11 (Omer): lane clips used to be unreachable by cmd/clip.* on purpose, so they could not be selected, deleted or processed — 'selection of multi-clips should be seamless in versions as it is outside'. Model::clipById now walks lanes; this proves the marquee and the mute tool actually reach them.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const hello = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+
+      let proj = await hello();
+      const mt = proj.tracks.find((t) => t.name === "MIDI 1");
+      const src = mt.clips[0];
+      await s.probe("cmd/clip.duplicate", { clipIds: [src.id], atSource: true });
+      proj = await hello();
+      let t = proj.tracks.find((x) => x.id === mt.id);
+      const folder = (await s.probe("cmd/take.create", {
+        trackId: mt.id, clipIds: t.clips.map((c) => c.id),
+      })).payload.folder;
+      tt.eq(folder.lanes.length, 2, "two versions to select across");
+      await s.reload();
+
+      // Rubber-band the whole track region, lane rows included.
+      const geom = await s.eval(`(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const r = rows.find((x) => x.textContent.includes("MIDI 1")).getBoundingClientRect();
+        const lanes = [...document.querySelectorAll(".tlh-takelane")].map((el) => el.getBoundingClientRect());
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({ top: r.top, bottom: lanes.length ? lanes[lanes.length - 1].bottom : r.bottom, left: cb.left });
+      })()`);
+      const g = JSON.parse(geom);
+      tt.ok(g.bottom > g.top, "the lane rows are on screen to drag across");
+      const clipsBefore = (await hello()).tracks.find((x) => x.id === mt.id)
+        .takeFolders[0].lanes.flatMap((l) => l.clips).length;
+      tt.eq(clipsBefore, 2, "two version clips exist before the marquee");
+      await s.drag([g.left + 1, g.top + 2], [g.left + 8 * ZOOM_X, g.bottom - 2], 14);
+      // PROOF, not vibes: delete the marquee selection and the VERSION clips must go.
+      // Before clipById walked lanes this was impossible — they were unaddressable.
+      await s.key("Delete");
+      await s.until("the marquee selected the version clips and Delete removed them", async () => {
+        const tr = (await hello()).tracks.find((x) => x.id === mt.id);
+        const inLanes = (tr.takeFolders ?? []).flatMap((f) => f.lanes.flatMap((l) => l.clips)).length;
+        return inLanes < clipsBefore;
+      });
+      tt.ok(true, "a rubber band reaches clips inside version lanes");
+
+      // Rebuild the folder for the mute-tool half of the check.
+      await s.probe("edit/undo", {});
+      await s.until("undo restores them", async () => {
+        const tr = (await hello()).tracks.find((x) => x.id === mt.id);
+        return (tr.takeFolders ?? []).flatMap((f) => f.lanes.flatMap((l) => l.clips)).length === clipsBefore;
+      });
+
+      // The X tool must reach a LANE clip — this is the check that would have failed
+      // before clipById walked lanes.
+      await s.eval(`(() => { localStorage.setItem("mydaw.ui.tool", JSON.stringify("mute")); return true; })()`);
+      await s.reload();
+      const laneY = await s.eval(`(() => {
+        const l = document.querySelectorAll(".tlh-takelane");
+        if (!l.length) return null;
+        const b = l[0].getBoundingClientRect();
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({ y: b.top + b.height / 2, left: cb.left });
+      })()`);
+      const ly = JSON.parse(laneY);
+      const before = (await hello()).tracks.find((x) => x.id === mt.id).takeFolders[0].lanes[0].clips[0];
+      await s.click(ly.left + (before.startBeat + 0.5) * ZOOM_X, ly.y);
+      await s.until("the X tool flips that version clip's mute", async () => {
+        const c = (await hello()).tracks.find((x) => x.id === mt.id).takeFolders[0].lanes[0].clips[0];
+        return (c.muted === true) !== (before.muted === true);
+      });
+      tt.ok(true, "the mute tool reaches clips inside a version lane");
+
+      // RESTORE: back to the select tool and the fixture geometry.
+      await s.eval(`(() => { localStorage.setItem("mydaw.ui.tool", JSON.stringify("select")); return true; })()`);
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      const keep = t.takeFolders[0].lanes.flatMap((l) => l.clips)
+        .find((c) => Math.abs(c.startBeat - src.startBeat) < 0.01);
+      if (keep) await s.probe("cmd/take.pick", { trackId: mt.id, clipId: keep.id });
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: t.takeFolders[0].id });
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      const extra = (t.clips ?? []).slice(1).map((c) => c.id);
+      if (extra.length) await s.probe("cmd/clip.delete", { clipIds: extra });
+      await s.reload();
+    },
+  },
+
+  {
     id: "take-lanes-inline-comp",
     title: "take folders draw inline: lanes show by default, clicking a version's clip picks it",
     area: "timeline-takes",

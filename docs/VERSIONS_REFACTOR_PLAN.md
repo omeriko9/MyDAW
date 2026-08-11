@@ -62,9 +62,11 @@ it out, do not silently keep a dead code path.
 1. ~~R1 removal (engine + UI + catalog).~~ DONE f088683
 2. ~~R2 per-track keepTakes.~~ DONE 7b827ff
 3. ~~R3+comp removal: mute-based playback, `take.pick`, flatten off mutes.~~ DONE
-4. R4 mute tool.
-5. R5 lane clips addressable + marquee.
-6. R6 selection stickiness.
+4. ~~R4 mute tool.~~ DONE
+5. ~~R5 lane clips addressable + marquee.~~ DONE (done BEFORE 4 — the mute tool is
+   useless on version clips until `clipById`/`takeClip` reach them)
+6. ~~R6 selection stickiness.~~ DONE (canvas half; an empty click in the track LIST does
+   not clear the selection today — TrackHeaders has no such handler. Esc does.)
 
 Catalog bookkeeping every time an op is added/removed: `capabilities.json` →
 `node scripts/generate-agent-catalog.mjs` → counts in `scripts/generate-agent-catalog.mjs`
