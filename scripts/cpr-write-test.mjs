@@ -9,7 +9,8 @@
  *      engine (scratch APPDATA, --driver null --no-browser, port 8434):
  *      project/importForeign {path} then session/hello, and the returned project is
  *      compared field-by-field against the source model:
- *        track names/kinds exact, note pitch/velocity exact, beats within 1e-6,
+ *        track names exact, kinds per the importer's contract (written-as-midi comes
+ *        back as instrument — see compare()), note pitch/velocity exact, beats within 1e-6,
  *        tempo within 0.01 bpm, volume within 0.01 dB, pan within 0.02.
  *   3. regression: scripts/cpr-roundtrip-test.mjs must still pass 60/60
  *      (skip with --skip-corpus).
@@ -129,7 +130,12 @@ function compare(model, pr, errs) {
     const t = pr.tracks[nBase + i];
     const tag = `track[${i}] "${mt.name}"`;
     if (t.name !== mt.name) errs.push(`${tag}: name "${t.name}"`);
-    if (t.kind !== "midi") errs.push(`${tag}: kind ${t.kind} != midi`);
+    // Written as MIDI tracks, imported back as INSTRUMENT tracks: the importer's
+    // "no MIDI-kind channels out of an import" invariant (CprImportProvider.cpp,
+    // collapseFeederTracks) turns every unrouted MIDI track into an empty Instrument
+    // track — Cubase-style, ready for a VSTi (2026-08-07). Only tracks that keep a
+    // deliberate midiTarget stay kind midi, and these fixtures route nothing.
+    if (t.kind !== "instrument") errs.push(`${tag}: kind ${t.kind} != instrument`);
     const vol = t.volume ?? 1.0;
     if (mt.volumeGain > 0 ? dbDiff(vol, mt.volumeGain) > 0.01 : vol > 1e-6)
       errs.push(`${tag}: volume ${vol} != gain ${mt.volumeGain} (Δ ${mt.volumeGain > 0 ? dbDiff(vol, mt.volumeGain).toFixed(4) : "inf"} dB)`);
