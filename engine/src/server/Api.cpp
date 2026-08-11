@@ -11,11 +11,14 @@
 
 #include <windows.h>
 
+#include <shellapi.h> // ShellExecuteW (plugins/revealFile) — not in LEAN_AND_MEAN
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -632,7 +635,7 @@ json Api::sessionHello() {
     // from here at connect time.
     return json{{"engine", app_.engineHelloInfo()},
                 {"project", toJson(app_.model.project)},
-                {"pluginRegistry", app_.registry.listJson()},
+                {"pluginRegistry", app_.registryJson()},
                 {"recentProjects", app_.projectIO.recentProjects()},
                 {"audioDevices", app_.devicesJson()},
                 {"midiInputs", std::move(midiInputs)},
@@ -1177,29 +1180,78 @@ json Api::handleEngine(const std::string& type, const json& p, std::string& ec,
 // plugins (§5.6)
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Windows path equality/prefix: case-insensitive, slash-direction-insensitive.
+std::string normPathKey(std::string s) {
+    for (char& c : s)
+        c = (c == '\\') ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+bool samePathKey(const std::string& a, const std::string& b) {
+    return normPathKey(a) == normPathKey(b);
+}
+bool pathUnderFolder(const std::string& path, const std::string& folder) {
+    std::string f = normPathKey(folder);
+    while (!f.empty() && f.back() == '/')
+        f.pop_back();
+    if (f.empty())
+        return false;
+    const std::string p2 = normPathKey(path);
+    return p2 == f || p2.rfind(f + "/", 0) == 0;
+}
+
+} // namespace
+
 json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
                         std::string& em) {
     if (type == "plugins/scan") {
         const bool full = getOr<bool>(p, "full", false);
+        // paths: TARGETED scan — only these files (or a bundle's inner PEs) are
+        // processed; the rest of the registry is preserved (manager-page per-file rescan,
+        // unblacklist-and-rescan).
+        const auto paths = getOr<std::vector<std::string>>(p, "paths", {});
+        if (app_.prober.probing()) // scan and probe spawn hosts against the same files
+            return json{{"started", false}, {"reason", "probe running"}};
         const bool alreadyRunning = app_.scanner.scanning();
+        if (!alreadyRunning && getOr<bool>(p, "trace", false))
+            app_.scanner.setTraceNextScan(true); // verbose host tracing for THIS scan only
         App* app = &app_;
         // Callbacks fire on the scanner worker thread; EventBus broadcast is thread-safe.
         app_.scanner.scanAsync(
-            full,
-            [app](int cur, int total, const std::string& path, int found) {
+            full, paths,
+            [app](int cur, int total, const std::string& path, int found, int failedSoFar) {
                 app->broadcastEvent("event/scanProgress", json{{"current", cur},
                                                                {"total", total},
                                                                {"path", path},
-                                                               {"found", found}});
+                                                               {"found", found},
+                                                               {"failed", failedSoFar}});
             },
-            [app] {
-                app->broadcastEvent("event/scanDone",
-                                    json{{"registry", app->registry.listJson()}});
+            [app](bool cancelled) {
+                json ev{{"registry", app->registryJson()}};
+                if (cancelled) // absent otherwise (older clients never see the key)
+                    ev["cancelled"] = true;
+                app->broadcastEvent("event/scanDone", std::move(ev));
+                // Icon harvest AFTER the broadcast (scanDone latency never pays for it);
+                // still on the scanner worker thread. New icons → one more scanDone so
+                // every view picks up the fresh iconKeys.
+                std::vector<std::string> okPaths;
+                for (const PluginInfo& pi : app->registry.list())
+                    if (pi.format != "builtin" && !pi.blacklisted)
+                        okPaths.push_back(pi.path);
+                if (app->pluginIcons.extractMissing(okPaths) > 0)
+                    app->broadcastEvent("event/scanDone",
+                                        json{{"registry", app->registryJson()}});
             });
         return json{{"started", !alreadyRunning}};
     }
+    if (type == "plugins/scanCancel") {
+        // Terminates the in-flight scan host and keeps the completed work — scanDone
+        // then arrives with cancelled:true. False when nothing was running.
+        return json{{"cancelling", app_.scanner.cancelScan()}};
+    }
     if (type == "plugins/getRegistry")
-        return json{{"registry", app_.registry.listJson()}};
+        return json{{"registry", app_.registryJson()}};
     if (type == "plugins/setFolders") {
         const auto vst2 = getOr<std::vector<std::string>>(p, "vst2", {});
         const auto vst3 = getOr<std::vector<std::string>>(p, "vst3", {});
@@ -1209,9 +1261,59 @@ json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
         // plugins disappear at once, and a re-added folder's come straight back (no rescan).
         // Reuse the scan-completed event so every client refreshes its registry view.
         app_.scanner.refreshFromCache();
-        app_.broadcastEvent("event/scanDone", json{{"registry", app_.registry.listJson()}});
+        app_.broadcastEvent("event/scanDone", json{{"registry", app_.registryJson()}});
         const auto [v2, v3] = app_.registry.folders();
-        return json{{"vst2", v2}, {"vst3", v3}};
+        // ADVISORY category check (bounded shallow walk): the scanner routes by file
+        // EXTENSION, so a VST2 folder under the VST3 list still scans fine — but the
+        // user's own settings had a Waves shell dir filed under vst3, and nothing ever
+        // said so. Warning-only, honest about the "still found" part.
+        json warnings = json::array();
+        const auto tally = [](const std::string& folder, int& dlls, int& vst3s) {
+            namespace fsx = std::filesystem;
+            std::error_code ec2;
+            int seen = 0;
+            const fsx::path root(utf8ToWide(folder));
+            for (fsx::recursive_directory_iterator it(root, ec2), end; !ec2 && it != end;
+                 it.increment(ec2)) {
+                if (it.depth() > 2) {
+                    it.disable_recursion_pending();
+                    continue;
+                }
+                if (++seen > 300)
+                    break; // a bound, not a census — enough to characterize the folder
+                const std::string ext = lower(it->path().extension().string());
+                if (ext == ".dll")
+                    ++dlls;
+                else if (ext == ".vst3")
+                    ++vst3s;
+            }
+        };
+        for (const std::string& f : v2) {
+            int dlls = 0, vst3s = 0;
+            tally(f, dlls, vst3s);
+            if (vst3s > 0 && dlls == 0)
+                warnings.push_back(json{
+                    {"folder", f},
+                    {"list", "vst2"},
+                    {"message", "contains " + std::to_string(vst3s) + " .vst3 and no .dll "
+                                "files but is in the VST2 list — plugins are still found; "
+                                "move it to the VST3 list to keep settings tidy"}});
+        }
+        for (const std::string& f : v3) {
+            int dlls = 0, vst3s = 0;
+            tally(f, dlls, vst3s);
+            if (dlls > 0 && vst3s == 0)
+                warnings.push_back(json{
+                    {"folder", f},
+                    {"list", "vst3"},
+                    {"message", "contains " + std::to_string(dlls) + " .dll and no .vst3 "
+                                "files but is in the VST3 list — plugins are still found; "
+                                "move it to the VST2 list to keep settings tidy"}});
+        }
+        json reply{{"vst2", v2}, {"vst3", v3}};
+        if (!warnings.empty())
+            reply["warnings"] = std::move(warnings);
+        return reply;
     }
     if (type == "plugins/getFolders") {
         const auto [v2, v3] = app_.registry.folders();
@@ -1221,12 +1323,199 @@ json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
         return json{{"vst2", PluginRegistry::defaultVst2Folders()},
                     {"vst3", PluginRegistry::defaultVst3Folders()}};
     }
+    if (type == "plugins/getHealth") {
+        // The manager page's data source (SPEC §5.6): every known file with its scan
+        // verdict, blacklist state and per-plugin runtime/probe outcomes, plus summary
+        // counts. Default EXCLUDES benign non-plugins (support DLLs inside bundles —
+        // ~2,616 of the 2,673 real-world failures) so the list shows what matters; the
+        // summary always counts everything. {path} returns ONE file with the log tails.
+        const bool includeBenign = getOr<bool>(p, "includeBenign", false);
+        const std::string onlyPath = getOr(p, "path", "");
+        const bool detail = !onlyPath.empty();
+        const auto isBenign = [](const std::string& v) {
+            return v == "not_plugin" || v == "dep_missing";
+        };
+        const json health = app_.pluginHealth.toJson(/*logs=*/detail);
+        const auto pluginJson = [&](const PluginInfo& pi) {
+            json jp{{"uid", pi.uid},
+                    {"name", pi.name},
+                    {"vendor", pi.vendor},
+                    {"category", pi.category},
+                    {"isInstrument", pi.isInstrument},
+                    {"bitness", pi.bitness},
+                    {"format", pi.format}};
+            const std::string key =
+                PluginHealth::makeKey(pi.format, pi.uid, pi.bitness, pi.path);
+            const auto hit = health.find(key);
+            if (hit != health.end()) {
+                if (hit->contains("load"))
+                    jp["runtime"] = (*hit)["load"];
+                if (hit->contains("probe"))
+                    jp["probe"] = (*hit)["probe"];
+            }
+            return jp;
+        };
+
+        json files = json::array();
+        std::map<std::string, int> summary{{"ok", 0},          {"not_plugin", 0},
+                                           {"dep_missing", 0}, {"init_failed", 0},
+                                           {"scan_crashed", 0}, {"scan_timeout", 0},
+                                           {"user_disabled", 0}, {"load_failed", 0},
+                                           {"untested", 0}};
+        std::set<std::string> cachedPaths; // norm — to spot blacklist-only paths below
+        const auto normKey = [](std::string s) {
+            for (char& c : s)
+                c = (c == '\\') ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+        };
+
+        for (const PluginScanner::CacheEntry& e : app_.scanner.snapshotCache()) {
+            cachedPaths.insert(normKey(e.path));
+            const std::string verdict = e.verdict.empty()
+                                            ? (e.ok ? std::string("ok") : std::string("not_plugin"))
+                                            : e.verdict;
+            ++summary[verdict];
+            BlacklistEntry ble;
+            const bool bl = app_.blacklist.find(e.path, ble);
+            if (detail && normKey(e.path) != normKey(onlyPath))
+                continue;
+            if (!detail && !includeBenign && isBenign(verdict) && !bl)
+                continue;
+            json jf{{"path", e.path}, {"verdict", verdict}, {"blacklisted", bl}};
+            if (!e.error.empty())
+                jf["error"] = e.error;
+            if (e.lastScanMs > 0)
+                jf["lastScanMs"] = e.lastScanMs;
+            if (detail && !e.hostTail.empty())
+                jf["hostTail"] = e.hostTail;
+            if (bl) {
+                jf["blacklistReason"] = ble.reason;
+                jf["blacklistWhen"] = ble.when;
+            }
+            json plugins = json::array();
+            std::string fileFormat = iendsWith(e.path, ".vst3") ? "vst3" : "vst2";
+            int fileBitness = 0;
+            for (const PluginInfo& pi : e.plugins) {
+                fileFormat = pi.format;
+                fileBitness = pi.bitness;
+                plugins.push_back(pluginJson(pi));
+            }
+            jf["format"] = fileFormat;
+            if (fileBitness > 0)
+                jf["bitness"] = fileBitness;
+            jf["plugins"] = std::move(plugins);
+            files.push_back(std::move(jf));
+        }
+
+        // Blacklist-only paths: crash-before-uid entries whose cache record predates v2,
+        // vanished files, and manual disables of never-scanned files.
+        for (const BlacklistEntry& ble : app_.blacklist.entries()) {
+            if (cachedPaths.count(normKey(ble.path)))
+                continue;
+            const std::string verdict = ble.reason == "disabled by user"
+                                            ? std::string("user_disabled")
+                                            : (ble.reason.find("timeout") != std::string::npos
+                                                   ? std::string("scan_timeout")
+                                                   : std::string("scan_crashed"));
+            ++summary[verdict];
+            if (detail && normKey(ble.path) != normKey(onlyPath))
+                continue;
+            files.push_back(json{{"path", ble.path},
+                                 {"verdict", verdict},
+                                 {"blacklisted", true},
+                                 {"blacklistReason", ble.reason},
+                                 {"blacklistWhen", ble.when},
+                                 {"format", iendsWith(ble.path, ".vst3") ? "vst3" : "vst2"},
+                                 {"plugins", json::array()}});
+        }
+
+        // Cross-cutting counts from the health store (runtime/probe failures + untested).
+        int loadFailed = 0;
+        int untested = 0;
+        for (const auto& [key, jr] : health.items()) {
+            (void)key;
+            const bool lf =
+                (jr.contains("load") && getOr(jr["load"], "verdict", "") == "load_failed") ||
+                (jr.contains("probe") && getOr(jr["probe"], "verdict", "") == "load_failed");
+            if (lf)
+                ++loadFailed;
+        }
+        untested = summary["ok"]; // refined per-plugin once the prober lands (Phase 5)
+        summary["load_failed"] = loadFailed;
+        summary["untested"] = untested;
+
+        json jsummary = json::object();
+        for (const auto& [k, v] : summary)
+            jsummary[k] = v;
+        return json{{"files", std::move(files)}, {"summary", std::move(jsummary)}};
+    }
+    if (type == "plugins/getBlacklist") {
+        // The raw blacklist, not the registry view: entries whose file vanished or whose
+        // crash predated any uid (path-surrogate entries) never appear as registry rows,
+        // so a registry-derived list silently hid them. This is the honest one.
+        return json{{"entries", app_.blacklist.toJson()}};
+    }
     if (type == "plugins/unblacklist") {
-        const std::string uid = getOr(p, "uid", "");
-        const bool removed = app_.blacklist.removeByUid(uid);
-        if (removed) // every window's registry view refreshes (incl. the manager page)
-            app_.broadcastEvent("event/scanDone", json{{"registry", app_.registry.listJson()}});
-        return json{{"removed", removed}};
+        // Single {uid} kept for back-compat; batch via {uids?/paths?} (matched like
+        // removeByUid: uid exact OR path) or {all:true}. ONE save + ONE scanDone
+        // broadcast regardless of count — per-entry broadcasts made 76 entries unusable.
+        size_t removed = 0;
+        std::vector<std::string> affectedPaths; // for rescan:true (targeted from Phase 2)
+        if (getOr<bool>(p, "all", false)) {
+            for (const BlacklistEntry& e : app_.blacklist.entries())
+                affectedPaths.push_back(e.path);
+            removed = app_.blacklist.clear();
+        } else {
+            std::vector<std::string> keys = getOr<std::vector<std::string>>(p, "uids", {});
+            for (const std::string& s : getOr<std::vector<std::string>>(p, "paths", {}))
+                keys.push_back(s);
+            const std::string one = getOr(p, "uid", "");
+            if (!one.empty())
+                keys.push_back(one);
+            if (keys.empty()) {
+                ec = "bad_request";
+                em = "uid, uids, paths or all required";
+                return json();
+            }
+            // Resolve paths BEFORE removal so rescan knows which files to revisit.
+            for (const std::string& k : keys) {
+                BlacklistEntry e;
+                if (app_.blacklist.find(k, e) && !e.path.empty())
+                    affectedPaths.push_back(e.path);
+            }
+            removed = app_.blacklist.removeMany(keys);
+        }
+        bool rescanStarted = false;
+        if (removed > 0) { // every window's registry view refreshes (incl. the manager page)
+            app_.broadcastEvent("event/scanDone", json{{"registry", app_.registryJson()}});
+            if (getOr<bool>(p, "rescan", false) && !affectedPaths.empty() &&
+                !app_.scanner.scanning()) {
+                // TARGETED at exactly the freed files (full=true so a stale ok-cache
+                // entry from before the blacklisting can't short-circuit the re-spawn).
+                App* app = &app_;
+                app_.scanner.scanAsync(
+                    /*full=*/true, affectedPaths,
+                    [app](int cur, int total, const std::string& path, int found, int failedSoFar) {
+                        app->broadcastEvent("event/scanProgress",
+                                            json{{"current", cur},
+                                                 {"total", total},
+                                                 {"path", path},
+                                                 {"found", found},
+                                                               {"failed", failedSoFar}});
+                    },
+                    [app](bool cancelled) {
+                        json ev{{"registry", app->registryJson()}};
+                        if (cancelled)
+                            ev["cancelled"] = true;
+                        app->broadcastEvent("event/scanDone", std::move(ev));
+                    });
+                rescanStarted = true;
+            }
+        }
+        json reply{{"removed", static_cast<int64_t>(removed)}};
+        if (getOr<bool>(p, "rescan", false))
+            reply["rescanStarted"] = rescanStarted;
+        return reply;
     }
     if (type == "plugins/blacklist") {
         // Manual disable (plugin manager page): the same persistent blacklist the
@@ -1240,8 +1529,165 @@ json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
             return json();
         }
         app_.blacklist.add(uid, path, getOr(p, "reason", std::string("disabled by user")));
-        app_.broadcastEvent("event/scanDone", json{{"registry", app_.registry.listJson()}});
+        app_.broadcastEvent("event/scanDone", json{{"registry", app_.registryJson()}});
         return json{{"added", true}};
+    }
+    if (type == "plugins/probe") {
+        // The automated pass (SPEC §5.6): deep load-test through the probe host.
+        // {uids?/paths?} select registry rows; {all:true} = every scanned, non-builtin,
+        // non-blacklisted plugin. SERIAL, below-normal priority, out-of-process — safe
+        // during playback. Mutually exclusive with scanning (same files, same hosts).
+        if (app_.scanner.scanning())
+            return json{{"started", false}, {"reason", "scan running"}};
+        if (app_.prober.probing())
+            return json{{"started", false}, {"reason", "probe running"}};
+        const bool all = getOr<bool>(p, "all", false);
+        const auto uids = getOr<std::vector<std::string>>(p, "uids", {});
+        const auto paths = getOr<std::vector<std::string>>(p, "paths", {});
+        if (!all && uids.empty() && paths.empty()) {
+            ec = "bad_request";
+            em = "uids, paths or all required";
+            return json();
+        }
+        std::vector<PluginProber::Target> targets;
+        for (const PluginInfo& pi : app_.registry.list()) {
+            if (pi.format == "builtin" || pi.blacklisted)
+                continue;
+            bool want = all;
+            if (!want)
+                for (const std::string& u : uids)
+                    if (pi.uid == u) {
+                        want = true;
+                        break;
+                    }
+            if (!want)
+                for (const std::string& path2 : paths)
+                    if (samePathKey(pi.path, path2)) {
+                        want = true;
+                        break;
+                    }
+            if (!want)
+                continue;
+            PluginProber::Target t;
+            t.path = pi.path;
+            t.uid = pi.uid;
+            t.format = pi.format;
+            t.bitness = pi.bitness;
+            t.name = pi.name;
+            targets.push_back(std::move(t));
+        }
+        if (targets.empty())
+            return json{{"started", false}, {"reason", "no matching plugins"}};
+        const int total = static_cast<int>(targets.size());
+        App* app = &app_;
+        app_.prober.probeAsync(
+            std::move(targets),
+            [app](int cur, int tot, const PluginProber::Target& t, const std::string& verdict) {
+                app->broadcastEvent("event/probeProgress", json{{"current", cur},
+                                                                {"total", tot},
+                                                                {"path", t.path},
+                                                                {"uid", t.uid},
+                                                                {"name", t.name},
+                                                                {"verdict", verdict}});
+            },
+            [app](int passed, int failed, bool cancelled) {
+                json ev{{"passed", passed}, {"failed", failed}};
+                if (cancelled)
+                    ev["cancelled"] = true;
+                app->broadcastEvent("event/probeDone", std::move(ev));
+                // problem badges may have appeared/cleared — refresh every registry view
+                app->broadcastEvent("event/scanDone", json{{"registry", app->registryJson()}});
+            });
+        return json{{"started", true}, {"total", total}};
+    }
+    if (type == "plugins/probeCancel") {
+        return json{{"cancelling", app_.prober.cancelProbe()}};
+    }
+    if (type == "plugins/revealFile") {
+        // Open Explorer with the file selected. Guarded: only paths the engine already
+        // knows (registry / blacklist / scan cache) — this is a plugin-management
+        // affordance, not an arbitrary shell-open endpoint.
+        const std::string path = getOr(p, "path", "");
+        if (path.empty() || !fileExists(path)) {
+            ec = "not_found";
+            em = "file does not exist: " + path;
+            return json();
+        }
+        bool known = app_.blacklist.contains(path);
+        if (!known)
+            for (const PluginScanner::CacheEntry& e : app_.scanner.snapshotCache())
+                if (samePathKey(e.path, path)) {
+                    known = true;
+                    break;
+                }
+        if (!known) {
+            ec = "bad_request";
+            em = "path is not a known plugin file";
+            return json();
+        }
+        const std::wstring args = L"/select,\"" + utf8ToWide(path) + L"\"";
+        const auto rc = reinterpret_cast<intptr_t>(
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL));
+        if (rc <= 32) {
+            ec = "internal";
+            em = "explorer launch failed";
+            return json();
+        }
+        return json::object();
+    }
+    if (type == "plugins/relocate") {
+        // The plugin file moved on disk: point the blacklist entry (disable/crash history
+        // follows the file) at the new path, drop the old path's cache record, and
+        // targeted-scan the new file so the registry reflects reality. Projects self-heal
+        // via plugins/recreate — it resolves by uid and takes the registry's path.
+        const std::string oldPath = getOr(p, "oldPath", "");
+        const std::string newPath = getOr(p, "newPath", "");
+        if (oldPath.empty() || newPath.empty()) {
+            ec = "bad_request";
+            em = "oldPath and newPath required";
+            return json();
+        }
+        if (!fileExists(newPath)) {
+            ec = "not_found";
+            em = "new path does not exist: " + newPath;
+            return json();
+        }
+        const bool blacklistMoved = app_.blacklist.rewritePath(oldPath, newPath);
+        app_.scanner.dropCacheEntry(oldPath);
+        json reply{{"ok", true}, {"blacklistMoved", blacklistMoved}, {"scanned", false}};
+        // Outside every configured folder the file scans fine but vanishes on the next
+        // folder refresh (populateRegistryFromCache's configured-folder filter) — say so
+        // honestly instead of pretending it stuck.
+        const auto [v2, v3] = app_.registry.folders();
+        bool underFolder = false;
+        for (const auto& folders : {v2, v3})
+            for (const std::string& f : folders)
+                if (pathUnderFolder(newPath, f))
+                    underFolder = true;
+        if (!underFolder)
+            reply["warning"] = "the new path is outside every configured plugin folder — "
+                               "it will disappear on the next folder refresh; add its "
+                               "folder in Settings";
+        if (!app_.scanner.scanning()) {
+            App* app = &app_;
+            app_.scanner.scanAsync(
+                /*full=*/true, {newPath},
+                [app](int cur, int total, const std::string& path2, int found, int failedSoFar) {
+                    app->broadcastEvent("event/scanProgress", json{{"current", cur},
+                                                                   {"total", total},
+                                                                   {"path", path2},
+                                                                   {"found", found},
+                                                               {"failed", failedSoFar}});
+                },
+                [app](bool cancelled) {
+                    json ev{{"registry", app->registryJson()}};
+                    if (cancelled)
+                        ev["cancelled"] = true;
+                    app->broadcastEvent("event/scanDone", std::move(ev));
+                });
+            reply["scanned"] = true;
+        }
+        return reply;
     }
     if (type == "plugins/recreate") // §5.6: resource resolution; UNDOABLE (pushes an entry)
         return app_.cmd->recreatePlugins(p, ec, em);

@@ -70,6 +70,7 @@
 #include "EditorWindow.h"
 #include "PluginAdapter.h"
 #include "RegOverlay.h" // optional per-plugin registry overlay (SPEC §8.5)
+#include "Probe.h"
 #include "Scan.h"
 #include "ShmServer.h"
 #include "Vst2Host.h" // HostCallbacks wiring (paramEdited/latencyChanged)
@@ -714,10 +715,12 @@ int main() {
   std::vector<std::wstring> args(argvW, argvW + argc);
   LocalFree(argvW);
 
-  bool scan = false, serve = false;
+  bool scan = false, serve = false, probe = false;
   std::wstring scanPath, pluginPath;
   std::string format, shmName, pipeName, uid;
   uint32_t parentPid = 0;
+  double probeRate = 48000.0;
+  uint32_t probeBlock = 512;
 
   for (size_t i = 1; i < args.size(); ++i) {
     const std::wstring& a = args[i];
@@ -730,6 +733,15 @@ int main() {
     if (a == L"--scan") {
       scan = true;
       if (!next(scanPath)) return usage();
+    } else if (a == L"--probe") {
+      probe = true;
+      if (!next(scanPath)) return usage(); // shares scanPath: same overlay arming below
+    } else if (a == L"--rate") {
+      if (!next(v)) return usage();
+      probeRate = wcstod(v.c_str(), nullptr);
+    } else if (a == L"--block") {
+      if (!next(v)) return usage();
+      probeBlock = static_cast<uint32_t>(wcstoul(v.c_str(), nullptr, 10));
     } else if (a == L"--serve") {
       serve = true;
     } else if (a == L"--format") {
@@ -759,8 +771,14 @@ int main() {
   // Optional per-plugin registry overlay (SPEC §8.5): arm it here — before runScan/runServe,
   // before any plugin DLL is loaded — so the plugin's DllMain and VST entry point see the
   // artificial registry. Covers BOTH modes; a no-op when the plugin has no sidecar .reg.
-  if (scan != serve)
-    mydaw::installRegOverlayIfPresent(scan ? scanPath : pluginPath);
+  if (scan != serve || probe)
+    mydaw::installRegOverlayIfPresent((scan || probe) ? scanPath : pluginPath);
+
+  if (probe && !scan && !serve) {
+    const int rc = mydaw::runProbe(scanPath, uid, format, probeRate, probeBlock);
+    mydaw::flushRegOverlay(); // same volatile-classes teardown as scan mode
+    return rc;
+  }
 
   if (scan && !serve) {
     const int rc = mydaw::runScan(scanPath, format); // format "" → infer by extension

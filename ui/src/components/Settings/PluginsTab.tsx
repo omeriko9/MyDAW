@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import type { PluginsFolders } from "../../protocol/types";
 import { useStore } from "../../store/store";
 import {
+  cancelPluginScan,
   getDefaultPluginFolders,
   getPluginFolders,
   getPluginRegistry,
@@ -96,6 +97,9 @@ export function PluginsTab() {
 
   const [folders, setFolders] = useState<PluginsFolders | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Advisory category warnings from the last setFolders reply ("a VST2 folder is filed
+  // under VST3" — plugins are still found, the settings are just untidy).
+  const [folderWarnings, setFolderWarnings] = useState<string[]>([]);
   const scanning = scanProgress !== null;
 
   useEffect(() => {
@@ -119,7 +123,10 @@ export function PluginsTab() {
     setFolders(next);
     setErr(null);
     setPluginFolders(next.vst2, next.vst3)
-      .then((saved) => setFolders({ vst2: saved.vst2 ?? [], vst3: saved.vst3 ?? [] }))
+      .then((saved) => {
+        setFolders({ vst2: saved.vst2 ?? [], vst3: saved.vst3 ?? [] });
+        setFolderWarnings((saved.warnings ?? []).map((w) => `${w.folder}: ${w.message}`));
+      })
       .catch((e) => setErr(errText(e)));
   };
 
@@ -210,7 +217,18 @@ export function PluginsTab() {
             <span className="grow ellipsis mono dim sett-selectable-path" title={scanProgress.path}>
               {scanProgress.path}
             </span>
-            <span className="dim">{scanProgress.found} found</span>
+            <span className="dim">
+              {scanProgress.found} found
+              {(scanProgress.failed ?? 0) > 0 ? ` · ${scanProgress.failed} failed` : ""}
+            </span>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void cancelPluginScan().catch(() => undefined)}
+              title="Stop scanning — plugins found so far are kept"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       ) : null}
@@ -238,6 +256,11 @@ export function PluginsTab() {
       )}
 
       {err ? <div className="sett-error">{err}</div> : null}
+      {folderWarnings.map((w) => (
+        <div key={w} className="dim" style={{ fontSize: 11, color: "var(--warn)" }}>
+          ⚠ {w}
+        </div>
+      ))}
     </div>
   );
 }

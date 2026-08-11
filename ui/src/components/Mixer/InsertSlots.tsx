@@ -416,6 +416,10 @@ export function InsertSlots({ track }: { track: Track }) {
         <PluginPicker
           x={picker.x}
           y={picker.y}
+          // The 174 instruments have no business in an audio/bus channel's EFFECT list —
+          // they were 6% of a 2,700-row haystack. Instrument channels keep them (picking
+          // one replaces the instrument, same as the drop rule below).
+          filter={(p) => !p.isInstrument || track.kind === "instrument"}
           onClose={() => setPicker(null)}
           onPick={(p) => {
             // Same one-sound-source rule as the drop paths: picking a second

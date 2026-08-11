@@ -59,6 +59,8 @@ public:
     using MessageHandler = std::function<void(json msg, RespondFn respond)>;
     using PeaksProvider =
         std::function<std::optional<std::vector<uint8_t>>(uint64_t assetId, int lod)>;
+    // GET /api/plugin-icon/<key> → PNG bytes (empty = 404). Key is a hex string.
+    using IconProvider = std::function<std::vector<uint8_t>(const std::string& key)>;
     using UploadHandler =
         std::function<json(const std::vector<std::string>& tempFilePaths,
                            const std::map<std::string, std::string>& query)>;
@@ -98,6 +100,7 @@ public:
     // Handlers may be set before or after start(); calls are internally synchronized.
     void setMessageHandler(MessageHandler handler);
     void setPeaksProvider(PeaksProvider provider);
+    void setIconProvider(IconProvider provider);
     void setUploadHandler(UploadHandler handler);
     void setMcpHandler(McpHandler handler);
 

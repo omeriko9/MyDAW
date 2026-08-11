@@ -474,6 +474,7 @@ struct HttpWsServer::Impl {
     std::mutex handlersMu;
     MessageHandler messageHandler;
     PeaksProvider peaksProvider;
+    IconProvider iconProvider;
     UploadHandler uploadHandler;
     McpHandler mcpHandler;
 
@@ -884,6 +885,34 @@ struct HttpWsServer::Impl {
     }
 
     void handleApiGet(Client& c, const HttpRequest& req, bool headOnly) {
+        static const char kIconPrefix[] = "/api/plugin-icon/";
+        if (startsWith(req.path, kIconPrefix)) {
+            const std::string key = req.path.substr(sizeof(kIconPrefix) - 1);
+            IconProvider provider;
+            {
+                std::lock_guard<std::mutex> lock(handlersMu);
+                provider = iconProvider;
+            }
+            const std::vector<uint8_t> data =
+                provider ? provider(key) : std::vector<uint8_t>{};
+            if (data.empty()) {
+                queueJsonError(c, 404, "not_found", "no icon for key " + key);
+                return;
+            }
+            // Same no-cache + content-ETag discipline as peaks: keys are path hashes but
+            // the FILE can be re-extracted, so revalidate every hit (cheap 304 locally).
+            const std::string etag = contentEtag(data);
+            const std::string inm = req.header("if-none-match");
+            if (!inm.empty() && inm.find(etag) != std::string::npos) {
+                queueHttp(c, 304, "image/png", "", "no-cache",
+                          /*headOnly=*/true, "ETag: " + etag + "\r\n");
+                return;
+            }
+            queueHttp(c, 200, "image/png",
+                      std::string(reinterpret_cast<const char*>(data.data()), data.size()),
+                      "no-cache", headOnly, "ETag: " + etag + "\r\n");
+            return;
+        }
         static const char kPeaksPrefix[] = "/api/peaks/";
         if (startsWith(req.path, kPeaksPrefix)) {
             const std::string idStr = req.path.substr(sizeof(kPeaksPrefix) - 1);
@@ -1540,6 +1569,11 @@ void HttpWsServer::setMessageHandler(MessageHandler handler) {
 void HttpWsServer::setPeaksProvider(PeaksProvider provider) {
     std::lock_guard<std::mutex> lock(impl_->handlersMu);
     impl_->peaksProvider = std::move(provider);
+}
+
+void HttpWsServer::setIconProvider(IconProvider provider) {
+    std::lock_guard<std::mutex> lock(impl_->handlersMu);
+    impl_->iconProvider = std::move(provider);
 }
 
 void HttpWsServer::setMcpHandler(McpHandler handler) {

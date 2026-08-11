@@ -45,8 +45,35 @@ class Blacklist;
 
 class PluginScanner {
 public:
-    using ProgressFn = std::function<void(int cur, int total, const std::string& path, int found)>;
-    using DoneFn = std::function<void()>;
+    using ProgressFn = std::function<void(int cur, int total, const std::string& path, int found,
+                                          int failedSoFar)>;
+    // cancelled=true when a user cancel ended the scan early: the registry then holds the
+    // completed work merged with the prior cache (partial results are kept, not discarded).
+    // Never invoked for the destructor's shutdown cancel.
+    using DoneFn = std::function<void(bool cancelled)>;
+
+    // One cache record, keyed by file path: {path,size,mtimeMs} -> scan result.
+    // Cache v2 (SPEC §8.3): `verdict` is the structured outcome; crash/timeout entries
+    // are now KEPT (v1 erased them, losing all history the moment a user unblacklisted).
+    // The "unblacklist must force a real rescan" invariant moved into the cache-hit rule:
+    // failure verdicts never count as a hit, so the file is genuinely re-spawned.
+    struct CacheEntry {
+        std::string path;     // original-case absolute path
+        int64_t size = 0;
+        int64_t mtimeMs = 0;
+        bool ok = false;      // false => did not yield plugins (verdict/error say why)
+        // "ok" | "not_plugin" | "dep_missing" | "init_failed" | "scan_crashed" |
+        // "scan_timeout" (empty only transiently for pre-v2 entries; loadCache migrates).
+        std::string verdict;
+        std::string error;
+        int64_t lastScanMs = 0;  // wall clock of the last real spawn (0 = unknown/v1)
+        std::string hostTail;    // condensed host output, failure verdicts only (<=4 KB)
+        std::vector<PluginInfo> plugins;
+
+        bool failureVerdict() const {
+            return verdict == "scan_crashed" || verdict == "scan_timeout";
+        }
+    };
 
     // Loads %APPDATA%/MyDAW/plugin-cache.json and pre-populates `registry` (see above).
     // Both references must outlive the scanner.
@@ -63,12 +90,36 @@ public:
     void setHostPaths(const std::string& host64, const std::string& host32);
 
     // Starts the async scan. full=true ignores the cache (every file is re-spawned);
-    // the blacklist still applies. `progress` fires once per file as it is processed
+    // the blacklist still applies. `onlyPaths` non-empty = a TARGETED scan: the folder
+    // walk still resolves formats/bundles identically, but only files whose normalized
+    // path is in the set are processed (used by unblacklist-and-rescan and the manager
+    // page's per-file rescan). `progress` fires once per file as it is processed
     // (cur 1-based, found = plugins discovered so far incl. cache hits); `done` fires
-    // after the registry has been replaced and the cache saved.
-    void scanAsync(bool full, ProgressFn progress, DoneFn done);
+    // after the registry has been replaced and the cache saved — cancelled or not.
+    void scanAsync(bool full, std::vector<std::string> onlyPaths, ProgressFn progress,
+                   DoneFn done);
+    void scanAsync(bool full, ProgressFn progress, DoneFn done) {
+        scanAsync(full, {}, std::move(progress), std::move(done));
+    }
+
+    // One-shot: the NEXT scan spawns its hosts with MYDAW_SCAN_TRACE (+VST2/REG trace)
+    // forced on, so the failure hostTail captures the verbose load trace. Cleared when
+    // that scan starts (plugins/scan {trace:true}, the manager page's Rescan-with-trace).
+    void setTraceNextScan(bool on) { traceNext_.store(on, std::memory_order_release); }
+
+    // Drop one file's cache record (plugins/relocate: the old path's record is obsolete).
+    void dropCacheEntry(const std::string& path);
+
+    // Cancel a running scan (SPEC §8.3): the in-flight scan host is terminated, work
+    // completed so far is KEPT (cache saved, registry re-derived from it) and done(true)
+    // fires. Returns false when no scan was running. Safe from any thread.
+    bool cancelScan();
 
     bool scanning() const { return running_.load(std::memory_order_acquire); }
+
+    // Copy of the scan cache for plugins/getHealth (SPEC §5.6): verdicts, timestamps and
+    // failure host-output tails per file. Safe from any thread; a snapshot, not a view.
+    std::vector<CacheEntry> snapshotCache() const;
 
     // Re-derive the registry from the cache, keeping ONLY plugins that live under a folder
     // currently configured on the registry. Call after the plugin folders change (startup and
@@ -78,16 +129,6 @@ public:
     void refreshFromCache();
 
 private:
-    // One cache record, keyed by file path: {path,size,mtimeMs} -> scan result.
-    struct CacheEntry {
-        std::string path;     // original-case absolute path
-        int64_t size = 0;
-        int64_t mtimeMs = 0;
-        bool ok = false;      // false => known non-plugin (error explains why)
-        std::string error;
-        std::vector<PluginInfo> plugins;
-    };
-
     struct FileTask {
         std::string path;     // UTF-8 absolute path of the binary to scan
         std::string format;   // "vst2" | "vst3" (by extension / bundle layout)
@@ -96,7 +137,8 @@ private:
     void loadCache();
     void saveCache();
     void populateRegistryFromCache();
-    void workerMain(bool full, ProgressFn progress, DoneFn done);
+    void workerMain(bool full, std::vector<std::string> onlyPaths, ProgressFn progress,
+                    DoneFn done);
     std::vector<FileTask> collectFiles() const;
 
     PluginRegistry& registry_;
@@ -110,6 +152,10 @@ private:
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> cancel_{false};
+    std::atomic<bool> traceNext_{false}; // one-shot; consumed at scan start
+    // Set (only) by the destructor before cancel_: the worker then skips done() — the
+    // callback captures App, which is being torn down. A USER cancel keeps done(true).
+    std::atomic<bool> destroying_{false};
 };
 
 } // namespace mydaw

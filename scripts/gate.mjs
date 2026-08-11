@@ -72,6 +72,8 @@ const SUITES = [
     note: "cycle-record lap splitting; needs midi/feedEvent to drive MIDI headlessly" },
   { id: "input-gain", tier: "fast", script: "input-gain-test.mjs", requires: needsEngine,
     note: "SPEC §5.5: pre-insert gain + input meter; the recorded FILE must stay raw" },
+  { id: "vst-manage", tier: "fast", script: "vst-manage-test.mjs", requires: needsEngine,
+    note: "blacklist surfacing + batch unblacklist; seeded blacklist.json, no real plugins needed" },
   { id: "midi-learn", tier: "fast", script: "midi-learn-test.mjs", requires: needsEngine },
   { id: "midi-out-channel", tier: "fast", script: "midi-out-channel-test.mjs", requires: needsEngine },
   { id: "midi-out", tier: "fast", script: "midi-out-test.mjs", requires: needsEngine,
@@ -108,6 +110,8 @@ const SUITES = [
     note: "~80 s: autosave's interval is an int in MINUTES, so 60 s is the floor" },
   { id: "vst-load", tier: "full", script: "vst-load-test.mjs", requires: needsPlugins,
     note: "scans and loads REAL plugins — machine-dependent" },
+  { id: "vst-probe", tier: "full", script: "vst-probe-test.mjs", requires: needsEngine,
+    note: "the automated load-test pass; fake-plugin core runs anywhere, real-VST3 check SKIPs without one" },
   { id: "dop-vst", tier: "full", script: "dop-vst-test.mjs", requires: needsPlugins,
     note: "needs a real VST in the registry" },
   // Its own flag, not a skip: the writer half runs anywhere, only the corpus round-trip

@@ -898,8 +898,46 @@ classes in factory), prints one JSON line `{ok:true, plugins:[PluginInfo-like]}`
 Engine scanner: walk folders (`.dll`→try vst2 both arches via PE header machine field check first;
 `.vst3`→host64 + host32 if bundle has x86), 20 s timeout per file, crash/timeout → blacklist with
 reason. Cache `%APPDATA%/MyDAW/plugin-cache.json` keyed `{path,size,mtime}`; blacklist
-`%APPDATA%/MyDAW/blacklist.json` (uid+path+reason). `plugins/scan {full:true}` ignores cache.
+`%APPDATA%/MyDAW/blacklist.json` (uid+path+reason+when). `plugins/scan {full:true}` ignores cache;
+`{paths:[...]}` = TARGETED scan (only those files / a bundle's inner PEs; the rest of the registry
+is preserved via a cache re-derive). `plugins/scanCancel` terminates the in-flight scan host,
+keeps completed work, and `event/scanDone` arrives with `cancelled:true`. Scanning is SERIAL by
+design — plugins may pop UI during init; concurrent scans would stack popups (user decision
+2026-08-11, do not parallelize).
 PE machine check: read IMAGE_FILE_HEADER.Machine to route x86 vs x64 without spawning both.
+**Cache v2**: each entry carries a structured `verdict` — `ok | not_plugin | dep_missing |
+init_failed | scan_crashed | scan_timeout` — plus `lastScanMs` and (failures only) `hostTail`,
+the condensed scan-host output. v1 entries are migrated on load by classifying the error string.
+Crash/timeout entries are KEPT (v1 erased them); the "unblacklist must force a real rescan"
+invariant lives in the cache-hit rule instead: failure verdicts never count as a hit. SEH-caught
+scan crashes blacklist exactly like hard crashes (they used to be silently cached as non-plugins).
+**Health records** (`%APPDATA%/MyDAW/plugin-health.json`, SPEC §5.6): durable per-plugin
+`load`/`probe` outcomes keyed `format|uid|bitness|path`, written from the pluginState callback
+(terminal states only) and the prober; debounced saves; NEVER auto-blacklists — the user decides.
+`plugins/getHealth {includeBenign?|path?}` → `{files:[{path, verdict, error?, blacklisted,
+blacklistReason?/When?, plugins:[{uid,name,…,runtime?,probe?}]}], summary:{<verdict>:n,…}}`;
+the default list hides benign non-plugins (support DLLs), the summary counts everything, and
+`{path}` returns one file WITH `hostTail`/probe logs. Registry rows gain additive
+`problem:"load_failed"` when the last real load or probe failed.
+**Probe (the automated pass)**: `mydaw-host{64,32}.exe --probe <path> [--uid u]` deep-tests
+load → init(48k/512) → 16 processed blocks (noteOn/off mid-way for instruments; silent output is
+information, never failure) → getState, each stage SEH-guarded, one JSON line
+`{ok, stages:{load,init,process,getState}, nonSilent?, error?}`. Engine side:
+`plugins/probe {uids?|paths?|all}` → `{started, total}` (SERIAL like scanning — probed plugins
+can pop UI too; BELOW_NORMAL priority; fully out-of-process so safe during playback; mutually
+exclusive with scanning), `plugins/probeCancel`, events `event/probeProgress
+{current,total,path,uid,name,verdict}` / `event/probeDone {passed,failed,cancelled?}`. Verdicts
+land in the health store's `probe` section with the host output tail.
+**Icons**: after each scan's `done`, embedded icons are harvested (`ExtractIconExW`; `.vst3`
+bundles also try `Contents/Resources/*.ico`) into `%APPDATA%/MyDAW/icons/<fnv1a64(path)>.png`,
+served at `GET /api/plugin-icon/<key>` (no-cache + content ETag, hex keys only). Registry rows
+carry `iconKey` only when the PNG exists; the UI falls back user-emoji-override → PNG →
+vendor-colored initial avatar (pref `plugins.customIcons`, keyed pluginFavKey).
+**Folder-category warnings**: `plugins/setFolders` replies gain advisory
+`warnings:[{folder,list,message}]` from a bounded shallow walk (depth ≤2, ≤300 files) when a
+folder's contents don't match its list — the scanner routes by extension, so nothing is lost;
+the settings are just untidy. `event/scanProgress` carries `failed` (crash/timeout/init count
+this pass).
 
 ### 8.4 VST2 / VST3 specifics
 VST2 (vestige.h clean-room): entry `VSTPluginMain`/`main`; audioMaster opcodes to support:

@@ -190,6 +190,53 @@ bool Blacklist::removeByUid(const std::string& uid) {
     return removed;
 }
 
+size_t Blacklist::removeMany(const std::vector<std::string>& uidsOrPaths) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t removed = 0;
+    for (size_t i = entries_.size(); i-- > 0;) {
+        const BlacklistEntry& e = entries_[i];
+        for (const std::string& key : uidsOrPaths) {
+            if (key.empty())
+                continue;
+            if ((!e.uid.empty() && e.uid == key) ||
+                (!e.path.empty() && samePath(e.path, key))) {
+                entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(i));
+                ++removed;
+                break;
+            }
+        }
+    }
+    if (removed > 0)
+        saveLocked();
+    return removed;
+}
+
+size_t Blacklist::clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const size_t removed = entries_.size();
+    if (removed > 0) {
+        entries_.clear();
+        saveLocked();
+    }
+    return removed;
+}
+
+bool Blacklist::rewritePath(const std::string& oldPath, const std::string& newPath) {
+    if (oldPath.empty() || newPath.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    bool changed = false;
+    for (BlacklistEntry& e : entries_) {
+        if (samePath(e.path, oldPath)) {
+            e.path = newPath;
+            changed = true;
+        }
+    }
+    if (changed)
+        saveLocked();
+    return changed;
+}
+
 json Blacklist::toJson() const {
     std::lock_guard<std::mutex> lock(mutex_);
     json arr = json::array();

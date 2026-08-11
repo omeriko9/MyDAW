@@ -460,8 +460,15 @@ export const exportCpr = (req: ExportCprRequest = {}) => ws.request("export/cpr"
  * §5.6 — Plugins
  * ========================================================================= */
 
-export const scanPlugins = (full?: boolean) =>
-  ws.request("plugins/scan", full !== undefined ? { full } : {});
+export const scanPlugins = (full?: boolean, paths?: string[]) =>
+  ws.request("plugins/scan", {
+    ...(full !== undefined ? { full } : {}),
+    ...(paths && paths.length > 0 ? { paths } : {}),
+  });
+
+/** Cancel a running scan — the in-flight scan host is terminated, completed work is kept,
+ *  and event/scanDone arrives with cancelled:true. */
+export const cancelPluginScan = () => ws.request("plugins/scanCancel", {});
 
 export const getPluginRegistry = () => ws.request("plugins/getRegistry", {});
 
@@ -473,6 +480,35 @@ export const getPluginFolders = () => ws.request("plugins/getFolders", {});
 export const getDefaultPluginFolders = () => ws.request("plugins/getDefaultFolders", {});
 
 export const unblacklistPlugin = (uid: string) => ws.request("plugins/unblacklist", { uid });
+
+/** Batch unblacklist: keys match uid exactly OR path; one broadcast for the whole batch.
+ *  rescan:true also rescans the freed files. */
+export const unblacklistPlugins = (
+  req: { uids?: string[]; paths?: string[]; all?: boolean; rescan?: boolean },
+) => ws.request("plugins/unblacklist", req);
+
+/** The raw persistent blacklist — includes path-only crash entries the registry never shows. */
+export const getPluginBlacklist = () => ws.request("plugins/getBlacklist", {});
+
+/** Per-file scan verdicts + per-plugin load/probe outcomes (the manager page's data).
+ *  {path} = single-file detail with the log tails. */
+export const getPluginHealth = (req: { includeBenign?: boolean; path?: string } = {}) =>
+  ws.request("plugins/getHealth", req);
+
+/** The automated pass: deep load-test plugins through the probe host (serial,
+ *  below-normal priority, out-of-process — safe during playback). */
+export const probePlugins = (req: { uids?: string[]; paths?: string[]; all?: boolean }) =>
+  ws.request("plugins/probe", req);
+
+export const cancelPluginProbe = () => ws.request("plugins/probeCancel", {});
+
+/** Open Explorer with the plugin file selected (known plugin files only). */
+export const revealPluginFile = (path: string) => ws.request("plugins/revealFile", { path });
+
+/** The plugin file moved on disk: blacklist history follows it, the old cache record is
+ *  dropped, and the new file is targeted-scanned. */
+export const relocatePlugin = (oldPath: string, newPath: string) =>
+  ws.request("plugins/relocate", { oldPath, newPath });
 
 /** Manual disable (plugin manager): persists in the scanner blacklist until unblacklisted. */
 export const blacklistPlugin = (path: string, uid?: string, reason?: string) =>

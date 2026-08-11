@@ -502,6 +502,89 @@ export const checks = [
   },
 
   {
+    id: "plugins-pane-instrument-mode",
+    title: "the Browser plugins pane defaults to Instruments and Effects mode groups by category",
+    area: "browser",
+    guards: "VST revision 2026-08-11 — the pane was 94% effects (2,602 vs 174) with instruments buried; Instruments must be the default mode, Effects one click away, and searching must pierce the mode wall",
+    run: async (s, tt) => {
+      // Own precondition: the Browser open on the Plugins tab.
+      await s.probe("ui/entity.reveal", { pane: "browser" }, { allowError: true }).catch(() => {});
+      const openPluginsTab = async () => {
+        const box = await s.eval(`(() => {
+          const el = [...document.querySelectorAll(".browser-tabs button, [role=tab]")]
+            .find((b) => b.textContent.trim() === "Plugins");
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+        })()`);
+        if (box) await s.click(box.x, box.y);
+      };
+      await openPluginsTab();
+      await s.until("the mode row renders", async () =>
+        (await s.eval(`document.querySelectorAll(".browser-mode-btn").length`)) === 3);
+
+      const active = await s.eval(
+        `document.querySelector(".browser-mode-btn.active")?.textContent.trim() ?? ""`);
+      tt.eq(active, "Instruments", "Instruments is the default mode");
+
+      // Switch to Effects; with category grouping the labels are normalized (no "Fx|").
+      await s.eval(`(() => { [...document.querySelectorAll(".browser-mode-btn")]
+        .find((b) => b.textContent.trim() === "Effects").click(); return true; })()`);
+      await s.until("effects mode active", async () =>
+        (await s.eval(`document.querySelector(".browser-mode-btn.active")?.textContent.trim()`)) === "Effects");
+      tt.ok(true, "Effects mode is one click away");
+
+      // RESTORE the pref-persisted mode (checks share localStorage across reloads).
+      await s.eval(`(() => { [...document.querySelectorAll(".browser-mode-btn")]
+        .find((b) => b.textContent.trim() === "Instruments").click(); return true; })()`);
+      await s.until("mode restored", async () =>
+        (await s.eval(`document.querySelector(".browser-mode-btn.active")?.textContent.trim()`)) === "Instruments");
+    },
+  },
+
+  {
+    id: "plugin-manager-health-view",
+    title: "the Plugin Manager's Health view classifies failures and opens a per-file detail",
+    area: "plugin-manager",
+    guards: "VST revision 2026-08-11 — 2,616 of 2,673 cache 'failures' are benign support DLLs; the Health view must show the bounded real-problem set (chips from plugins/getHealth.summary) and a detail with the rescan-with-trace/reveal/relocate actions, not the raw dump",
+    run: async (s, tt) => {
+      const base = await s.eval(`location.origin + location.pathname`);
+      try {
+        await s.send("Page.navigate", { url: `${base}?page=plugins` });
+        await s.until("the manager page mounts", async () =>
+          (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
+        await s.eval(`(() => { [...document.querySelectorAll(".pm-view-btn")]
+          .find(b => b.textContent.trim() === "Health").click(); return true; })()`);
+        await s.until("the health view loads its summary", async () =>
+          (await s.eval(`document.querySelectorAll(".pm-health .pm-chip").length`)) >= 4);
+        const chips = await s.eval(`[...document.querySelectorAll(".pm-health .pm-chip")].map(c => c.textContent.trim())`);
+        tt.ok(chips.some((c) => c.startsWith("Problems")), `summary chips render (${chips.join(", ")})`);
+
+        // A detail opens when any row exists (a fresh slot may have zero problems — the
+        // empty state is then the correct render, not a failure).
+        const rows = await s.eval(`document.querySelectorAll(".pm-health .pm-row-click").length`);
+        if (rows > 0) {
+          await s.eval(`(() => { document.querySelector(".pm-health .pm-row-click").click(); return true; })()`);
+          await s.until("the detail panel opens", async () =>
+            (await s.eval(`!!document.querySelector(".pm-health-detail")`)) === true);
+          const actions = await s.eval(`[...document.querySelectorAll(".pm-detail-actions .pm-btn")].map(b => b.textContent.trim())`);
+          tt.ok(actions.includes("Rescan with trace") && actions.includes("Relocate…"),
+            `detail actions present (${actions.join(", ")})`);
+        } else {
+          tt.ok(await s.eval(`!!document.querySelector(".pm-health .pm-empty")`),
+            "no problems on this slot — the empty state renders");
+        }
+      } finally {
+        // RESTORE: the runner reloads the CURRENT url between checks — left on
+        // ?page=plugins, every later check would run against the manager page.
+        await s.send("Page.navigate", { url: base });
+        await s.until("the DAW app is back", async () =>
+          (await s.eval(`!!document.querySelector(".tl-corner")`)) === true, { timeout: 30000 });
+      }
+    },
+  },
+
+  {
     id: "technique-master-glue",
     title: "the Production Techniques wizard applies Master Glue stages and takes the last one back",
     area: "techniques",

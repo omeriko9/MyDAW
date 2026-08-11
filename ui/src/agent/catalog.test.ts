@@ -112,12 +112,19 @@ const REQUEST_TYPES = [
   "export/trackArchive",
   "export/cpr",
   "plugins/scan",
+  "plugins/scanCancel",
   "plugins/getRegistry",
   "plugins/setFolders",
   "plugins/getFolders",
   "plugins/getDefaultFolders",
   "plugins/unblacklist",
   "plugins/blacklist",
+  "plugins/getBlacklist",
+  "plugins/getHealth",
+  "plugins/probe",
+  "plugins/probeCancel",
+  "plugins/revealFile",
+  "plugins/relocate",
   "plugins/recreate",
   "cmd/plugin.add",
   "cmd/plugin.remove",
@@ -294,9 +301,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(134);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(141);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(148);
+    expect(AGENT_CATALOG.operations).toHaveLength(155);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

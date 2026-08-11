@@ -19,6 +19,7 @@ import { useStore, type DawState } from "../../store/store";
 import {
   addPlugin,
   getPluginRegistry,
+  cancelPluginScan,
   scanPlugins,
   unblacklistPlugin,
 } from "../../store/actions";
@@ -32,6 +33,8 @@ import {
 } from "../../lib/ids";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isBool, loadPref, oneOf, savePref, usePrefState } from "../../lib/prefs";
+import { categoryLabel, matchesMode, type PluginsMode } from "../../lib/pluginCategories";
+import { customIconOf, loadCustomIcons, setCustomIcon, vendorHue } from "../../lib/pluginIcons";
 import type { PluginInfo, Track } from "../../protocol/types";
 import { contextMenuHandler, type MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/icons";
@@ -149,8 +152,12 @@ function buildRows(
 
   const groups = new Map<string, PluginInfo[]>();
   for (const p of filtered) {
-    const raw = groupBy === "vendor" ? p.vendor : p.category;
-    const label = raw && raw.trim() !== "" ? raw : groupBy === "vendor" ? "Unknown vendor" : "Uncategorized";
+    // Category groups use the NORMALIZED label ("Fx|Reverb" → "Reverb") so one effect
+    // family is one group instead of four vendor spellings (lib/pluginCategories).
+    const label =
+      groupBy === "vendor"
+        ? (p.vendor && p.vendor.trim() !== "" ? p.vendor : "Unknown vendor")
+        : categoryLabel(p.category);
     const list = groups.get(label);
     if (list) list.push(p);
     else groups.set(label, [p]);
@@ -174,19 +181,24 @@ const PluginRowView = memo(function PluginRowView({
   p,
   favorite,
   variants,
+  customIcon,
   onAdd,
   onToggleFavorite,
   onUnblacklist,
   onRescan,
+  onSetIcon,
 }: {
   p: PluginInfo;
   favorite: boolean;
   /** Full names of merged shell-routing/bitness twins (incl. this row), when > 1. */
   variants?: string[];
+  /** user emoji override (lib/pluginIcons), wins over the extracted PNG */
+  customIcon?: string;
   onAdd: (p: PluginInfo) => void;
   onToggleFavorite: (p: PluginInfo) => void;
   onUnblacklist: (p: PluginInfo) => void;
   onRescan: (full: boolean) => void;
+  onSetIcon: (p: PluginInfo) => void;
 }) {
   // Built lazily at open time so connection / selection / scan state is current.
   const menuItems = (): MenuEntry[] => {
@@ -214,6 +226,11 @@ const PluginRowView = memo(function PluginRowView({
           ? `Remove "${p.name}" from favorites`
           : `Add "${p.name}" to favorites`,
         onClick: () => onToggleFavorite(p),
+      },
+      {
+        label: "Set Icon…",
+        title: "Pick an emoji shown next to this plugin (empty to reset)",
+        onClick: () => onSetIcon(p),
       },
       "separator",
       ...(p.blacklisted
@@ -256,7 +273,29 @@ const PluginRowView = memo(function PluginRowView({
       onMouseLeave={pluginCardLeave}
       onMouseDown={pluginCardLeave}
     >
-      <Icon name={p.isInstrument ? "piano" : "plug"} size={13} className="plugin-row-icon" />
+      {/* Identity chain: emoji override → extracted PNG → vendor-colored initial avatar.
+          The old piano/plug glyph survives as the avatar's shape cue via the title. */}
+      {customIcon ? (
+        <span className="plugin-row-emoji" aria-hidden="true">{customIcon}</span>
+      ) : p.iconKey ? (
+        <img
+          className="plugin-row-img"
+          src={`/api/plugin-icon/${p.iconKey}`}
+          alt=""
+          width={14}
+          height={14}
+          draggable={false}
+        />
+      ) : (
+        <span
+          className="plugin-row-avatar"
+          aria-hidden="true"
+          style={{ background: `hsl(${vendorHue(p.vendor)} 45% 38%)` }}
+          title={p.vendor}
+        >
+          {(p.vendor || p.name).slice(0, 1).toUpperCase()}
+        </span>
+      )}
       <span className="ellipsis grow">{p.name}</span>
       {variants && (
         <Tooltip content={"Merged shell variants (best one is used):\n" + variants.join("\n")}>
@@ -287,6 +326,14 @@ const PluginRowView = memo(function PluginRowView({
         >
           unblacklist
         </button>
+      ) : null}
+      {p.problem === "load_failed" ? (
+        <span
+          className="badge warn"
+          title="Failed to load the last time it was used or probed — details in the Plugin Manager's Health view"
+        >
+          ⚠
+        </span>
       ) : null}
       {p.bitness === 32 && p.format !== "builtin" ? <span className="badge warn">32-bit</span> : null}
       <span className="badge">
@@ -352,6 +399,14 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
   const setDialogs = useStore((s) => s.setDialogs);
 
   const [query, setQuery] = useState("");
+  // Instruments | Effects | All (Omer 2026-08-10): the registry is ~94% effects (real
+  // data: 174 instruments vs 2,602 effects), which buried the instruments a track
+  // usually wants — so Instruments is the DEFAULT and effects are one click away.
+  const [mode, setMode] = usePrefState<PluginsMode>(
+    "browser.pluginsMode",
+    "instruments",
+    oneOf<PluginsMode>("instruments", "effects", "all"),
+  );
   // Group-by mode and which groups are collapsed persist across reloads (lib/prefs).
   // Collapse keys are "<groupBy>:<label>", so each grouping mode keeps its own set.
   const [groupBy, setGroupBy] = usePrefState<GroupBy>(
@@ -373,11 +428,26 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
     false,
     isBool,
   );
+  // Per-plugin emoji overrides (lib/pluginIcons) — win over extracted PNGs and avatars.
+  const [customIcons, setCustomIcons] = useState<Record<string, string>>(loadCustomIcons);
+  const onSetIcon = useCallback((p: PluginInfo) => {
+    const cur = customIconOf(loadCustomIcons(), p) ?? "";
+    const next = window.prompt(
+      `Emoji for "${p.name}" (empty resets to the extracted icon / vendor avatar):`, cur);
+    if (next === null) return; // cancelled
+    setCustomIcons(setCustomIcon(p, next));
+  }, []);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
 
+  // A search means the user is LOOKING for something specific — flatten the mode wall
+  // so "valhalla" finds the reverb even from Instruments mode.
+  const modeFiltered = useMemo(
+    () => (query.trim() !== "" ? registry : registry.filter((p) => matchesMode(p, mode))),
+    [registry, mode, query],
+  );
   const { rows, matchCount, variantsByKey } = useMemo(
-    () => buildRows(registry, query, groupBy, collapsed, favorites, recent, favoritesOnly),
-    [registry, query, groupBy, collapsed, favorites, recent, favoritesOnly],
+    () => buildRows(modeFiltered, query, groupBy, collapsed, favorites, recent, favoritesOnly),
+    [modeFiltered, query, groupBy, collapsed, favorites, recent, favoritesOnly],
   );
 
   // The Plugin Manager tab edits the same pref: follow its writes live, and toggle
@@ -501,19 +571,22 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
           p={r.plugin}
           favorite={isPluginFavorite(favoriteSet, r.plugin)}
           variants={variantsByKey.get(pluginKey(r.plugin))}
+          customIcon={customIconOf(customIcons, r.plugin)}
           onAdd={onAdd}
           onToggleFavorite={toggleFavorite}
           onUnblacklist={onUnblacklist}
           onRescan={onRescan}
+          onSetIcon={onSetIcon}
         />
       );
     },
-    [rows, toggleGroup, favoriteSet, variantsByKey, onAdd, toggleFavorite, onUnblacklist, onRescan],
+    [rows, toggleGroup, favoriteSet, variantsByKey, customIcons, onAdd, toggleFavorite,
+     onUnblacklist, onRescan, onSetIcon],
   );
 
   // "X of Y" whenever ANY filter narrows the list — favorites-only shrinks it just like the search.
   const countText =
-    query.trim() !== "" || favoritesOnly
+    query.trim() !== "" || favoritesOnly || mode !== "all"
       ? `${matchCount} of ${registry.length} plugin${registry.length === 1 ? "" : "s"}`
       : `${registry.length} plugin${registry.length === 1 ? "" : "s"}`;
 
@@ -521,6 +594,33 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
 
   return (
     <div className="col grow">
+      <div className="browser-toolbar browser-mode-row" role="tablist" aria-label="Plugin kind">
+        {(
+          [
+            ["instruments", "Instruments"],
+            ["effects", "Effects"],
+            ["all", "All"],
+          ] as const
+        ).map(([m, label]) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            className={"browser-mode-btn" + (mode === m ? " active" : "")}
+            title={
+              m === "instruments"
+                ? "Instruments only — what a track usually wants"
+                : m === "effects"
+                  ? "Effects only — drag onto a mixer strip or an FX track"
+                  : "Everything the registry knows"
+            }
+            onClick={() => setMode(m)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="browser-toolbar">
         <TextInput
           className="grow"
@@ -622,6 +722,14 @@ export default function PluginsTab({ showHint }: PluginsTabProps) {
             <span style={{ whiteSpace: "nowrap" }}>
               {scan.current}/{scan.total} · {scan.found} found
             </span>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void cancelPluginScan().catch(() => undefined)}
+              title="Stop scanning — plugins found so far are kept"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

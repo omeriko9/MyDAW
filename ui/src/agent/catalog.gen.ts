@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "e8ba0b08a3bad7a0800e49be47cbddb142b4a66ac4f45da5019de14b92858968";
+export const AGENT_CATALOG_SHA256 = "742528f206cf4f206f0629f021b593a9c0a9e8ce9c4601007fe55fd9603cb45d";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -659,6 +659,31 @@ export const AGENT_CATALOG: AgentCatalog = {
         64
       ],
       "type": "number"
+    },
+    "BlacklistEntry": {
+      "additionalProperties": false,
+      "description": "One persistent blacklist entry. uid absent when the plugin crashed before ever reporting one — the path is then the identity.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "when": {
+          "description": "ISO8601 UTC",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason",
+        "when"
+      ],
+      "type": "object"
     },
     "CaptureDeviceSlot": {
       "additionalProperties": false,
@@ -3297,6 +3322,98 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "PluginsGetBlacklistReply": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/schemas/BlacklistEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "PluginsGetHealthReply": {
+      "additionalProperties": false,
+      "description": "files: per-file scan verdict, blacklist state, per-plugin runtime/probe outcomes. summary: counts over everything known.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "files",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "PluginsGetHealthRequest": {
+      "additionalProperties": false,
+      "description": "Default hides benign non-plugins (support DLLs). path = single-file detail including the scan-host output tail and probe logs.",
+      "properties": {
+        "includeBenign": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "PluginsProbeReply": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "description": "why started=false (scan running / probe running / no matching plugins)",
+          "type": "string"
+        },
+        "started": {
+          "type": "boolean"
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "started"
+      ],
+      "type": "object"
+    },
+    "PluginsProbeRequest": {
+      "additionalProperties": false,
+      "description": "uids/paths select registry rows; all:true probes every enabled, scanned plugin. Serial and out-of-process - safe during playback.",
+      "properties": {
+        "all": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "uids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "PluginsRecreateReply": {
       "additionalProperties": false,
       "description": "Reply to plugins/recreate. Mutates the model on success (path/bitness/name refreshed from the registry), goes through the command pipeline (undoable, broadcasts event/projectChanged).",
@@ -3360,6 +3477,72 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "PluginsRelocateReply": {
+      "additionalProperties": false,
+      "properties": {
+        "blacklistMoved": {
+          "type": "boolean"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "scanned": {
+          "type": "boolean"
+        },
+        "warning": {
+          "description": "present when the new path is outside every configured folder",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "blacklistMoved",
+        "scanned"
+      ],
+      "type": "object"
+    },
+    "PluginsRelocateRequest": {
+      "additionalProperties": false,
+      "description": "The plugin file moved on disk: blacklist history follows it, the old cache record is dropped, the new file is targeted-scanned. Projects re-resolve by uid via plugins/recreate.",
+      "properties": {
+        "newPath": {
+          "type": "string"
+        },
+        "oldPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "oldPath",
+        "newPath"
+      ],
+      "type": "object"
+    },
+    "PluginsRevealFileRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "PluginsScanCancelReply": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelling": {
+          "description": "false when no scan was running",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelling"
+      ],
+      "type": "object"
+    },
     "PluginsScanReply": {
       "additionalProperties": false,
       "description": "`started` is false when a scan was already running (this request started nothing).",
@@ -3378,20 +3561,64 @@ export const AGENT_CATALOG: AgentCatalog = {
       "properties": {
         "full": {
           "type": "boolean"
+        },
+        "paths": {
+          "description": "Targeted scan: only these files (or a bundle's inner PEs); the rest of the registry is preserved.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "trace": {
+          "description": "Verbose host tracing for this scan only - the failure hostTail then holds the full load trace.",
+          "type": "boolean"
         }
       },
       "type": "object"
     },
-    "PluginsUnblacklistRequest": {
+    "PluginsUnblacklistReply": {
       "additionalProperties": false,
       "properties": {
-        "uid": {
-          "type": "string"
+        "removed": {
+          "description": "number of blacklist entries removed",
+          "type": "number"
+        },
+        "rescanStarted": {
+          "description": "present only when rescan was requested",
+          "type": "boolean"
         }
       },
       "required": [
-        "uid"
+        "removed"
       ],
+      "type": "object"
+    },
+    "PluginsUnblacklistRequest": {
+      "additionalProperties": false,
+      "description": "Single uid (back-compat) or batch: uids/paths match uid exactly OR path case-insensitively; all:true clears everything. One save + one scanDone broadcast. rescan:true rescans the freed files.",
+      "properties": {
+        "all": {
+          "type": "boolean"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rescan": {
+          "type": "boolean"
+        },
+        "uid": {
+          "type": "string"
+        },
+        "uids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "Project": {
@@ -9304,6 +9531,28 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "plugins/getBlacklist",
+      "category": "plugins",
+      "description": "The raw persistent blacklist with reasons and timestamps — includes path-only crash entries the registry never shows.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsGetBlacklistReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
       "name": "plugins/getDefaultFolders",
       "category": "plugins",
       "description": "Read platform-default VST2 and VST3 search folders.",
@@ -9352,6 +9601,33 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "plugins/getHealth",
+      "category": "plugins",
+      "description": "Per-file scan verdicts (ok/not_plugin/dep_missing/init_failed/scan_crashed/scan_timeout) + per-plugin load/probe outcomes and summary counts.",
+      "target": "engine",
+      "mode": "read",
+      "traits": [],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsGetHealthRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsGetHealthReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        },
+        {
+          "input": {
+            "path": "C:/VSTs/CrashyReverb.dll"
+          }
+        }
+      ]
+    },
+    {
       "name": "plugins/getRegistry",
       "category": "plugins",
       "description": "List discovered built-in, VST2, and VST3 plugins.",
@@ -9368,6 +9644,63 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "output": {
         "$ref": "#/schemas/PluginsRegistryReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "plugins/probe",
+      "category": "plugins",
+      "description": "The automated pass: deep load-test plugins (load/init/process/getState) via the probe host; verdicts land in getHealth. Progress via event/probeProgress.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsProbeRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsProbeReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "all": true
+          }
+        },
+        {
+          "input": {
+            "paths": [
+              "C:/VSTs/Reverb.dll"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/probeCancel",
+      "category": "plugins",
+      "description": "Cancel a running automated pass. Verdicts recorded so far are kept; event/probeDone arrives with cancelled:true.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsScanCancelReply"
       },
       "examples": [
         {
@@ -9408,9 +9741,64 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "plugins/relocate",
+      "category": "plugins",
+      "description": "Point MyDAW at a plugin file's new location: blacklist history follows, the old cache record drops, the new file is rescanned.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "filesystem"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsRelocateRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsRelocateReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "oldPath": "C:/Old/Synth.dll",
+            "newPath": "C:/New/Synth.dll"
+          }
+        }
+      ]
+    },
+    {
+      "name": "plugins/revealFile",
+      "category": "plugins",
+      "description": "Open Windows Explorer with the plugin file selected. Known plugin files only (registry, blacklist or scan cache).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "external"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/PluginsRevealFileRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "path": "C:/VSTs/Synth.dll"
+          }
+        }
+      ]
+    },
+    {
       "name": "plugins/scan",
       "category": "plugins",
-      "description": "Scan configured plugin folders and refresh the registry.",
+      "description": "Scan the configured plugin folders (full:true ignores the cache; paths targets specific files). Progress via event/scanProgress; cancellable.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -9432,6 +9820,30 @@ export const AGENT_CATALOG: AgentCatalog = {
           "input": {
             "full": false
           }
+        }
+      ]
+    },
+    {
+      "name": "plugins/scanCancel",
+      "category": "plugins",
+      "description": "Cancel a running plugin scan. The in-flight scan host is terminated; completed work is kept and event/scanDone arrives with cancelled:true.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "output": {
+        "$ref": "#/schemas/PluginsScanCancelReply"
+      },
+      "examples": [
+        {
+          "input": {}
         }
       ]
     },
@@ -9471,7 +9883,7 @@ export const AGENT_CATALOG: AgentCatalog = {
     {
       "name": "plugins/unblacklist",
       "category": "plugins",
-      "description": "Remove a plugin from the scanner blacklist.",
+      "description": "Remove blacklist entries: single uid, batch uids/paths, or all:true. One scanDone broadcast; rescan:true rescans the freed files.",
       "target": "engine",
       "mode": "write",
       "traits": [
@@ -9485,12 +9897,21 @@ export const AGENT_CATALOG: AgentCatalog = {
         "$ref": "#/schemas/PluginsUnblacklistRequest"
       },
       "output": {
-        "$ref": "#/schemas/EmptyObject"
+        "$ref": "#/schemas/PluginsUnblacklistReply"
       },
       "examples": [
         {
           "input": {
             "uid": "vst3:com.vendor.plugin"
+          }
+        },
+        {
+          "input": {
+            "paths": [
+              "C:/VSTs/Old.dll",
+              "C:/VSTs/Older.dll"
+            ],
+            "rescan": true
           }
         }
       ]
@@ -11317,11 +11738,18 @@ export const ENGINE_OPERATION_NAMES = [
   "plugin/openEditor",
   "plugin/savePreset",
   "plugins/blacklist",
+  "plugins/getBlacklist",
   "plugins/getDefaultFolders",
   "plugins/getFolders",
+  "plugins/getHealth",
   "plugins/getRegistry",
+  "plugins/probe",
+  "plugins/probeCancel",
   "plugins/recreate",
+  "plugins/relocate",
+  "plugins/revealFile",
   "plugins/scan",
+  "plugins/scanCancel",
   "plugins/setFolders",
   "plugins/unblacklist",
   "project/getImportFormats",
@@ -11851,6 +12279,10 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "plugins/scan"
   },
+  "plugins/scanCancel": {
+    "kind": "operation",
+    "operation": "plugins/scanCancel"
+  },
   "plugins/getRegistry": {
     "kind": "operation",
     "operation": "plugins/getRegistry"
@@ -11874,6 +12306,30 @@ export const REQUEST_COVERAGE = {
   "plugins/blacklist": {
     "kind": "operation",
     "operation": "plugins/blacklist"
+  },
+  "plugins/getBlacklist": {
+    "kind": "operation",
+    "operation": "plugins/getBlacklist"
+  },
+  "plugins/getHealth": {
+    "kind": "operation",
+    "operation": "plugins/getHealth"
+  },
+  "plugins/probe": {
+    "kind": "operation",
+    "operation": "plugins/probe"
+  },
+  "plugins/probeCancel": {
+    "kind": "operation",
+    "operation": "plugins/probeCancel"
+  },
+  "plugins/revealFile": {
+    "kind": "operation",
+    "operation": "plugins/revealFile"
+  },
+  "plugins/relocate": {
+    "kind": "operation",
+    "operation": "plugins/relocate"
   },
   "plugins/recreate": {
     "kind": "operation",
@@ -12781,13 +13237,35 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "reason": "disabled by user"
     }
   ],
+  "plugins/getBlacklist": [
+    {}
+  ],
   "plugins/getDefaultFolders": [
     {}
   ],
   "plugins/getFolders": [
     {}
   ],
+  "plugins/getHealth": [
+    {},
+    {
+      "path": "C:/VSTs/CrashyReverb.dll"
+    }
+  ],
   "plugins/getRegistry": [
+    {}
+  ],
+  "plugins/probe": [
+    {
+      "all": true
+    },
+    {
+      "paths": [
+        "C:/VSTs/Reverb.dll"
+      ]
+    }
+  ],
+  "plugins/probeCancel": [
     {}
   ],
   "plugins/recreate": [
@@ -12797,10 +13275,24 @@ export const ENGINE_OPERATION_EXAMPLES = {
       ]
     }
   ],
+  "plugins/relocate": [
+    {
+      "oldPath": "C:/Old/Synth.dll",
+      "newPath": "C:/New/Synth.dll"
+    }
+  ],
+  "plugins/revealFile": [
+    {
+      "path": "C:/VSTs/Synth.dll"
+    }
+  ],
   "plugins/scan": [
     {
       "full": false
     }
+  ],
+  "plugins/scanCancel": [
+    {}
   ],
   "plugins/setFolders": [
     {
@@ -12815,6 +13307,13 @@ export const ENGINE_OPERATION_EXAMPLES = {
   "plugins/unblacklist": [
     {
       "uid": "vst3:com.vendor.plugin"
+    },
+    {
+      "paths": [
+        "C:/VSTs/Old.dll",
+        "C:/VSTs/Older.dll"
+      ],
+      "rescan": true
     }
   ],
   "project/getImportFormats": [

@@ -492,6 +492,74 @@ export interface PluginInfo {
   numOutputs: number;
   blacklisted?: boolean;
   blacklistReason?: string;
+  /** the last real session load or probe of this plugin failed (PluginHealth) —
+   *  surfaces as a warning badge; details live in the Plugin Manager. */
+  problem?: "load_failed";
+  /** set only when GET /api/plugin-icon/<iconKey> serves a real extracted PNG */
+  iconKey?: string;
+}
+
+/* ---- plugins/getHealth (SPEC §5.6): the Plugin Manager's data source ---- */
+
+export type ScanVerdict =
+  | "ok"
+  | "not_plugin"
+  | "dep_missing"
+  | "init_failed"
+  | "scan_crashed"
+  | "scan_timeout"
+  | "user_disabled";
+
+export interface PluginHealthOutcome {
+  verdict: "ok" | "load_failed";
+  message?: string;
+  whenMs: number;
+  /** probe only: which stages passed */
+  stages?: Record<string, boolean>;
+  /** probe only, single-file detail only: condensed host output tail */
+  log?: string;
+}
+
+export interface PluginHealthPlugin {
+  uid: string;
+  name: string;
+  vendor: string;
+  category: string;
+  isInstrument: boolean;
+  bitness: number;
+  format: string;
+  /** last real session load */
+  runtime?: PluginHealthOutcome;
+  /** last automated probe */
+  probe?: PluginHealthOutcome;
+}
+
+export interface PluginHealthFile {
+  path: string;
+  format: string;
+  bitness?: number;
+  verdict: ScanVerdict;
+  error?: string;
+  lastScanMs?: number;
+  /** single-file detail only: condensed scan-host output */
+  hostTail?: string;
+  blacklisted: boolean;
+  blacklistReason?: string;
+  blacklistWhen?: string;
+  plugins: PluginHealthPlugin[];
+}
+
+export interface PluginsGetHealthRequest {
+  /** include benign non-plugins (support DLLs: not_plugin / dep_missing) in `files` */
+  includeBenign?: boolean;
+  /** single-file detail: only this file, WITH hostTail and probe logs */
+  path?: string;
+}
+
+export interface PluginsGetHealthReply {
+  files: PluginHealthFile[];
+  /** counts over EVERYTHING known, regardless of the includeBenign filter */
+  summary: Record<ScanVerdict | "load_failed" | "untested", number>;
 }
 
 export interface PluginParam {
@@ -1543,6 +1611,12 @@ export interface ExportCprReply {
 
 export interface PluginsScanRequest {
   full?: boolean;
+  /** TARGETED scan: only these files (or a bundle's inner PEs) are processed and the
+   *  rest of the registry is preserved. Absent/empty = scan every configured folder. */
+  paths?: string[];
+  /** verbose host tracing for THIS scan only — the failure hostTail then holds the
+   *  full load trace (MYDAW_SCAN_TRACE/VST2/REG forced into the scan hosts) */
+  trace?: boolean;
 }
 
 /** `started` is false when a scan was already running (this request started nothing). */
@@ -1559,8 +1633,50 @@ export interface PluginsFolders {
   vst3: string[];
 }
 
+/** Advisory only — the scanner routes by file EXTENSION, so a miscategorized folder
+ *  still scans; the warning just says the settings are untidy. */
+export interface FolderCategoryWarning {
+  folder: string;
+  list: "vst2" | "vst3";
+  message: string;
+}
+
+export interface PluginsSetFoldersReply extends PluginsFolders {
+  warnings?: FolderCategoryWarning[];
+}
+
+/**
+ * Single {uid} kept for back-compat; batch via uids/paths (each key matches uid exactly
+ * OR path case-insensitively) or all:true. One engine save + one event/scanDone broadcast
+ * regardless of count. rescan:true additionally rescans the freed files.
+ */
 export interface PluginsUnblacklistRequest {
-  uid: string;
+  uid?: string;
+  uids?: string[];
+  paths?: string[];
+  all?: boolean;
+  rescan?: boolean;
+}
+
+export interface PluginsUnblacklistReply {
+  /** number of blacklist entries removed */
+  removed: number;
+  /** present only when rescan was requested */
+  rescanStarted?: boolean;
+}
+
+/** One persistent blacklist entry (blacklist.json). uid absent when the plugin crashed
+ *  before ever reporting one — the path is then the identity. */
+export interface BlacklistEntry {
+  uid?: string;
+  path: string;
+  reason: string;
+  /** ISO8601 UTC */
+  when: string;
+}
+
+export interface PluginsGetBlacklistReply {
+  entries: BlacklistEntry[];
 }
 
 /**
@@ -1933,10 +2049,30 @@ export interface ScanProgressEvent {
   total: number;
   path: string;
   found: number;
+  /** crash/timeout/init failures so far THIS pass — absent on older engines */
+  failed?: number;
 }
 
 export interface ScanDoneEvent {
   registry: PluginInfo[];
+  /** true when a user cancel ended the scan early — completed work was kept. */
+  cancelled?: boolean;
+}
+
+/** One plugin finished probing (the automated load-test pass, SPEC §5.6). */
+export interface ProbeProgressEvent {
+  current: number;
+  total: number;
+  path: string;
+  uid: string;
+  name: string;
+  verdict: "ok" | "load_failed";
+}
+
+export interface ProbeDoneEvent {
+  passed: number;
+  failed: number;
+  cancelled?: boolean;
 }
 
 /** Async offline-process (DOP) render progress — a VST chain replaying on a worker. */
@@ -2118,12 +2254,25 @@ export interface RequestMap {
 
   // §5.6 plugins
   "plugins/scan": { req: PluginsScanRequest; reply: PluginsScanReply };
+  "plugins/scanCancel": { req: EmptyObject; reply: { cancelling: boolean } };
   "plugins/getRegistry": { req: EmptyObject; reply: PluginsRegistryReply };
-  "plugins/setFolders": { req: PluginsFolders; reply: PluginsFolders };
+  "plugins/setFolders": { req: PluginsFolders; reply: PluginsSetFoldersReply };
   "plugins/getFolders": { req: EmptyObject; reply: PluginsFolders };
   "plugins/getDefaultFolders": { req: EmptyObject; reply: PluginsFolders };
-  "plugins/unblacklist": { req: PluginsUnblacklistRequest; reply: EmptyObject };
+  "plugins/unblacklist": { req: PluginsUnblacklistRequest; reply: PluginsUnblacklistReply };
   "plugins/blacklist": { req: PluginsBlacklistRequest; reply: { added: boolean } };
+  "plugins/getBlacklist": { req: EmptyObject; reply: PluginsGetBlacklistReply };
+  "plugins/getHealth": { req: PluginsGetHealthRequest; reply: PluginsGetHealthReply };
+  "plugins/probe": {
+    req: { uids?: string[]; paths?: string[]; all?: boolean };
+    reply: { started: boolean; total?: number; reason?: string };
+  };
+  "plugins/probeCancel": { req: EmptyObject; reply: { cancelling: boolean } };
+  "plugins/revealFile": { req: { path: string }; reply: EmptyObject };
+  "plugins/relocate": {
+    req: { oldPath: string; newPath: string };
+    reply: { ok: boolean; blacklistMoved: boolean; scanned: boolean; warning?: string };
+  };
   "plugins/recreate": { req: PluginsRecreateRequest; reply: PluginsRecreateReply };
   "cmd/plugin.add": { req: PluginAddRequest; reply: PluginAddReply };
   "cmd/plugin.remove": { req: PluginRemoveRequest; reply: EmptyObject };
@@ -2193,6 +2342,8 @@ export interface EventMap {
   "event/dopDone": DopDoneEvent;
   "event/scanProgress": ScanProgressEvent;
   "event/scanDone": ScanDoneEvent;
+  "event/probeProgress": ProbeProgressEvent;
+  "event/probeDone": ProbeDoneEvent;
   "event/pluginLoadProgress": PluginLoadProgressEvent;
   "event/pluginParams": PluginParamsEvent;
   "event/pluginState": PluginStateEvent;
@@ -2334,12 +2485,17 @@ export const ExportMsg = {
 
 export const PluginsMsg = {
   scan: "plugins/scan",
+  scanCancel: "plugins/scanCancel",
   getRegistry: "plugins/getRegistry",
   setFolders: "plugins/setFolders",
   getFolders: "plugins/getFolders",
   getDefaultFolders: "plugins/getDefaultFolders",
   unblacklist: "plugins/unblacklist",
   blacklist: "plugins/blacklist",
+  getBlacklist: "plugins/getBlacklist",
+  getHealth: "plugins/getHealth",
+  revealFile: "plugins/revealFile",
+  relocate: "plugins/relocate",
   recreate: "plugins/recreate",
 } as const satisfies Record<string, RequestType>;
 

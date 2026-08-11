@@ -18,6 +18,7 @@ import { ws, type ConnectionState } from "../../protocol/ws";
 import type { PluginInfo, ScanProgressEvent } from "../../protocol/types";
 import {
   blacklistPlugin,
+  cancelPluginScan,
   getPluginRegistry,
   scanPlugins,
   unblacklistPlugin,
@@ -29,6 +30,8 @@ import {
   togglePluginFavorite,
 } from "../../lib/ids";
 import { Icon } from "../common/icons";
+import BlacklistPanel from "./BlacklistPanel";
+import HealthPanel from "./HealthPanel";
 
 type KindFilter = "all" | "instruments" | "effects" | "blacklisted" | "bit32";
 type SortKey = "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io" | "folder" | "status";
@@ -73,6 +76,10 @@ export default function PluginManagerPage() {
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<readonly string[]>(loadPluginFavorites);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
+  // "plugins" = the registry table; "health" = per-file scan verdicts + load/probe
+  // outcomes with the failure logs (master/detail); "blacklist" = the raw persistent
+  // blacklist (incl. path-only crash entries the registry never shows) with batch ops.
+  const [view, setView] = useState<"plugins" | "health" | "blacklist">("plugins");
 
   const refresh = useCallback(() => {
     getPluginRegistry()
@@ -229,6 +236,32 @@ export default function PluginManagerPage() {
             <Icon name="plug" size={20} />
           </span>
           <h1 className="pm-title">Plugin Manager</h1>
+          <nav className="pm-views" aria-label="Plugin manager views">
+            <button
+              type="button"
+              className={"pm-view-btn" + (view === "plugins" ? " active" : "")}
+              aria-pressed={view === "plugins"}
+              onClick={() => setView("plugins")}
+            >
+              Plugins
+            </button>
+            <button
+              type="button"
+              className={"pm-view-btn" + (view === "health" ? " active" : "")}
+              aria-pressed={view === "health"}
+              onClick={() => setView("health")}
+            >
+              Health
+            </button>
+            <button
+              type="button"
+              className={"pm-view-btn" + (view === "blacklist" ? " active" : "")}
+              aria-pressed={view === "blacklist"}
+              onClick={() => setView("blacklist")}
+            >
+              Blacklist
+            </button>
+          </nav>
           <span
             className={`pm-conn ${connState}`}
             title={connState === "open" ? "Connected to the engine" : `Engine: ${connState}`}
@@ -248,27 +281,38 @@ export default function PluginManagerPage() {
             <Icon name="refresh" size={13} /> Rescan
           </button>
         </div>
-        <div className="pm-toolbar">
-          {chip("all", "All", registry.length)}
-          {chip("instruments", "Instruments", counts.instruments, "inst")}
-          {chip("effects", "Effects", counts.effects, "fx")}
-          {chip("bit32", "32-bit", counts.bit32, "b32")}
-          {chip("blacklisted", "Blacklisted", counts.blacklisted, "bl")}
-          <input
-            className="pm-search"
-            type="search"
-            aria-label="Search plugins"
-            placeholder="Search name, vendor, category, format, path…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
+        {view === "plugins" && (
+          <div className="pm-toolbar">
+            {chip("all", "All", registry.length)}
+            {chip("instruments", "Instruments", counts.instruments, "inst")}
+            {chip("effects", "Effects", counts.effects, "fx")}
+            {chip("bit32", "32-bit", counts.bit32, "b32")}
+            {chip("blacklisted", "Blacklisted", counts.blacklisted, "bl")}
+            <input
+              className="pm-search"
+              type="search"
+              aria-label="Search plugins"
+              placeholder="Search name, vendor, category, format, path…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        )}
         {scan && (
           <div className="pm-scanline">
             <div className="pm-scanbar" style={{ width: `${scanPct}%` }} />
             <span className="pm-scantext">
-              Scanning {scan.current}/{scan.total} — {scan.path} ({scan.found} found)
+              Scanning {scan.current}/{scan.total} — {scan.path} ({scan.found} found
+              {(scan.failed ?? 0) > 0 ? `, ${scan.failed} failed` : ""})
             </span>
+            <button
+              type="button"
+              className="pm-btn pm-scancancel"
+              onClick={() => { cancelPluginScan().catch((e) => setError(String(e))); }}
+              title="Stop scanning — plugins found so far are kept"
+            >
+              Cancel
+            </button>
           </div>
         )}
         {error && (
@@ -279,6 +323,11 @@ export default function PluginManagerPage() {
       </header>
 
       <main className="pm-main">
+        {view === "blacklist" ? (
+          <BlacklistPanel connected={connState === "open"} />
+        ) : view === "health" ? (
+          <HealthPanel connected={connState === "open"} />
+        ) : (
         <table className="pm-table">
           <thead>
             <tr>
@@ -384,7 +433,8 @@ export default function PluginManagerPage() {
             })}
           </tbody>
         </table>
-        {rows.length === 0 && (
+        )}
+        {view === "plugins" && rows.length === 0 && (
           <div className="pm-empty">
             {registry.length === 0
               ? connState === "open"

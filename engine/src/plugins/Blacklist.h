@@ -49,6 +49,19 @@ public:
     // Returns true if anything was removed; saves immediately.
     bool removeByUid(const std::string& uid);
 
+    // Batch removal: each key matches like removeByUid (uid exact OR path). ONE save,
+    // one mutex hold — 76 one-by-one removals used to mean 76 file writes and 76
+    // event/scanDone broadcasts. Returns the number of entries removed.
+    size_t removeMany(const std::vector<std::string>& uidsOrPaths);
+
+    // Removes everything. Returns the number of entries removed; saves once.
+    size_t clear();
+
+    // Rewrite the entry whose path matches `oldPath` to point at `newPath` (relocate:
+    // the plugin file moved on disk; the disable/crash history follows it). Returns
+    // false when no entry matched; saves on change.
+    bool rewritePath(const std::string& oldPath, const std::string& newPath);
+
     // JSON array of entries [{uid?, path, reason, when}] (uid omitted when empty).
     json toJson() const;
 

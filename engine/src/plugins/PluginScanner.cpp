@@ -161,8 +161,8 @@ struct ScanProcOutcome {
     std::string spawnError;
 };
 
-std::wstring buildScanEnvironmentBlock() {
-    if (!envEnabled("MYDAW_SCAN_TRACE"))
+std::wstring buildScanEnvironmentBlock(bool forceTrace) {
+    if (!forceTrace && !envEnabled("MYDAW_SCAN_TRACE"))
         return std::wstring();
 
     std::map<std::wstring, std::wstring> vars;
@@ -220,10 +220,37 @@ std::string formatScanOutputForLog(const std::string& output) {
     return out.empty() ? "<no host output>" : out;
 }
 
+int64_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+// Structured verdict from a host-reported (or cached v1) error string. The strings are
+// the scan host's own vocabulary (plugin-host/src/Scan.cpp + adapter load errors), so a
+// prefix taxonomy is reliable; anything unrecognized is a plain non-plugin. Verified
+// against the real 2,673-entry cache: every entry classifies into one of these.
+std::string classifyScanError(const std::string& err) {
+    const auto has = [&err](const char* s) { return err.find(s) != std::string::npos; };
+    if (has("crashed during scan"))
+        return "scan_crashed"; // SEH-caught fault reported by the host itself
+    if (has("scan timeout"))
+        return "scan_timeout";
+    if (has("module could not be found") || has("The specified module could not be found"))
+        return "dep_missing"; // a dependency DLL is absent — common for bundle support DLLs
+    if (has("LoadLibrary failed") || has("initialization routine failed") ||
+        has("did not return a valid AEffect") || has("factory") || has("IPluginFactory"))
+        return "init_failed"; // a plugin-shaped binary that would not come up
+    // "not a VST2 plugin", "not a PE binary", "no scan output", "unsupported PE machine",
+    // "not a usable plugin", unknown format …
+    return "not_plugin";
+}
+
 // Spawns `"<hostExe>" --scan "<pluginPath>"` with stdout+stderr captured through an
 // anonymous pipe, CREATE_NO_WINDOW. Kills the process on timeout or cancel.
 ScanProcOutcome runScanProcess(const std::string& hostExe, const std::string& pluginPath,
-                               DWORD timeoutMs, const std::atomic<bool>& cancel) {
+                               DWORD timeoutMs, const std::atomic<bool>& cancel,
+                               bool forceTrace = false) {
     ScanProcOutcome r;
 
     SECURITY_ATTRIBUTES sa{};
@@ -240,7 +267,7 @@ ScanProcOutcome runScanProcess(const std::string& hostExe, const std::string& pl
     std::wstring cmd = L"\"" + utf8ToWide(hostExe) + L"\" --scan \"" + utf8ToWide(pluginPath) + L"\"";
     std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
     cmdBuf.push_back(L'\0');
-    std::wstring envBlock = buildScanEnvironmentBlock();
+    std::wstring envBlock = buildScanEnvironmentBlock(forceTrace);
 
     STARTUPINFOW si{};
     si.cb = sizeof(si);
@@ -331,9 +358,17 @@ PluginScanner::PluginScanner(PluginRegistry& registry, Blacklist& blacklist)
 }
 
 PluginScanner::~PluginScanner() {
+    destroying_.store(true, std::memory_order_release); // worker must skip done()
     cancel_.store(true, std::memory_order_release);
     if (thread_.joinable())
         thread_.join();
+}
+
+bool PluginScanner::cancelScan() {
+    if (!running_.load(std::memory_order_acquire))
+        return false;
+    cancel_.store(true, std::memory_order_release);
+    return true;
 }
 
 void PluginScanner::setHostPaths(const std::string& host64, const std::string& host32) {
@@ -362,8 +397,15 @@ void PluginScanner::loadCache() {
         e.mtimeMs = getOr<int64_t>(je, "mtimeMs", -1);
         e.ok = getOr<bool>(je, "ok", false);
         e.error = getOr(je, "error", "");
+        e.verdict = getOr(je, "verdict", "");
+        e.lastScanMs = getOr<int64_t>(je, "lastScanMs", 0);
+        e.hostTail = getOr(je, "hostTail", "");
         if (e.path.empty())
             continue;
+        // v1 migration: derive the structured verdict from the error string once; the
+        // next saveCache() persists it as v2.
+        if (e.verdict.empty())
+            e.verdict = e.ok ? "ok" : classifyScanError(e.error);
         if (e.ok && je.contains("plugins") && je["plugins"].is_array()) {
             for (const json& jp : je["plugins"]) {
                 PluginInfo p = PluginInfo::fromJson(jp);
@@ -384,6 +426,12 @@ void PluginScanner::saveCache() {
         for (const auto& [key, e] : cache_) {
             (void)key;
             json je{{"path", e.path}, {"size", e.size}, {"mtimeMs", e.mtimeMs}, {"ok", e.ok}};
+            if (!e.verdict.empty())
+                je["verdict"] = e.verdict;
+            if (e.lastScanMs > 0)
+                je["lastScanMs"] = e.lastScanMs;
+            if (!e.hostTail.empty())
+                je["hostTail"] = e.hostTail;
             if (e.ok) {
                 json plugins = json::array();
                 for (const PluginInfo& p : e.plugins)
@@ -395,10 +443,30 @@ void PluginScanner::saveCache() {
             arr.push_back(std::move(je));
         }
     }
-    const json root{{"version", 1}, {"entries", std::move(arr)}};
+    const json root{{"version", 2}, {"entries", std::move(arr)}};
     const std::string path = cacheFilePath();
     if (!writeFileAtomic(path, root.dump()))
         Log::error("PluginScanner: failed to write %s", path.c_str());
+}
+
+void PluginScanner::dropCacheEntry(const std::string& path) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (cache_.erase(normPath(path)) == 0)
+            return;
+    }
+    saveCache();
+}
+
+std::vector<PluginScanner::CacheEntry> PluginScanner::snapshotCache() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<CacheEntry> out;
+    out.reserve(cache_.size());
+    for (const auto& [key, e] : cache_) {
+        (void)key;
+        out.push_back(e);
+    }
+    return out;
 }
 
 void PluginScanner::refreshFromCache() {
@@ -559,7 +627,8 @@ std::vector<PluginScanner::FileTask> PluginScanner::collectFiles() const {
 // Scan worker
 // ---------------------------------------------------------------------------
 
-void PluginScanner::scanAsync(bool full, ProgressFn progress, DoneFn done) {
+void PluginScanner::scanAsync(bool full, std::vector<std::string> onlyPaths,
+                              ProgressFn progress, DoneFn done) {
     if (running_.load(std::memory_order_acquire)) {
         Log::warn("PluginScanner: scan already running — request ignored");
         return;
@@ -568,12 +637,17 @@ void PluginScanner::scanAsync(bool full, ProgressFn progress, DoneFn done) {
         thread_.join(); // reap the previous, finished worker
     cancel_.store(false, std::memory_order_release);
     running_.store(true, std::memory_order_release);
-    thread_ = std::thread([this, full, p = std::move(progress), d = std::move(done)]() mutable {
-        workerMain(full, std::move(p), std::move(d));
+    thread_ = std::thread([this, full, only = std::move(onlyPaths), p = std::move(progress),
+                           d = std::move(done)]() mutable {
+        workerMain(full, std::move(only), std::move(p), std::move(d));
     });
 }
 
-void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
+void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
+                               ProgressFn progress, DoneFn done) {
+    // One-shot trace request (plugins/scan {trace:true}) — forces MYDAW_SCAN_TRACE/
+    // MYDAW_VST2_TRACE/MYDAW_REG_TRACE into every spawned host of THIS scan only.
+    const bool trace = traceNext_.exchange(false, std::memory_order_acq_rel);
     std::string host64;
     std::string host32;
     {
@@ -592,20 +666,40 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
             host32 = fallback;
     }
 
-    const std::vector<FileTask> tasks = collectFiles();
+    std::vector<FileTask> tasks = collectFiles();
+    // Targeted scan: filter AFTER collection so format routing and .vst3 bundle
+    // expansion stay identical to a normal scan — a bundle path targets its inner PEs.
+    if (!onlyPaths.empty()) {
+        std::vector<std::string> want;
+        want.reserve(onlyPaths.size());
+        for (const std::string& p : onlyPaths)
+            want.push_back(normPath(p));
+        std::vector<FileTask> filtered;
+        for (FileTask& t : tasks) {
+            const std::string norm = normPath(t.path);
+            for (const std::string& w : want)
+                if (norm == w || norm.rfind(w + "/", 0) == 0) { // exact or inside a bundle
+                    filtered.push_back(std::move(t));
+                    break;
+                }
+        }
+        tasks = std::move(filtered);
+    }
     const int total = static_cast<int>(tasks.size());
-    Log::info("PluginScanner: scanning %d candidate file(s)%s", total,
-              full ? " (full rescan, cache ignored)" : "");
+    Log::info("PluginScanner: scanning %d candidate file(s)%s%s", total,
+              full ? " (full rescan, cache ignored)" : "",
+              onlyPaths.empty() ? "" : " (targeted)");
 
     std::vector<PluginInfo> results;
     int found = 0;
+    int failedSoFar = 0; // crash/timeout/init failures THIS pass (live progress detail)
     bool warnedNoHost64 = false;
     bool warnedNoHost32 = false;
 
     for (int i = 0; i < total && !cancel_.load(std::memory_order_relaxed); ++i) {
         const FileTask& task = tasks[i];
         if (progress)
-            progress(i + 1, total, task.path, found);
+            progress(i + 1, total, task.path, found, failedSoFar);
 
         // 1. Blacklisted paths are never spawned (blacklist persists across full rescans).
         BlacklistEntry ble;
@@ -642,10 +736,14 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
         }
 
         // 3. Cache hit (a full rescan ignores the cache but still re-populates it).
+        // Failure verdicts NEVER hit: crash/timeout records are kept for history now
+        // (v1 erased them), and the load-bearing "unblacklist must force a real rescan"
+        // invariant lives exactly here — an unblacklisted crasher must re-spawn.
         if (!full) {
             std::lock_guard<std::mutex> lock(mutex_);
             const auto it = cache_.find(normPath(task.path));
-            if (it != cache_.end() && it->second.size == size && it->second.mtimeMs == mtimeMs) {
+            if (it != cache_.end() && it->second.size == size && it->second.mtimeMs == mtimeMs &&
+                !it->second.failureVerdict()) {
                 if (it->second.ok) {
                     for (const PluginInfo& p : it->second.plugins) {
                         results.push_back(p);
@@ -672,6 +770,8 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
             e.size = size;
             e.mtimeMs = mtimeMs;
             e.ok = false;
+            e.verdict = "not_plugin";
+            e.lastScanMs = nowMs();
             if (machine == 0) {
                 e.error = "not a PE binary";
             } else {
@@ -698,7 +798,8 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
         }
 
         // 5. Spawn `<host> --scan <path>`.
-        const ScanProcOutcome r = runScanProcess(host, task.path, kScanTimeoutMs, cancel_);
+        const ScanProcOutcome r =
+            runScanProcess(host, task.path, kScanTimeoutMs, cancel_, trace);
         if (r.cancelled)
             break;
         if (!r.spawned) {
@@ -708,14 +809,27 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
         }
 
         if (r.timedOut) {
+            const std::string tail = formatScanOutputForLog(r.output);
             Log::warn("PluginScanner: %s timed out after %lums; host output: %s",
                       task.path.c_str(), static_cast<unsigned long>(kScanTimeoutMs),
-                      formatScanOutputForLog(r.output).c_str());
+                      tail.c_str());
             blacklist_.add("", task.path, "scan timeout");
             results.push_back(
                 syntheticBlacklistedEntry(task.path, task.format, bitness, "scan timeout"));
+            // KEEP a record (v1 erased it — unblacklist then lost all history). The
+            // failure verdict never cache-hits, so re-spawn-after-unblacklist still holds.
+            CacheEntry e;
+            e.path = task.path;
+            e.size = size;
+            e.mtimeMs = mtimeMs;
+            e.ok = false;
+            ++failedSoFar;
+            e.verdict = "scan_timeout";
+            e.error = "scan timeout";
+            e.lastScanMs = nowMs();
+            e.hostTail = tail;
             std::lock_guard<std::mutex> lock(mutex_);
-            cache_.erase(normPath(task.path)); // unblacklisting must force a real rescan
+            cache_[normPath(task.path)] = std::move(e);
             continue;
         }
 
@@ -755,21 +869,40 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
                 e.size = size;
                 e.mtimeMs = mtimeMs;
                 e.ok = true;
+                e.verdict = "ok";
+                e.lastScanMs = nowMs();
                 e.plugins = std::move(plugins);
                 std::lock_guard<std::mutex> lock(mutex_);
                 cache_[normPath(task.path)] = std::move(e);
             } else {
-                // Non-plugin DLL ("no VST entry" etc) — cached so it is never re-spawned,
-                // but NOT blacklisted (SPEC §8.3).
+                // Host-reported rejection. Mostly benign non-plugins ("no VST entry",
+                // support DLLs), but an SEH-caught crash arrives on this path too — the
+                // host survives the fault and reports it as an error line. Treat those
+                // like hard crashes (blacklist): SEH-vs-hard-crash used to diverge here,
+                // so the same faulting plugin was blacklisted or not depending on how
+                // messily it died.
+                const std::string err = getOr(line, "error", "not a plugin");
+                const std::string verdict = classifyScanError(err);
+                const std::string tail = formatScanOutputForLog(r.output);
                 Log::info("PluginScanner: %s scan host rejected file: %s; host output: %s",
-                          task.path.c_str(), getOr(line, "error", "not a plugin").c_str(),
-                          formatScanOutputForLog(r.output).c_str());
+                          task.path.c_str(), err.c_str(), tail.c_str());
+                if (verdict == "scan_crashed") {
+                    blacklist_.add("", task.path, err);
+                    results.push_back(
+                        syntheticBlacklistedEntry(task.path, task.format, bitness, err));
+                }
+                if (verdict == "scan_crashed" || verdict == "init_failed")
+                    ++failedSoFar;
                 CacheEntry e;
                 e.path = task.path;
                 e.size = size;
                 e.mtimeMs = mtimeMs;
                 e.ok = false;
-                e.error = getOr(line, "error", "not a plugin");
+                e.verdict = verdict;
+                e.error = err;
+                e.lastScanMs = nowMs();
+                if (verdict != "not_plugin")
+                    e.hostTail = tail; // benign non-plugins would bloat the cache
                 std::lock_guard<std::mutex> lock(mutex_);
                 cache_[normPath(task.path)] = std::move(e);
             }
@@ -777,12 +910,23 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
             char reason[64];
             std::snprintf(reason, sizeof(reason), "crashed during scan (0x%08X)",
                           static_cast<unsigned>(r.exitCode));
+            const std::string tail = formatScanOutputForLog(r.output);
             Log::warn("PluginScanner: %s scan host crashed/failed (%s); host output: %s",
-                      task.path.c_str(), reason, formatScanOutputForLog(r.output).c_str());
+                      task.path.c_str(), reason, tail.c_str());
             blacklist_.add("", task.path, reason);
             results.push_back(syntheticBlacklistedEntry(task.path, task.format, bitness, reason));
+            CacheEntry e;
+            e.path = task.path;
+            e.size = size;
+            e.mtimeMs = mtimeMs;
+            e.ok = false;
+            ++failedSoFar;
+            e.verdict = "scan_crashed";
+            e.error = reason;
+            e.lastScanMs = nowMs();
+            e.hostTail = tail;
             std::lock_guard<std::mutex> lock(mutex_);
-            cache_.erase(normPath(task.path));
+            cache_[normPath(task.path)] = std::move(e);
         } else {
             // Exited 0 without a parseable result line — treat as non-plugin.
             Log::info("PluginScanner: %s exited 0 without parseable result; host output: %s",
@@ -792,15 +936,42 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
             e.size = size;
             e.mtimeMs = mtimeMs;
             e.ok = false;
+            e.verdict = "not_plugin";
             e.error = "no scan output";
+            e.lastScanMs = nowMs();
             std::lock_guard<std::mutex> lock(mutex_);
             cache_[normPath(task.path)] = std::move(e);
         }
     }
 
     if (cancel_.load(std::memory_order_relaxed)) {
-        saveCache(); // keep the completed work; no registry publish / done() at shutdown
-        Log::info("PluginScanner: scan cancelled");
+        // USER cancel: keep the completed work. Every processed file already updated the
+        // cache, so re-deriving the registry from it merges the fresh results with the
+        // prior state of everything unvisited — nothing is discarded, nothing invented.
+        // (No vanished-file prune here: most files were never visited this pass.)
+        saveCache();
+        if (!destroying_.load(std::memory_order_acquire)) {
+            populateRegistryFromCache();
+            Log::info("PluginScanner: scan cancelled — partial results kept");
+            if (done)
+                done(true);
+        } else {
+            Log::info("PluginScanner: scan cancelled (shutdown)");
+        }
+        running_.store(false, std::memory_order_release);
+        return;
+    }
+
+    if (!onlyPaths.empty()) {
+        // Targeted scan: `results` holds only the targeted files' plugins — replaceAll
+        // would wipe every other registry row. The cache now contains the fresh records,
+        // so derive the full registry from it instead.
+        saveCache();
+        populateRegistryFromCache();
+        Log::info("PluginScanner: targeted scan done — %d plugin(s) in %d file(s)", found,
+                  total);
+        if (done)
+            done(false);
         running_.store(false, std::memory_order_release);
         return;
     }
@@ -821,7 +992,7 @@ void PluginScanner::workerMain(bool full, ProgressFn progress, DoneFn done) {
     Log::info("PluginScanner: scan done — %d plugin(s) found, %zu registry entr%s",
               found, numEntries, numEntries == 1 ? "y" : "ies");
     if (done)
-        done();
+        done(false);
     running_.store(false, std::memory_order_release);
 }
 

@@ -40,6 +40,9 @@
 #include "midi/MidiOutput.h"
 #include "midi/MidiRecorder.h"
 #include "plugins/Blacklist.h"
+#include "plugins/IconExtractor.h"
+#include "plugins/PluginHealth.h"
+#include "plugins/PluginProber.h"
 #include "plugins/PluginRegistry.h"
 #include "plugins/PluginScanner.h"
 #include "project/Autosave.h"
@@ -144,6 +147,12 @@ public:
 
     // ----- events --------------------------------------------------------------
     void broadcastEvent(const std::string& type, json payload); // thread-safe
+
+    /** registry.listJson() + additive `problem:"load_failed"` on rows whose last real
+     *  load or probe failed (PluginHealth) — the Browser pane's warning badge. Use this
+     *  for EVERY registry emission (session/hello, event/scanDone, plugins/getRegistry)
+     *  so no surface shows an unbadged copy. Thread-safe (both sources lock). */
+    json registryJson() const;
     void broadcastTransportEvent();                             // main thread
     json transportJson() const;
 
@@ -265,6 +274,9 @@ public:
     PluginRegistry registry;
     Blacklist blacklist;
     PluginScanner scanner{registry, blacklist}; // preloads plugin cache; no boot scan
+    PluginHealth pluginHealth; // durable load/probe outcomes (SPEC §5.6); debounced saves
+    PluginProber prober{pluginHealth}; // the automated pass; SERIAL, out-of-process
+    IconExtractor pluginIcons; // scan-time icon harvest; served at /api/plugin-icon/<key>
     MidiInput midiInput;
     MidiOutput midiOutput; // hardware MIDI out (Track::midiOutDevice, SPEC §5.5)
     MidiRecorder midiRecorder;

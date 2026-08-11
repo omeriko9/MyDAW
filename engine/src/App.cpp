@@ -161,6 +161,7 @@ bool App::init(std::string& err) {
     registry.setBuiltins(BuiltinEffectManager::builtinPluginInfos()); // stock effects (always listed)
     scanner.refreshFromCache();
     scanner.setHostPaths(host64Path_, host32Path_);
+    prober.setHostPaths(host64Path_, host32Path_);
 
     // 7. ProjectIO wiring + crash-recovery probe (§6).
     projectIO.setEventBus(&eventBus);
@@ -356,6 +357,9 @@ bool App::init(std::string& err) {
     });
     server.setPeaksProvider([this](uint64_t assetId, int lod) {
         return assetStore.readPeaks(assetId, lod); // AssetStore is thread-safe
+    });
+    server.setIconProvider([this](const std::string& key) {
+        return pluginIcons.read(key); // IconExtractor is thread-safe
     });
     server.setUploadHandler([this](const std::vector<std::string>& files,
                                    const std::map<std::string, std::string>& query) {
@@ -713,6 +717,36 @@ bool App::renderRangeStems(int64_t startSample, int64_t endSample, int blockSize
                                 err, stemSink, stemTrackIds);
 }
 
+json App::registryJson() const {
+    json arr = registry.listJson();
+    const json health = pluginHealth.toJson(/*logs=*/false);
+    for (json& row : arr) {
+        const std::string path = getOr(row, "path", "");
+        // Icon key only when the PNG actually exists — the UI's <img> then never 404s
+        // and rows without one go straight to the vendor avatar / emoji override.
+        if (!path.empty()) {
+            const std::string iconKey = IconExtractor::keyFor(path);
+            if (pluginIcons.has(iconKey))
+                row["iconKey"] = iconKey;
+        }
+        if (health.empty())
+            continue;
+        const std::string key = PluginHealth::makeKey(
+            getOr(row, "format", ""), getOr(row, "uid", ""), getOr<int>(row, "bitness", 64),
+            path);
+        const auto hit = health.find(key);
+        if (hit == health.end())
+            continue;
+        const auto failed = [&](const char* section) {
+            return hit->contains(section) &&
+                   getOr((*hit)[section], "verdict", "") == "load_failed";
+        };
+        if (failed("load") || failed("probe"))
+            row["problem"] = "load_failed";
+    }
+    return arr;
+}
+
 void App::requestGraphRebuild() {
     pendingRebuild_.store(true, std::memory_order_release);
     jobCv_.notify_all();
@@ -732,6 +766,23 @@ void App::wireHostCallbacks() {
                                   const std::string& message, int restartCount) {
         const std::string name = pluginRuntimeStateName(state);
         post([this, instanceId, name, message, restartCount] {
+            // Durable health record (SPEC §5.6): a load-time crash used to be
+            // broadcast-and-forgotten, so the same plugin crashed the host on every
+            // project open with nothing anywhere saying so. Terminal states only —
+            // loading/restarting are transitions. Never auto-blacklists (user decides).
+            if (name == "ok" || name == "crashed" || name == "timeout" || name == "failed") {
+                if (const PluginInstance* pi = model.pluginByInstanceId(instanceId)) {
+                    PluginHealth::Record id;
+                    id.key = PluginHealth::makeKey(pi->format, pi->uid, pi->bitness, pi->path);
+                    id.path = pi->path;
+                    id.uid = pi->uid;
+                    id.format = pi->format;
+                    id.name = pi->name;
+                    id.bitness = pi->bitness;
+                    pluginHealth.recordLoad(id, name == "ok" ? "ok" : "load_failed",
+                                            message);
+                }
+            }
             json ev{{"instanceId", instanceId},
                     {"state", name},
                     {"restartCount", restartCount}};
@@ -1396,6 +1447,9 @@ int App::run() {
         // every 5 ms tick, not at the pump, so the deadline means what it says.
         commitNativeParamGestures(/*force=*/false);
 
+        // Debounced plugin-health persistence (cheap early-out when clean).
+        pluginHealth.flush();
+
         // Cycle wrap / arranger jump: the RT thread moved the playhead BACKWARDS, and the
         // recorder times everything off that playhead. Split the take at the seam before
         // the next pump — otherwise the note-off of a key held across the loop end is
@@ -1468,6 +1522,7 @@ int App::run() {
 
 void App::shutdown() {
     Log::info("App: shutting down");
+    pluginHealth.flush(/*force=*/true); // any dirty records land before teardown
     server.stop();
     if (driver) {
         driver->stop();
@@ -1499,6 +1554,7 @@ void App::applySettings() {
     resolveHostPaths();
     host->setHostPaths(host64Path_, host32Path_);
     scanner.setHostPaths(host64Path_, host32Path_);
+    prober.setHostPaths(host64Path_, host32Path_);
 }
 
 double App::cpuPercent() {
