@@ -2,8 +2,8 @@
  * Take-lane UI state (SPEC §8.7) — which tracks show their take-folder lanes inline in
  * the arrangement. Local-only zustand store, deliberately NOT in store.ts (the
  * automationUi precedent): expansion is per-window view state, never persisted and
- * never engine-authoritative — Ctrl+Z after a comp swipe restores the previous comp
- * via the project mirror while the expansion survives, which is the desired behavior.
+ * never engine-authoritative — Ctrl+Z after an edit restores the previous state via
+ * the project mirror while the expansion survives, which is the desired behavior.
  */
 
 import { useEffect, useRef } from "react";

@@ -172,6 +172,33 @@ void movePluginLanes(Track& from, Track& to, uint64_t instanceId) {
 }
 
 // Removes the clip with `id` from `t`, moving it into `out`. False if absent.
+// The clip vector that HOLDS `id` — the track's flat list, or a take lane's list. New
+// material derived from a clip (split's right half, a duplicate) must land in the SAME
+// container: version clips are ordinary clips (2026-08-11), and a split half escaping its
+// lane onto the track would half-dissolve the version it came from.
+std::vector<Clip>& containerOf(Track& t, uint64_t id) {
+    for (TakeFolder& f : t.takeFolders)
+        for (TakeLane& ln : f.lanes)
+            for (const Clip& c : ln.clips)
+                if (clipId(c) == id)
+                    return ln.clips;
+    return t.clips;
+}
+
+// After a lane clip is moved/resized, grow (never shrink) its folder's span to keep it
+// inside the playback window — buildPlan clamps lane clips to [startBeat,endBeat), so a
+// version dragged past the folder edge would otherwise go silently part-mute.
+void growFolderSpanFor(Track& t, uint64_t id, const TempoMap& T) {
+    for (TakeFolder& f : t.takeFolders)
+        for (TakeLane& ln : f.lanes)
+            for (const Clip& c : ln.clips)
+                if (clipId(c) == id) {
+                    f.startBeat = std::min(f.startBeat, clipStartBeat(c));
+                    f.endBeat = std::max(f.endBeat, clipEndBeat(c, T));
+                    return;
+                }
+}
+
 bool takeClip(Track& t, uint64_t id, Clip& out) {
     for (size_t i = 0; i < t.clips.size(); ++i) {
         if (clipId(t.clips[i]) == id) {
@@ -2765,6 +2792,7 @@ json CommandProcessor::clipMove(const json& p, CmdResult& r) {
             dst->clips.push_back(std::move(moved));
         } else {
             setClipStartBeat(*ref.clip, ns);
+            growFolderSpanFor(*dst, id, tm());
         }
         touched.insert(dst);
         r.eventClips.emplace_back(dst->id, id);
@@ -2900,6 +2928,7 @@ json CommandProcessor::clipResize(const json& p, CmdResult& r) {
     }
     sortClipsByStart(*ref.track);
 
+    growFolderSpanFor(*ref.track, id, T); // a version clip resized past its folder edge stays audible
     r.label = "Resize Clip";
     r.structural = true;
     r.scope = "clip";
@@ -4059,7 +4088,7 @@ json CommandProcessor::clipSplit(const json& p, CmdResult& r) {
             newIds.push_back(right.id);
             r.eventClips.emplace_back(t.id, id);
             r.eventClips.emplace_back(t.id, right.id);
-            t.clips.emplace_back(std::move(right)); // invalidates `a` — done with it
+            containerOf(t, id).emplace_back(std::move(right)); // invalidates `a` — done with it
         } else {
             MidiClip* mc = asMidi(ref.clip);
             const double rel = atBeat - start;
@@ -4097,7 +4126,7 @@ json CommandProcessor::clipSplit(const json& p, CmdResult& r) {
             newIds.push_back(right.id);
             r.eventClips.emplace_back(t.id, id);
             r.eventClips.emplace_back(t.id, right.id);
-            t.clips.emplace_back(std::move(right)); // invalidates `mc`
+            containerOf(t, id).emplace_back(std::move(right)); // invalidates `mc`
         }
         touched.insert(&t);
     }
@@ -4261,7 +4290,7 @@ json CommandProcessor::clipDuplicate(const json& p, CmdResult& r) {
         clipsOut.push_back(toJson(copy));
         r.eventClips.emplace_back(ref.track->id, newId);
         Track* t = ref.track;
-        t->clips.emplace_back(std::move(copy)); // invalidates ref
+        containerOf(*t, id).emplace_back(std::move(copy)); // invalidates ref
         touched.insert(t);
     }
     for (Track* t : touched)

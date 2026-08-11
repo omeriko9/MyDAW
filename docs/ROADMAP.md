@@ -209,7 +209,7 @@ Playback resolves at graph build — `AudioGraph::buildPlan` emits only the sele
 **windowed to each comp segment** (sample-accurate audio clipping; MIDI notes by onset), so stacked
 takes never sum. Loop-record slices a >1-lap continuous recording into one lane per lap in
 `recordingCommit` (same asset, increasing source offsets; comp defaults to the last lap). Commands:
-`cmd/take.create` (fold clips → folder), `cmd/take.setComp` (`activeLane` | `comp[]`),
+`cmd/take.create` (fold clips → folder), `cmd/take.pick` (click a version's clip),
 `cmd/take.flatten` (bounce to plain clips). UI: Inspector "Takes / Comp" — comp bar + per-take
 strips; click a strip to use that take, drag to swipe a range in. Test: `scripts/comping-test.mjs`
 (11/11 — a loud take and a quiet take, comp switches sample-accurately at the mid-span boundary

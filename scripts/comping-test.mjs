@@ -128,6 +128,19 @@ try {
   report("take.create left only the newest version audible",
     quietRms < loudRms * 0.5, `quiet=${quietRms?.toFixed(1)}`);
 
+  // Version clips are ordinary clips: a split must keep BOTH halves inside the lane —
+  // the right half escaping onto the track would half-dissolve the version.
+  await req("cmd/clip.split", { clipIds: [quietClip], atBeat: 1 });
+  const tkS = (await req("session/hello", { clientName: "comp" })).project.tracks.find((t) => t.id === track.id);
+  report("splitting a version clip keeps both halves in its lane",
+    (tkS.clips?.length ?? 0) === 0 && tkS.takeFolders[0].lanes[1].clips.length === 2,
+    `flat=${tkS.clips?.length} laneClips=${tkS.takeFolders[0].lanes[1].clips.length}`);
+  await req("edit/undo", {});
+  const tkU = (await req("session/hello", { clientName: "comp" })).project.tracks.find((t) => t.id === track.id);
+  report("undo restores the un-split version",
+    tkU.takeFolders[0].lanes[1].clips.length === 1,
+    `laneClips=${tkU.takeFolders[0].lanes[1].clips.length}`);
+
   // Persistence: mute state is what carries the choice now, so that is what must survive.
   const projDir = path.join(TMP, "Comp.mydaw");
   await req("project/saveAs", { path: projDir });

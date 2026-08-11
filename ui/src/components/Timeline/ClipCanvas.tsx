@@ -699,8 +699,8 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         }
         continue;
       }
-      // Take-lane rows (SPEC §8.7): this lane's takes per folder, with the comp's
-      // selected segments washed in the lane color and a live swipe preview band.
+      // Take-lane rows (SPEC §8.7): one version per row; muted clips draw dimmed
+      // (drawClip), so the audible version reads at a glance.
       if (row.kind === "takelane") {
         const track = row.track;
         const laneColor = LANE_COLORS[row.laneIndex % LANE_COLORS.length];
