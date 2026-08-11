@@ -61,6 +61,7 @@ import {
   transientParam,
   undo,
   redo,
+  createTakeFolder,
   flattenTake,
   setTakeActiveLane,
   setTakeLaneMuted,
@@ -2778,6 +2779,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         onClick: () => void pasteAt(pasteBeat).catch((err) => console.warn("[timeline] paste failed:", err)),
       },
       { label: "Duplicate", shortcut: "Ctrl+D", onClick: () => fire(duplicateClips(ids)) },
+      // Stacking existing clips as versions was reachable ONLY from the Inspector's
+      // "Takes / Comp" section, which hides itself until 2+ clips are already selected —
+      // so the feature was invisible to anyone who did not already know it existed
+      // (asked 2026-08-11: "how do I see the 2nd feature?"). The clips' own menu is where
+      // people look. Same-track only: a folder belongs to one track by construction.
+      ...(ids.length >= 2 &&
+      ids.every((id) => (hit.row.track.clips ?? []).some((c) => c.id === id))
+        ? ([
+            {
+              label: `Stack as Versions (${ids.length})`,
+              icon: "layers",
+              title:
+                "Fold the selected clips into one take folder — they become versions shown as sub-rows, with the last one playing",
+              onClick: () => fire(createTakeFolder(hit.row.track.id, ids)),
+            },
+          ] as MenuEntry[])
+        : []),
       "separator",
       {
         label: "Split at Playhead",

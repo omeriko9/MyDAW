@@ -2163,6 +2163,77 @@ export const checks = [
   },
 
   {
+    id: "stack-as-versions-from-clip-menu",
+    title: "two selected clips can be stacked into versions from the clips' own right-click menu",
+    area: "timeline-takes",
+    guards: "2026-08-11 (Omer, 'how do I see the 2nd feature called versions?'): folding existing clips into take lanes was reachable ONLY from the Inspector's Takes/Comp section, which hides itself until 2+ clips are already selected — so the feature was invisible unless you already knew it existed. The clips' own menu is where people look.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const hello = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+
+      // Two clips on ONE track, side by side so each is separately clickable.
+      let proj = await hello();
+      const mt = proj.tracks.find((t) => t.name === "MIDI 1");
+      const src = mt.clips[0];
+      const dup = (await s.probe("cmd/clip.duplicate", { clipIds: [src.id], atSource: true })).payload;
+      const dupId = dup.clipIds?.[0] ?? dup.clips?.[0]?.id;
+      await s.probe("cmd/clip.move", { clipIds: [dupId], deltaBeats: 4, deltaTracks: 0 });
+      await s.reload();
+      proj = await hello();
+      let t = proj.tracks.find((x) => x.id === mt.id);
+      tt.eq((t.takeFolders ?? []).length, 0, "no folder yet — this is the state the user is in");
+
+      const clipY = await s.eval(`(() => {
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const r = rows.find((x) => x.textContent.includes("MIDI 1")).getBoundingClientRect();
+        return JSON.stringify({ left: cb.left, y: r.top + r.height / 2 });
+      })()`);
+      const geo = JSON.parse(clipY);
+      const xOf = (beat) => geo.left + (beat + 0.5) * ZOOM_X;
+
+      await s.click(xOf(src.startBeat), geo.y);
+      // shift-click the second clip (s.click takes no modifiers)
+      for (const [type, button, buttons] of [["mouseMoved", "none", 0], ["mousePressed", "left", 1], ["mouseReleased", "left", 0]])
+        await s.send("Input.dispatchMouseEvent",
+          { type, x: xOf(src.startBeat + 4), y: geo.y, button, buttons, clickCount: 1, modifiers: 8 });
+
+      await s.click(xOf(src.startBeat + 4), geo.y, { button: "right" });
+      await s.untilEval("the clip menu opens", () =>
+        document.querySelectorAll(".ctx-item").length > 0);
+      const labels = await s.eval(`[...document.querySelectorAll(".ctx-item")].map(i => i.textContent.trim())`);
+      const stack = labels.find((l) => l.startsWith("Stack as Versions"));
+      tt.ok(!!stack, `the clip menu offers Stack as Versions (${labels.slice(0, 8).join(" | ")})`);
+
+      await s.eval(`(() => {
+        [...document.querySelectorAll(".ctx-item")]
+          .find(i => i.textContent.trim().startsWith("Stack as Versions")).click();
+        return true;
+      })()`);
+      await s.until("the clips fold into a take folder", async () => {
+        const tr = (await hello()).tracks.find((x) => x.id === mt.id);
+        return (tr.takeFolders ?? []).length === 1 && tr.takeFolders[0].lanes.length === 2;
+      });
+      await s.untilEval("and its versions are visible without pressing anything", () =>
+        document.querySelectorAll(".tlh-takelane").length === 2);
+
+      // RESTORE: flatten back to plain clips and drop the duplicate, so later
+      // coordinate-driven checks see the fixture geometry they expect.
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      await s.probe("cmd/take.flatten", { trackId: mt.id, folderId: t.takeFolders[0].id });
+      t = (await hello()).tracks.find((x) => x.id === mt.id);
+      const extra = (t.clips ?? []).filter((c) => c.startBeat >= src.startBeat + 3.9).map((c) => c.id);
+      if (extra.length) await s.probe("cmd/clip.remove", { clipIds: extra });
+    },
+  },
+
+  {
     id: "take-lanes-inline-comp",
     title: "take folders draw inline: lanes show by default, click picks a take, swipe comps a range",
     area: "timeline-takes",
