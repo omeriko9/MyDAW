@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "742528f206cf4f206f0629f021b593a9c0a9e8ce9c4601007fe55fd9603cb45d";
+const char kAgentCatalogSha256[] = "5748850b918e9579d0ca475e3423e754d982ca1881c9677686ec2f3753338430";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -4115,6 +4115,31 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "type": "object"
     },
+    "TakeSetLaneMutedRequest": {
+      "additionalProperties": false,
+      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
+      "properties": {
+        "folderId": {
+          "type": "number"
+        },
+        "lane": {
+          "type": "number"
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "folderId",
+        "lane",
+        "muted"
+      ],
+      "type": "object"
+    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -7385,6 +7410,44 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/take.setLaneMuted",
+      "category": "takes",
+      "description": "Mute or unmute every clip in one take lane (the lane stays parked and silent even where the comp selects it). Undoable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TakeSetLaneMutedRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "folderId": 9,
+            "lane": 1,
+            "muted": true
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/tempo.set",
       "category": "arrangement",
       "description": "Set the project's base tempo.",
@@ -10320,6 +10383,42 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "name": "transport/setAutomationWrite",
       "category": "transport",
       "description": "Enable or disable live automation writing.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/setKeepTakes",
+      "category": "transport",
+      "description": "Keep Takes record mode: recording over existing material folds into take lanes (newest take plays). Sticky across sessions.",
       "target": "engine",
       "mode": "write",
       "traits": [

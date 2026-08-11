@@ -1104,6 +1104,7 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/vca.set")          return vcaSet(p, transient, r);
     if (type == "cmd/take.create")      return takeCreate(p, r);
     if (type == "cmd/take.setComp")     return takeSetComp(p, r);
+    if (type == "cmd/take.setLaneMuted") return takeSetLaneMuted(p, r);
     if (type == "cmd/take.flatten")     return takeFlatten(p, r);
     if (type == "cmd/version.add")      return versionAdd(p, r);
     if (type == "cmd/version.switch")   return versionSwitch(p, r);
@@ -6057,6 +6058,45 @@ json CommandProcessor::takeSetComp(const json& p, CmdResult& r) {
     return json::object();
 }
 
+// cmd/take.setLaneMuted {trackId, folderId, lane, muted} — mute/unmute every clip in one
+// take lane. Lane clips are unreachable by cmd/clip.set on purpose (Model::clipById walks
+// only Track::clips; letting move/split/delete address lane clips would corrupt folder
+// invariants), so lane mute gets its own narrow command. Playback already honors muted
+// inside lanes (AudioGraph buildPlan) and the canvas already dims muted clips.
+json CommandProcessor::takeSetLaneMuted(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t trackId = getOr<uint64_t>(p, "trackId", 0);
+    const uint64_t folderId = getOr<uint64_t>(p, "folderId", 0);
+    Track* t = m.trackById(trackId);
+    if (!t)
+        return r.fail("not_found", "unknown trackId");
+    TakeFolder* f = nullptr;
+    for (TakeFolder& tf : t->takeFolders)
+        if (tf.id == folderId) { f = &tf; break; }
+    if (!f)
+        return r.fail("not_found", "unknown folderId");
+    const int lane = getOr<int>(p, "lane", -1);
+    if (lane < 0 || lane >= static_cast<int>(f->lanes.size()))
+        return r.fail("bad_request", "lane out of range");
+    const bool muted = getOr<bool>(p, "muted", true);
+    bool changed = false;
+    for (Clip& c : f->lanes[static_cast<size_t>(lane)].clips) {
+        if (clipMuted(c) != muted) {
+            setClipMuted(c, muted);
+            changed = true;
+        }
+    }
+    if (!changed) {
+        r.mutated = false;
+        return json::object();
+    }
+    r.label = muted ? "Mute Take" : "Unmute Take";
+    r.structural = true; // audibility changed — the plan must rebuild
+    r.scope = "track";
+    r.eventTrackIds.push_back(trackId);
+    return json::object();
+}
+
 // cmd/take.flatten {trackId, folderId} — bounce the current comp to plain clips on the track and
 // remove the folder. Per comp segment, the selected lane's clips are copied windowed to the
 // segment (sample-accurate for audio; MIDI notes kept by onset). Returns {clipIds}.
@@ -6536,6 +6576,155 @@ json CommandProcessor::recreatePlugins(const json& p, std::string& ec, std::stri
 // internal/recording.commit — assets + clips for a finished take, ONE undo entry
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Paint [b0,b1) of a folder's comp to `lane`, preserving what plays before b0 and
+// restoring after b1. VERBATIM port of ui/src/lib/comping.ts paintComp (same 1e-6
+// epsilons, dedupe of consecutive same-lane segments, comp[0] anchored to the folder
+// start) — the UI's swipe preview predicts engine playback with this exact function,
+// so any drift here is an audible lie in the preview.
+std::vector<CompSegment> paintCompRange(const TakeFolder& f, double b0, double b1, int lane) {
+    const double fs = f.startBeat;
+    const double fe = f.endBeat;
+    double lo = std::clamp(b0, fs, fe);
+    double hi = std::clamp(b1, fs, fe);
+    if (hi < lo)
+        std::swap(lo, hi);
+    std::vector<CompSegment> src = f.comp;
+    if (src.empty())
+        src.push_back(CompSegment{fs, f.lanes.empty() ? -1 : 0});
+    // Span-ignoring lane lookup (NOT Model.h compLaneAt, which returns -1 outside the
+    // span — wrong while we are mid-extension).
+    const auto laneAt = [&src](double b) {
+        int l = src.front().lane;
+        for (const CompSegment& s : src) {
+            if (b >= s.startBeat)
+                l = s.lane;
+            else
+                break;
+        }
+        return l;
+    };
+    const int laneAfter = laneAt(hi);
+    std::vector<CompSegment> pts;
+    for (const CompSegment& s : src)
+        if (s.startBeat < lo - 1e-6)
+            pts.push_back(s);
+    if (pts.empty())
+        pts.push_back(CompSegment{fs, laneAt(fs)});
+    pts.push_back(CompSegment{lo, lane});
+    if (fe - hi > 1e-6)
+        pts.push_back(CompSegment{hi, laneAfter});
+    for (const CompSegment& s : src)
+        if (s.startBeat > hi + 1e-6)
+            pts.push_back(s);
+    std::stable_sort(pts.begin(), pts.end(), [](const CompSegment& a, const CompSegment& b) {
+        return a.startBeat < b.startBeat;
+    });
+    std::vector<CompSegment> out;
+    for (const CompSegment& s : pts)
+        if (out.empty() || out.back().lane != s.lane)
+            out.push_back(s);
+    if (!out.empty())
+        out.front().startBeat = fs;
+    return out;
+}
+
+// "Keep Takes" fold (SPEC §8.7): stack a recorded unit ([uS,uE), one Clip per lap, all
+// starting at uS) into lanes against the track's EXISTING material. Returns true when it
+// folded; false = no overlap, the caller runs the legacy append verbatim.
+//   1. Overlapping take folder (largest overlap wins, ties → first; touching ≠ overlap):
+//      laps append as new lanes, the span extends to the union, and the comp paints
+//      [uS,uE) to the newest lane — the just-performed take plays, everything the old
+//      comp chose keeps playing outside the recorded range. Loose clips that also
+//      overlap are left alone (lanes cannot represent folder+clip summing).
+//   2. Overlapping loose clip(s): they ALL move wholesale into lane 0 ("Previous" — what
+//      played before, preserved as one lane), laps become lanes 1..k, comp = lane 0
+//      outside [uS,uE), newest lane inside. Partial overlaps keep their outside parts
+//      audible via lane 0.
+bool foldRecordedUnit(Model& m, Track& t, const TempoMap& T, double uS, double uE,
+                      std::vector<Clip>&& laps, const std::string& folderName) {
+    if (laps.empty())
+        return false;
+    constexpr double eps = 1e-9;
+
+    // 1. Best-overlap folder.
+    TakeFolder* best = nullptr;
+    double bestLen = 0.0;
+    for (TakeFolder& f : t.takeFolders) {
+        const double ov = std::min(f.endBeat, uE) - std::max(f.startBeat, uS);
+        if (ov > eps && ov > bestLen) {
+            best = &f;
+            bestLen = ov;
+        }
+    }
+    if (best) {
+        TakeFolder& f = *best;
+        // Seed an explicit comp BEFORE extending: comp[0].startBeat is reinterpreted as
+        // the folder start (Model.h), so a left-extension of an empty comp would silently
+        // move lane 0's coverage. An explicit segment pins today's audible truth.
+        if (f.comp.empty())
+            f.comp.push_back(CompSegment{f.startBeat, f.lanes.empty() ? -1 : 0});
+        int lastLane = static_cast<int>(f.lanes.size()) - 1;
+        for (Clip& lap : laps) {
+            TakeLane ln;
+            ln.id = m.nextId();
+            ln.name = "Take " + std::to_string(f.lanes.size() + 1);
+            ln.clips.push_back(std::move(lap));
+            f.lanes.push_back(std::move(ln));
+            lastLane = static_cast<int>(f.lanes.size()) - 1;
+        }
+        f.startBeat = std::min(f.startBeat, uS);
+        f.endBeat = std::max(f.endBeat, uE);
+        f.comp = paintCompRange(f, uS, uE, lastLane);
+        return true;
+    }
+
+    // 2. Overlapping loose clips → new folder with them parked on lane 0.
+    std::vector<Clip> previous;
+    for (size_t i = t.clips.size(); i-- > 0;) {
+        const double cs = clipStartBeat(t.clips[i]);
+        const double ce = clipEndBeat(t.clips[i], T);
+        if (std::min(ce, uE) - std::max(cs, uS) > eps) {
+            previous.push_back(std::move(t.clips[i]));
+            t.clips.erase(t.clips.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+    }
+    if (previous.empty())
+        return false;
+    std::reverse(previous.begin(), previous.end()); // restore timeline order
+
+    TakeFolder folder;
+    folder.id = m.nextId();
+    folder.name = folderName;
+    folder.startBeat = uS;
+    folder.endBeat = uE;
+    TakeLane prevLane;
+    prevLane.id = m.nextId();
+    prevLane.name = "Previous";
+    for (Clip& c : previous) {
+        folder.startBeat = std::min(folder.startBeat, clipStartBeat(c));
+        folder.endBeat = std::max(folder.endBeat, clipEndBeat(c, T));
+        prevLane.clips.push_back(std::move(c));
+    }
+    folder.lanes.push_back(std::move(prevLane));
+    int lastLane = 0;
+    for (Clip& lap : laps) {
+        TakeLane ln;
+        ln.id = m.nextId();
+        ln.name = "Take " + std::to_string(folder.lanes.size() + 1);
+        ln.clips.push_back(std::move(lap));
+        folder.lanes.push_back(std::move(ln));
+        lastLane = static_cast<int>(folder.lanes.size()) - 1;
+    }
+    folder.comp.push_back(CompSegment{folder.startBeat, 0}); // "Previous" everywhere…
+    folder.comp = paintCompRange(folder, uS, uE, lastLane);  // …except the new take's range
+    t.takeFolders.push_back(std::move(folder));
+    return true;
+}
+
+} // namespace
+
 json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     // One contiguous run of captured material: where it belongs on the timeline, and where
     // it lives inside the take file. Mirrors AudioRecorder::Segment on the wire; declared
@@ -6548,6 +6737,9 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     Model& m = model();
     const TempoMap& T = tm();
     const std::string pdir = projectIO_ ? projectIO_->projectDir() : std::string();
+    // "Keep Takes" record mode, snapshotted by App at stop time (not read live from the
+    // transport: the user may flip the toggle between stop and this deferred commit).
+    const bool keepTakes = getOr<bool>(p, "keepTakes", false);
 
     json assetsOut = json::array();
     json clipsOut = json::array();
@@ -6623,6 +6815,35 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             for (int64_t key : order) {
                 const std::vector<RecSegment>& group = byStart[key];
                 const double groupBeat = std::max(0.0, T.samplesToBeats(key));
+                // Build the unit's laps first — both the Keep Takes fold and the legacy
+                // append consume the same clips.
+                int64_t longest = 0;
+                std::vector<Clip> laps;
+                laps.reserve(group.size());
+                int k = 0;
+                for (const RecSegment& sg : group) {
+                    longest = std::max(longest, sg.frames);
+                    AudioClip c;
+                    c.id = m.nextId();
+                    c.name = group.size() >= 2 ? "Take " + std::to_string(++k)
+                                               : fileStem(wavPath);
+                    c.startBeat = groupBeat;
+                    c.assetId = a.id;
+                    c.srcOffsetSamples = sg.fileOffset;
+                    c.lengthSamples = sg.frames;
+                    laps.emplace_back(std::move(c));
+                }
+                const double unitEnd = groupBeat + T.samplesToBeats(longest);
+
+                // "Keep Takes" (SPEC §8.7): fold into lanes against existing material —
+                // the fresh take plays, older material parks in its lane.
+                if (keepTakes &&
+                    foldRecordedUnit(m, *t, T, groupBeat, unitEnd, std::move(laps),
+                                     fileStem(wavPath))) {
+                    any = true;
+                    continue;
+                }
+
                 if (group.size() >= 2) {
                     // Laps of a repeated region: one lane per pass, comp defaults to the
                     // most recent, matching the previous loop-record behaviour.
@@ -6630,38 +6851,20 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
                     folder.id = m.nextId();
                     folder.name = fileStem(wavPath);
                     folder.startBeat = groupBeat;
-                    int64_t longest = 0;
-                    for (const RecSegment& sg : group)
-                        longest = std::max(longest, sg.frames);
-                    folder.endBeat = groupBeat + T.samplesToBeats(longest);
-                    int k = 0;
-                    for (const RecSegment& sg : group) {
-                        AudioClip c;
-                        c.id = m.nextId();
-                        c.name = "Take " + std::to_string(++k);
-                        c.startBeat = groupBeat;
-                        c.assetId = a.id;
-                        c.srcOffsetSamples = sg.fileOffset;
-                        c.lengthSamples = sg.frames;
+                    folder.endBeat = unitEnd;
+                    for (Clip& lap : laps) {
                         TakeLane ln;
                         ln.id = m.nextId();
-                        ln.name = c.name;
-                        ln.clips.push_back(std::move(c));
+                        ln.name = clipName(lap);
+                        ln.clips.push_back(std::move(lap));
                         folder.lanes.push_back(std::move(ln));
                     }
                     folder.comp.push_back(
                         CompSegment{folder.startBeat, static_cast<int>(folder.lanes.size()) - 1});
                     t->takeFolders.push_back(std::move(folder));
                 } else {
-                    AudioClip c;
-                    c.id = m.nextId();
-                    c.name = fileStem(wavPath);
-                    c.startBeat = groupBeat;
-                    c.assetId = a.id;
-                    c.srcOffsetSamples = group[0].fileOffset;
-                    c.lengthSamples = group[0].frames;
-                    clipsOut.push_back(toJson(c));
-                    t->clips.emplace_back(std::move(c));
+                    clipsOut.push_back(toJson(laps[0]));
+                    t->clips.emplace_back(std::move(laps[0]));
                     sortClipsByStart(*t);
                 }
             }
@@ -6716,6 +6919,12 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
                     c.cc.push_back(cev);
                 }
             }
+            // Empty take: armed but nothing played (or an automation-only pass — write
+            // captures go to automation lanes, never in here). No clip, no lane, ever —
+            // Cubase: an empty lap does nothing. Unconditional; App pre-filters too, this
+            // is the guarantee for any direct internal/recording.commit caller.
+            if (c.notes.empty() && c.cc.empty())
+                continue;
             c.lengthBeats = std::max({kMinClipBeats, endBeat - startBeat, maxNoteEnd});
             sortNotes(c);
             sortCc(c);
@@ -6769,6 +6978,25 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             if (!t)
                 continue;
             std::vector<MidiClip>& group = groups[key];
+
+            // "Keep Takes" (SPEC §8.7): fold this unit into lanes against existing
+            // material — same rule as the audio path above.
+            if (keepTakes) {
+                double longest = 0.0;
+                std::vector<Clip> laps;
+                laps.reserve(group.size());
+                int kk = 0;
+                for (MidiClip& c : group) {
+                    longest = std::max(longest, c.lengthBeats);
+                    if (group.size() >= 2)
+                        c.name = "Take " + std::to_string(++kk);
+                    laps.emplace_back(c); // copy: the legacy path below reuses `group`
+                }
+                if (foldRecordedUnit(m, *t, T, key.second, key.second + longest,
+                                     std::move(laps), "MIDI Take"))
+                    continue;
+            }
+
             if (group.size() >= 2) {
                 TakeFolder folder;
                 folder.id = m.nextId();

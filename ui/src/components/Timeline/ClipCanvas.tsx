@@ -63,6 +63,7 @@ import {
   redo,
   flattenTake,
   setTakeActiveLane,
+  setTakeLaneMuted,
   setTakeComp,
 } from "../../store/actions";
 import { compSegments, LANE_COLORS, paintComp } from "../../lib/comping";
@@ -2551,11 +2552,23 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         (f) => rawBeat >= f.startBeat && rawBeat < f.endBeat && row.laneIndex < f.lanes.length,
       );
       if (!folder) return;
+      const laneMuted =
+        folder.lanes[row.laneIndex].clips.length > 0 &&
+        folder.lanes[row.laneIndex].clips.every((c) => c.muted === true);
       openContextMenu(e.clientX, e.clientY, [
         {
           label: "Use This Take",
           title: "Select this take for the whole folder",
           onClick: () => fireLane(setTakeActiveLane(t.id, folder.id, row.laneIndex)),
+        },
+        {
+          label: laneMuted ? "Unmute Take" : "Mute Take",
+          checked: laneMuted,
+          title: laneMuted
+            ? "Unmute every clip in this take lane"
+            : "Mute every clip in this take lane — it stays parked and silent even where the comp selects it",
+          onClick: () =>
+            fireLane(setTakeLaneMuted(t.id, folder.id, row.laneIndex, !laneMuted)),
         },
         {
           label: "Flatten Comp…",

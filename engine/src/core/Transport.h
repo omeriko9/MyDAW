@@ -149,6 +149,13 @@ public:
     // plugin) capture points into that param's automation lane at the playhead.
     void setAutomationWrite(bool on) { automationWrite_.store(on, std::memory_order_release); }
     bool automationWrite() const { return automationWrite_.load(std::memory_order_acquire); }
+
+    // "Keep Takes" record mode (SPEC §5.4/§8.7, Cubase "Keep History"): while on, a
+    // recording that overlaps existing material folds into take lanes (newest take plays;
+    // older material parks in its lane). Off = the recording just overlaps and sums.
+    // Persisted in settings (recordKeepTakes); the commit snapshots it at stop time.
+    void setKeepTakes(bool on) { keepTakes_.store(on, std::memory_order_release); }
+    bool keepTakes() const { return keepTakes_.load(std::memory_order_acquire); }
     // Remaining count-in samples (> 0 while the pre-roll click is sounding and the
     // playhead is held). The metronome (E2) reads this before/after nextSpans() to place
     // count-in clicks within the block.
@@ -201,6 +208,7 @@ private:
     // mirrored to the UI via the "metronome" object in transportJson()/session/hello.
     std::atomic<bool> metronome_{false};
     std::atomic<bool> automationWrite_{false};
+    std::atomic<bool> keepTakes_{false};
     std::atomic<int64_t> countInRemaining_{0};
     std::atomic<int64_t> countInTotal_{0};
     std::atomic<int64_t> lastPlayStart_{0}; // position where playback/recording last began

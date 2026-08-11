@@ -37,6 +37,7 @@ public:
     // ----- typed accessors ----------------------------------------------------
     int port() const;                            // HTTP/WS port, default 8417
     int autosaveMinutes() const;                 // default 2
+    bool recordKeepTakes() const;                // "Keep Takes" record mode, default false
     AudioConfig audioConfig() const;             // from "audio" object
     void storeAudioConfig(const AudioConfig& c); // writes "audio" + save()
     std::vector<std::string> pluginFoldersVst2() const;

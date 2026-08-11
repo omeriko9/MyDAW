@@ -325,6 +325,8 @@ bool App::init(std::string& err) {
     //    %APPDATA% recovery slot, so they never autosave — they'd clobber the primary's
     //    crash-recovery data. (Explicit File > Save still works; that writes a chosen path.)
     autosave.setIntervalMinutes(opts.exitWhenIdle ? 0 : settings.autosaveMinutes());
+    // Record mode is a sticky user preference (like Cubase's), not project state.
+    transport.setKeepTakes(settings.recordKeepTakes());
 
     // 10. Graph format + initial plan, then start the stream.
     prepareGraphFormat(actual);
@@ -991,7 +993,11 @@ void App::stopRecordingAndCommit() {
     if (!audioArr.empty() || !midiArr.empty()) {
         std::string ec, em;
         cmd->execute("internal/recording.commit",
-                     json{{"audio", std::move(audioArr)}, {"midi", std::move(midiArr)}},
+                     json{{"audio", std::move(audioArr)},
+                          {"midi", std::move(midiArr)},
+                          // Snapshot at stop time: the fold must reflect the mode the
+                          // recording was MADE under, not a toggle flipped mid-commit.
+                          {"keepTakes", transport.keepTakes()}},
                      false, ec, em);
         if (!ec.empty())
             Log::error("recording.commit failed: %s", em.c_str());
@@ -1185,7 +1191,8 @@ json App::transportJson() const {
                                    {"countInBars", transport.countInBars()},
                                    {"firstBeatVolume", metronome->firstBeatVolume()},
                                    {"otherBeatVolume", metronome->otherBeatVolume()}}},
-                {"automationWrite", transport.automationWrite()}};
+                {"automationWrite", transport.automationWrite()},
+                {"keepTakes", transport.keepTakes()}};
 }
 
 void App::broadcastTransportEvent() {

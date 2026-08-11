@@ -82,8 +82,8 @@ traces, interactive control), see [DEBUGGING_UI.md](DEBUGGING_UI.md).
 ## Tests
 
 ```powershell
-node scripts/gate.mjs             # 26 suites, ~90 s — run this before every commit
-node scripts/gate.mjs --full      # +recovery, real-plugin and CPR corpus suites, ~3.5 min
+node scripts/gate.mjs             # 33 suites, ~2.5 min — run this before every commit
+node scripts/gate.mjs --full      # +recovery, real-plugin and CPR corpus suites, ~4 min
 node scripts/gate.mjs --list      # the table: which suite is in which tier, and why
 node scripts/gate.mjs --only ui-smoke,smoke
 ```

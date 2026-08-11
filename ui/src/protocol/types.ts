@@ -729,6 +729,8 @@ export interface HelloReply {
   metronome?: MetronomeState;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
+  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
+  keepTakes?: boolean;
   /** MIDI control-surface maps + learn-arm — absent on older engines */
   midiMaps?: MidiMapsState;
   /** engine-side unsaved-changes flag — absent on older engines */
@@ -1417,6 +1419,8 @@ export interface SetMetronomeRequest {
 export interface TransportReply {
   metronome?: MetronomeState;
   automationWrite?: boolean;
+  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
+  keepTakes?: boolean;
 }
 
 export interface SetAudioConfigRequest {
@@ -1950,6 +1954,8 @@ export interface TransportEvent {
   metronome?: MetronomeState;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
+  /** "Keep Takes" record mode — recording over existing material folds into take lanes */
+  keepTakes?: boolean;
 }
 
 /** [peakL, peakR, rmsL, rmsR], linear 0..~1.4 */
@@ -2224,6 +2230,7 @@ export interface RequestMap {
   "transport/locate": { req: TransportLocateRequest; reply: TransportReply };
   "transport/setMetronome": { req: SetMetronomeRequest; reply: TransportReply };
   "transport/setAutomationWrite": { req: { enabled: boolean }; reply: TransportReply };
+  "transport/setKeepTakes": { req: { enabled: boolean }; reply: TransportReply };
   "engine/getDevices": { req: EmptyObject; reply: GetDevicesReply };
   "engine/setAudioConfig": { req: SetAudioConfigRequest; reply: SetAudioConfigReply };
   "engine/getStatus": { req: EmptyObject; reply: EngineStatus };
@@ -2288,6 +2295,10 @@ export interface RequestMap {
   "cmd/clip.processChain": { req: ClipProcessChainRequest; reply: { assetId: number; lengthSamples: number } };
   "cmd/take.create": { req: { trackId: number; clipIds: number[]; name?: string }; reply: { folder: TakeFolder } };
   "cmd/take.setComp": { req: { trackId: number; folderId: number; activeLane?: number; comp?: CompSegment[] }; reply: EmptyObject };
+  "cmd/take.setLaneMuted": {
+    req: { trackId: number; folderId: number; lane: number; muted: boolean };
+    reply: EmptyObject;
+  };
   "cmd/take.flatten": { req: { trackId: number; folderId: number }; reply: { clipIds: number[] } };
   "cmd/version.add": { req: { trackId: number; name?: string; copy?: boolean }; reply: { versionId: number; track: Track } };
   "cmd/version.switch": { req: { trackId: number; versionId: number }; reply: { track: Track } };

@@ -28,6 +28,7 @@ import {
   record,
   redo,
   setAutomationWrite,
+  setKeepTakes,
   setLoop,
   setPunch,
   setTimeSig,
@@ -162,6 +163,26 @@ function AutomationWriteToggle() {
       icon="pencil"
       variant="danger"
       tooltip="Write automation — while ON and playing, fader/knob moves record automation points at the playhead"
+    />
+  );
+}
+
+function KeepTakesToggle() {
+  // "Keep Takes" record mode (Cubase "Keep History"): recording over existing material
+  // stacks it into take lanes instead of overlapping-and-summing. Engine-authoritative,
+  // sticky across sessions (persisted in engine settings, not the project).
+  const on = useStore((s) => s.keepTakes);
+  const setLocal = useStore((s) => s.setKeepTakes);
+  return (
+    <Toggle
+      on={on}
+      onChange={(next) => {
+        setLocal(next);
+        void setKeepTakes(next);
+      }}
+      icon="layers"
+      variant="danger"
+      tooltip="Keep takes — recording over existing material stacks it into take lanes (the newest take plays; press T on a track to show its lanes, M on a clip to mute it)"
     />
   );
 }
@@ -664,6 +685,7 @@ export default function TransportBar() {
         <MetronomeControl />
         <FollowPlayheadToggle />
         <AutomationWriteToggle />
+        <KeepTakesToggle />
       </div>
       </div>
 

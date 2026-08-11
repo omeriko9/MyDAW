@@ -382,6 +382,11 @@ export const setMetronome = (
 export const setAutomationWrite = (enabled: boolean) =>
   ws.request("transport/setAutomationWrite", { enabled });
 
+/** "Keep Takes" record mode: recording over existing material folds into take lanes
+ *  (newest take plays). Sticky across sessions (engine settings). */
+export const setKeepTakes = (enabled: boolean) =>
+  ws.request("transport/setKeepTakes", { enabled });
+
 export const getDevices = () => ws.request("engine/getDevices", {});
 
 export const setAudioConfig = (cfg: {
@@ -588,6 +593,11 @@ export const createTakeFolder = (trackId: number, clipIds: number[], name?: stri
 /** Select one lane for the whole folder span. */
 export const setTakeActiveLane = (trackId: number, folderId: number, activeLane: number) =>
   ws.request("cmd/take.setComp", { trackId, folderId, activeLane });
+
+/** Mute/unmute every clip in one take lane (lane clips are unreachable by cmd/clip.set —
+ *  versions usually mean muting all but one take, so the lane menu offers this directly). */
+export const setTakeLaneMuted = (trackId: number, folderId: number, lane: number, muted: boolean) =>
+  ws.request("cmd/take.setLaneMuted", { trackId, folderId, lane, muted });
 /** Set explicit per-segment comp boundaries (the swipe-comp result). */
 export const setTakeComp = (
   trackId: number,

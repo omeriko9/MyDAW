@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "742528f206cf4f206f0629f021b593a9c0a9e8ce9c4601007fe55fd9603cb45d";
+export const AGENT_CATALOG_SHA256 = "5748850b918e9579d0ca475e3423e754d982ca1881c9677686ec2f3753338430";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -4135,6 +4135,31 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "type": "object"
     },
+    "TakeSetLaneMutedRequest": {
+      "additionalProperties": false,
+      "description": "Mute/unmute every clip in one take lane. Lane clips are unreachable by cmd/clip.set; versions workflows mute all but one take.",
+      "properties": {
+        "folderId": {
+          "type": "number"
+        },
+        "lane": {
+          "type": "number"
+        },
+        "muted": {
+          "type": "boolean"
+        },
+        "trackId": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "trackId",
+        "folderId",
+        "lane",
+        "muted"
+      ],
+      "type": "object"
+    },
     "TempoMapSetRequest": {
       "additionalProperties": false,
       "description": "Full tempo-map replace — undoable; engine validates (>=1 entry, first beat == 0, sorted ascending, bpm clamped 20..400) and re-derives loop/transport.",
@@ -7405,6 +7430,44 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/take.setLaneMuted",
+      "category": "takes",
+      "description": "Mute or unmute every clip in one take lane (the lane stays parked and silent even where the comp selects it). Undoable.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track",
+        "take-folder"
+      ],
+      "produces": [],
+      "input": {
+        "$ref": "#/schemas/TakeSetLaneMutedRequest"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "folderId": 9,
+            "lane": 1,
+            "muted": true
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/tempo.set",
       "category": "arrangement",
       "description": "Set the project's base tempo.",
@@ -10373,6 +10436,42 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "transport/setKeepTakes",
+      "category": "transport",
+      "description": "Keep Takes record mode: recording over existing material folds into take lanes (newest take plays). Sticky across sessions.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "enabled": true
+          }
+        }
+      ]
+    },
+    {
       "name": "transport/setMetronome",
       "category": "transport",
       "description": "Enable or disable the metronome, set count-in bars, and control first/other beat click levels.",
@@ -11679,6 +11778,7 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/take.create",
   "cmd/take.flatten",
   "cmd/take.setComp",
+  "cmd/take.setLaneMuted",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -11769,6 +11869,7 @@ export const ENGINE_OPERATION_NAMES = [
   "transport/play",
   "transport/record",
   "transport/setAutomationWrite",
+  "transport/setKeepTakes",
   "transport/setMetronome",
   "transport/stop"
 ] as const satisfies readonly RequestType[];
@@ -12195,6 +12296,10 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "transport/setAutomationWrite"
   },
+  "transport/setKeepTakes": {
+    "kind": "operation",
+    "operation": "transport/setKeepTakes"
+  },
   "engine/getDevices": {
     "kind": "operation",
     "operation": "engine/getDevices"
@@ -12390,6 +12495,10 @@ export const REQUEST_COVERAGE = {
   "cmd/take.setComp": {
     "kind": "operation",
     "operation": "cmd/take.setComp"
+  },
+  "cmd/take.setLaneMuted": {
+    "kind": "operation",
+    "operation": "cmd/take.setLaneMuted"
   },
   "cmd/take.flatten": {
     "kind": "operation",
@@ -12882,6 +12991,14 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "trackId": 7,
       "folderId": 9,
       "activeLane": 1
+    }
+  ],
+  "cmd/take.setLaneMuted": [
+    {
+      "trackId": 3,
+      "folderId": 9,
+      "lane": 1,
+      "muted": true
     }
   ],
   "cmd/tempo.set": [
@@ -13379,6 +13496,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {}
   ],
   "transport/setAutomationWrite": [
+    {
+      "enabled": true
+    }
+  ],
+  "transport/setKeepTakes": [
     {
       "enabled": true
     }

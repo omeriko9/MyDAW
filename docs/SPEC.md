@@ -406,7 +406,8 @@ the entire drag.
 ### 5.4 Transport & engine
 - `transport/play {}` `transport/stop {}` (stop at pos; second stop returns to start)
   `transport/pause {}` `transport/record {}` `transport/locate {beat}` `transport/setMetronome
-  {enabled, countInBars?:0|1|2}` `transport/setAutomationWrite {enabled}`. Engine metronome
+  {enabled, countInBars?:0|1|2}` `transport/setAutomationWrite {enabled}`
+  `transport/setKeepTakes {enabled}` (record-to-lanes mode, §8.7; sticky in settings). Engine metronome
   default is OFF. Every `transport/*` reply returns the full transport snapshot below (incl.
   `metronome` and `automationWrite`), so the state is readable — the UI seeds its mirror from
   `session/hello`, reconciles it from every transport event/reply carrying the field, and keeps
@@ -1099,6 +1100,31 @@ undo entry). Expansion is per-window view state (`Timeline/takesUi.ts`, never pe
 comp math shared by Inspector and canvas lives in `ui/src/lib/comping.ts` and mirrors
 `AudioGraph::buildPlan` exactly (segment 0 anchors to the folder start regardless of its stored
 startBeat).
+
+**Keep Takes record mode (2026-08-11, Cubase "Keep History")**: `transport/setKeepTakes
+{enabled}` — engine-authoritative like the automation arm, but STICKY across sessions
+(`settings.json recordKeepTakes`; record modes are user preference, not project state). Replies /
+hello / `event/transport` carry `keepTakes`. While ON, `recordingCommit` folds each recorded unit
+into lanes against the track's existing material (the commit payload snapshots the arm at stop
+time):
+  * unit overlaps a take folder (largest overlap wins; touching ≠ overlap) → laps append as new
+    lanes, span extends to the union, and the comp paints `[unitStart,unitEnd)` to the newest
+    lane via a C++ port of `paintComp` (Commands.cpp `paintCompRange` — kept VERBATIM in sync
+    with `ui/src/lib/comping.ts`, same 1e-6 epsilons; comps may carry zero-width leading
+    segments, LAST-at-equal-beat wins). Everything the old comp chose keeps playing outside the
+    recorded range; overlapped loose clips are left alone (lanes can't represent folder+clip sums).
+  * unit overlaps loose clip(s) → they ALL move wholesale into lane 0 "Previous", laps become
+    lanes 1..k, comp = lane 0 outside the unit, newest lane inside — the fresh take plays, the
+    old material's un-overlapped parts stay audible.
+  * no overlap (or toggle OFF) → the pre-existing behavior verbatim.
+**Empty-MIDI rule (UNCONDITIONAL)**: a recorded MIDI take with zero notes AND zero cc creates no
+clip and no lane (armed-but-silent, or an automation-only pass — write captures live in
+automation lanes). App pre-filters; `recordingCommit` guarantees it for direct callers.
+**Lane mute**: `cmd/take.setLaneMuted {trackId, folderId, lane, muted}` mutes/unmutes every clip
+in one lane (lane clips are deliberately unreachable by `cmd/clip.set` — `clipById` walks only
+`Track::clips`). The take-lane context menu offers Mute/Unmute Take; a muted lane stays silent
+even where the comp selects it (buildPlan's per-clip muted skip). Plain clips keep their
+existing right-click "Mute" (shortcut **M**; `X` stays Crossfade).
 
 ## 9. UI architecture
 

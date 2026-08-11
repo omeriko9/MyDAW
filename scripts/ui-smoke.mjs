@@ -502,6 +502,31 @@ export const checks = [
   },
 
   {
+    id: "keep-takes-toggle",
+    title: "the Keep Takes transport toggle arms the engine's record-to-lanes mode",
+    area: "transport",
+    guards: "Lanes feature 2026-08-11 — recording over existing material folds into take lanes only while this arm is on; the toggle must exist beside the automation pencil and be engine-authoritative",
+    run: async (s, tt) => {
+      const box = await s.eval(`(() => {
+        const el = [...document.querySelectorAll("button")]
+          .find((b) => (b.getAttribute("aria-label") ?? "").startsWith("Keep takes"));
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+      })()`);
+      tt.ok(box, "the Keep Takes toggle renders in the transport bar");
+      // Own precondition: force OFF over the wire, then click ON via the UI.
+      await s.probe("transport/setKeepTakes", { enabled: false });
+      await s.click(box.x, box.y);
+      await s.until("the engine arms Keep Takes", async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.keepTakes === true);
+      tt.ok(true, "clicking the toggle arms the engine");
+      // RESTORE: the arm persists in engine settings — leave it off for later checks/slots.
+      await s.probe("transport/setKeepTakes", { enabled: false });
+    },
+  },
+
+  {
     id: "plugins-pane-instrument-mode",
     title: "the Browser plugins pane defaults to Instruments and Effects mode groups by category",
     area: "browser",

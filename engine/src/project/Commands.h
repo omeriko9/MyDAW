@@ -300,6 +300,7 @@ private:
     // §5.3 comping (take folders)
     json takeCreate(const json& p, CmdResult& r);
     json takeSetComp(const json& p, CmdResult& r);
+    json takeSetLaneMuted(const json& p, CmdResult& r);
     json takeFlatten(const json& p, CmdResult& r);
     // §5.3 track versions
     json versionAdd(const json& p, CmdResult& r);
