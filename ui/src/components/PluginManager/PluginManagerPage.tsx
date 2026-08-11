@@ -4,11 +4,12 @@
  * to the engine over the shared WsClient directly (no zustand store, no project state),
  * so it works alongside any number of open DAW windows.
  *
- * Columns: favorite ★, name, kind (instrument/effect), format (VST2/VST3/built-in),
- * bits, vendor, category, I/O, folder, status. Actions: Disable (plugins/blacklist)
- * and Enable (plugins/unblacklist) — both broadcast event/scanDone so every open
- * window's registry refreshes live. Blacklisted rows are red-tinted; instruments and
- * effects carry their own accent colors.
+ * Columns: favorite ★ (sortable — starred first; also a Favorites filter chip), name,
+ * kind (instrument/effect), format (VST2/VST3/built-in), bits, vendor, category, I/O,
+ * folder, status. Actions: Start (new track + insert + open editor, in the DAW window),
+ * Disable (plugins/blacklist) and Enable (plugins/unblacklist) — the latter two
+ * broadcast event/scanDone so every open window's registry refreshes live. Blacklisted
+ * rows are red-tinted; instruments and effects carry their own accent colors.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,9 +18,12 @@ import "./pluginmanager.css";
 import { ws, type ConnectionState } from "../../protocol/ws";
 import type { PluginInfo, ScanProgressEvent } from "../../protocol/types";
 import {
+  addPlugin,
+  addTrack,
   blacklistPlugin,
   cancelPluginScan,
   getPluginRegistry,
+  openPluginEditor,
   scanPlugins,
   unblacklistPlugin,
 } from "../../store/actions";
@@ -33,8 +37,9 @@ import { Icon } from "../common/icons";
 import BlacklistPanel from "./BlacklistPanel";
 import HealthPanel from "./HealthPanel";
 
-type KindFilter = "all" | "instruments" | "effects" | "blacklisted" | "bit32";
-type SortKey = "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io" | "folder" | "status";
+type KindFilter = "all" | "instruments" | "effects" | "blacklisted" | "bit32" | "favorites";
+type SortKey =
+  | "favorite" | "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io" | "folder" | "status";
 
 function folderOf(p: PluginInfo): string {
   if (p.format === "builtin") return "";
@@ -51,8 +56,11 @@ function formatLabel(p: PluginInfo): string {
   return p.format === "vst2" ? "VST2" : p.format === "vst3" ? "VST3" : "Built-in";
 }
 
-function sortValue(p: PluginInfo, key: SortKey): string | number {
+function sortValue(p: PluginInfo, key: SortKey, favoriteSet: ReadonlySet<string>): string | number {
   switch (key) {
+    // Favorites ascending = starred FIRST, which is the only order anyone wants from
+    // this column; the arrow still flips it for symmetry with the other headers.
+    case "favorite": return isPluginFavorite(favoriteSet, p) ? 0 : 1;
     case "name": return p.name.toLowerCase();
     case "kind": return p.isInstrument ? 0 : 1;
     case "format": return formatLabel(p);
@@ -117,6 +125,31 @@ export default function PluginManagerPage() {
     setFavorites(togglePluginFavorite(p));
   }, []);
 
+  // "Start" — hear/see a plugin right now, from the table you are already looking at.
+  // A new track named after the plugin (instrument track for instruments, audio for
+  // effects), the plugin as its insert, editor open. This page holds no project state,
+  // so it cannot target the DAW's selection; a fresh track is the only honest
+  // destination, and one undo in the main window removes it.
+  const start = useCallback(
+    (p: PluginInfo) => {
+      const key = pluginKey(p);
+      setBusyKey(key);
+      void (async () => {
+        try {
+          const tr = await addTrack(p.isInstrument ? "instrument" : "audio", { name: p.name });
+          const added = await addPlugin(tr.track.id, p.uid);
+          await openPluginEditor(added.instance.instanceId);
+          setError(null);
+        } catch (e) {
+          setError(`Could not start "${p.name}": ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          setBusyKey((k) => (k === key ? null : k));
+        }
+      })();
+    },
+    [],
+  );
+
   const disable = useCallback(
     (p: PluginInfo) => {
       const key = pluginKey(p);
@@ -147,14 +180,16 @@ export default function PluginManagerPage() {
     let effects = 0;
     let blacklisted = 0;
     let bit32 = 0;
+    let favorites = 0;
     for (const p of registry) {
       if (p.isInstrument) instruments++;
       else effects++;
       if (p.blacklisted) blacklisted++;
       if (p.bitness === 32) bit32++;
+      if (isPluginFavorite(favoriteSet, p)) favorites++;
     }
-    return { instruments, effects, blacklisted, bit32 };
-  }, [registry]);
+    return { instruments, effects, blacklisted, bit32, favorites };
+  }, [registry, favoriteSet]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -163,6 +198,7 @@ export default function PluginManagerPage() {
       if (filter === "effects" && p.isInstrument) return false;
       if (filter === "blacklisted" && !p.blacklisted) return false;
       if (filter === "bit32" && p.bitness !== 32) return false;
+      if (filter === "favorites" && !isPluginFavorite(favoriteSet, p)) return false;
       if (q === "") return true;
       return (
         p.name.toLowerCase().includes(q) ||
@@ -178,8 +214,8 @@ export default function PluginManagerPage() {
     });
     const { key, dir } = sort;
     out = out.slice().sort((a, b) => {
-      const va = sortValue(a, key);
-      const vb = sortValue(b, key);
+      const va = sortValue(a, key, favoriteSet);
+      const vb = sortValue(b, key, favoriteSet);
       if (va < vb) return -dir;
       if (va > vb) return dir;
       // stable-ish secondary: name then path
@@ -189,7 +225,7 @@ export default function PluginManagerPage() {
       return a.path < b.path ? -1 : 1;
     });
     return out;
-  }, [registry, query, filter, sort]);
+  }, [registry, query, filter, sort, favoriteSet]);
 
   const clickSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
@@ -208,7 +244,9 @@ export default function PluginManagerPage() {
           clickSort(key);
         }
       }}
-      title={`Sort by ${label.toLowerCase()}`}
+      title={key === "favorite"
+        ? "Sort by favorite — starred first (shared with the Browser panel)"
+        : `Sort by ${label.toLowerCase()}`}
     >
       {label}
       {sort.key === key && <span className="pm-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
@@ -284,6 +322,7 @@ export default function PluginManagerPage() {
         {view === "plugins" && (
           <div className="pm-toolbar">
             {chip("all", "All", registry.length)}
+            {chip("favorites", "★ Favorites", counts.favorites, "fav")}
             {chip("instruments", "Instruments", counts.instruments, "inst")}
             {chip("effects", "Effects", counts.effects, "fx")}
             {chip("bit32", "32-bit", counts.bit32, "b32")}
@@ -331,7 +370,7 @@ export default function PluginManagerPage() {
         <table className="pm-table">
           <thead>
             <tr>
-              <th className="pm-th pm-th-fav" title="Favorites (shared with the Browser panel)">★</th>
+              {th("favorite", "★", "pm-th-fav")}
               {th("name", "Name")}
               {th("kind", "Kind")}
               {th("format", "Format")}
@@ -406,6 +445,17 @@ export default function PluginManagerPage() {
                     )}
                   </td>
                   <td className="pm-td pm-td-actions">
+                    {!p.blacklisted && (
+                      <button
+                        type="button"
+                        className="pm-ibtn start"
+                        disabled={busy || connState !== "open"}
+                        onClick={() => start(p)}
+                        title={`Start "${p.name}" — adds it on a new ${p.isInstrument ? "instrument" : "audio"} track in the DAW window and opens its editor`}
+                      >
+                        <Icon name="play" size={13} />
+                      </button>
+                    )}
                     {p.format === "builtin" ? null : p.blacklisted ? (
                       <button
                         type="button"

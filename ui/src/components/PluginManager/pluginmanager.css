@@ -85,6 +85,7 @@
 .pm-chip.fx.active { border-color: var(--pm-fx); }
 .pm-chip.bl.active { border-color: var(--danger); background: var(--danger-soft); }
 .pm-chip.b32.active { border-color: var(--warn); background: var(--warn-soft); }
+.pm-chip.fav.active { border-color: var(--pm-fav, var(--accent)); }
 
 .pm-search {
   flex: 1 1 220px;
@@ -171,7 +172,7 @@
   user-select: none;
 }
 .pm-th:hover { color: var(--text); }
-.pm-th-fav, .pm-th-actions { cursor: default; }
+.pm-th-actions { cursor: default; } /* ★ is sortable now, so it keeps the pointer */
 .pm-sort { margin-left: 4px; font-size: 8px; color: var(--accent); }
 
 .pm-row { border-bottom: 1px solid var(--border); }
@@ -295,6 +296,12 @@
 .pm-ibtn.enable:hover:not(:disabled) {
   border-color: var(--ok);
   background: color-mix(in srgb, var(--ok) 18%, transparent);
+}
+.pm-ibtn.start { margin-right: 6px; }
+.pm-ibtn.start:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .pm-btn {

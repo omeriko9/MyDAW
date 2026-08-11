@@ -610,6 +610,93 @@ export const checks = [
   },
 
   {
+    id: "plugin-manager-start-and-fav-sort",
+    title: "the Plugin Manager's table can start a plugin and sort favourites first",
+    area: "plugin-manager",
+    guards: "2026-08-11 (Omer): Start first shipped ONLY in the Health view's detail, whose default filter is 'problems' — so a working plugin was never listed and the action was unreachable. It must live in the Plugins table, and it must really create the track (compile-level evidence is what let the unreachable version ship).",
+    run: async (s, tt) => {
+      const base = await s.eval(`location.origin + location.pathname`);
+      const tracks = async () =>
+        (await s.probe("session/hello", { clientName: "smoke" })).payload.project.tracks;
+      const before = await tracks();
+      let createdId = null;
+      try {
+        await s.send("Page.navigate", { url: `${base}?page=plugins` });
+        await s.until("the manager page mounts", async () =>
+          (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
+        await s.until("the registry table fills", async () =>
+          (await s.eval(`document.querySelectorAll(".pm-row").length`)) > 0);
+
+        // Target a BUILT-IN instrument: always in the registry, no real VST needed, and
+        // its uid is stable — so this check works on any machine.
+        const target = await s.eval(`(() => {
+          const rows = [...document.querySelectorAll(".pm-row")];
+          const r = rows.find(x => x.querySelector(".pm-badge.inst") && x.querySelector(".pm-ibtn.start"));
+          if (!r) return null;
+          return r.querySelector(".pm-name").textContent.trim();
+        })()`);
+        tt.ok(target !== null, `an instrument row offers Start (${target})`);
+
+        await s.eval(`(() => {
+          const rows = [...document.querySelectorAll(".pm-row")];
+          const r = rows.find(x => x.querySelector(".pm-badge.inst") && x.querySelector(".pm-ibtn.start"));
+          r.querySelector(".pm-ibtn.start").click();
+          return true;
+        })()`);
+
+        await s.until("a track appears for the started plugin", async () =>
+          (await tracks()).length === before.length + 1, { timeout: 20000 });
+        const freshOf = async () =>
+          (await tracks()).find((t) => !before.some((b) => b.id === t.id));
+        createdId = (await freshOf()).id;
+        // Start is three sequential ops (track, then plugin, then editor) — the track
+        // lands first, so the insert must be WAITED for, not read in the same breath.
+        await s.until("the plugin lands on the new track", async () =>
+          (await freshOf()).inserts.length >= 1, { timeout: 20000 });
+        const fresh = await freshOf();
+        tt.eq(fresh.kind, "instrument", "an instrument plugin starts on an INSTRUMENT track");
+        tt.eq(fresh.name, target, "the track is named after the plugin");
+
+        // ★ header sorts, and ascending puts starred rows first.
+        await s.eval(`(() => { document.querySelector(".pm-th-fav").click(); return true; })()`);
+        const sortState = await s.eval(`document.querySelector(".pm-th-fav").getAttribute("aria-sort")`);
+        tt.ok(sortState === "ascending" || sortState === "descending",
+          `the star column is a real sortable header (aria-sort=${sortState})`);
+
+        // Star the last row, re-sort ascending, and it must climb to the top.
+        await s.eval(`(() => {
+          const rows = [...document.querySelectorAll(".pm-row")];
+          rows[rows.length - 1].querySelector(".pm-fav").click();
+          return true;
+        })()`);
+        await s.until("the star registers", async () =>
+          (await s.eval(`document.querySelectorAll(".pm-fav.on").length`)) > 0);
+        const firstIsStarred = await s.eval(`(() => {
+          const th = document.querySelector(".pm-th-fav");
+          if (th.getAttribute("aria-sort") !== "ascending") th.click();
+          return !!document.querySelector(".pm-row .pm-fav.on") &&
+                 !!document.querySelector(".pm-row:first-child .pm-fav.on");
+        })()`);
+        tt.ok(firstIsStarred, "sorting by ★ ascending floats favourites to the top");
+
+        // RESTORE the star — favourites live in localStorage and would leak into later runs.
+        await s.eval(`(() => {
+          const on = document.querySelector(".pm-fav.on");
+          if (on) on.click();
+          return true;
+        })()`);
+      } finally {
+        // RESTORE: drop the track this check created, and leave the DAW page loaded —
+        // the runner reloads the CURRENT url between checks.
+        if (createdId !== null) await s.probe("cmd/track.remove", { trackId: createdId });
+        await s.send("Page.navigate", { url: base });
+        await s.until("the DAW app is back", async () =>
+          (await s.eval(`!!document.querySelector(".tl-corner")`)) === true, { timeout: 30000 });
+      }
+    },
+  },
+
+  {
     id: "technique-master-glue",
     title: "the Production Techniques wizard applies Master Glue stages and takes the last one back",
     area: "techniques",
