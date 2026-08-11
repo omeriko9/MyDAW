@@ -19,7 +19,7 @@ import TrackHeaders from "./TrackHeaders";
 import ClipCanvas from "./ClipCanvas";
 import Minimap, { MINIMAP_H } from "./Minimap";
 import { useAutomationUi, useRevealWrittenLanes } from "./automationUi";
-import { useTakesUi } from "./takesUi";
+import { useRevealNewTakeLanes, useTakesUi } from "./takesUi";
 import { useIsKeyTarget } from "../common/paneFocus";
 import { lineV, useCanvas, useRafLoop } from "../../lib/canvas";
 import { noteManualScroll } from "../../lib/followSuspend";
@@ -201,6 +201,8 @@ export default function Timeline() {
   const extraLanes = useAutomationUi((s) => s.extraLanes);
   // Writing into a new lane opens that track, so recorded moves are visible as they land.
   useRevealWrittenLanes(project);
+  // Recording a new version opens that track's lanes, so the stack is visible as it lands.
+  useRevealNewTakeLanes(project);
   const takesExpanded = useTakesUi((s) => s.expanded);
 
   const vScale = vScaleOf(viewport.zoomY);
