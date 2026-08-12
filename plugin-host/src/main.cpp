@@ -394,6 +394,77 @@ HWND createPumpWindow() {
 }
 
 // ---------------------------------------------------------------------------
+// Transport-key forwarding (2026-08-13, Cubase-style): Space and '.' pressed
+// while a plugin editor window has focus go to the DAW transport, not the
+// plugin — the '.'-then-Space muscle memory must survive a focused VST. A
+// THREAD hook (not a per-window subclass) fires for every window the plugin
+// creates on this GUI thread, including inside its own modal loops. Two
+// guards keep typing safe — the key passes through untouched when:
+//   1. the focused window is an OS edit control (classname contains "edit"),
+//   2. any window on this thread shows a caret (GetGUIThreadInfo) — custom
+//      text fields (JUCE, Kontakt's search box) create a system caret while
+//      active even though their classname says nothing.
+// ---------------------------------------------------------------------------
+HHOOK g_transportKeyHook = nullptr;
+
+bool focusIsTextEntry() {
+  if (HWND f = GetFocus()) {
+    wchar_t cls[64]{};
+    if (GetClassNameW(f, cls, 63)) {
+      CharLowerW(cls);
+      // Exact/prefix match, NOT contains: our own editor frame is
+      // "MyDawEditorWindow" and plugin frames are often "...Editor..." —
+      // a contains-"edit" test would mute forwarding everywhere.
+      if (wcscmp(cls, L"edit") == 0 || wcsstr(cls, L"richedit"))
+        return true; // Edit, RichEdit20W, RICHEDIT50W, TRichEdit...
+    }
+  }
+  GUITHREADINFO gti{};
+  gti.cbSize = sizeof(gti);
+  if (GetGUIThreadInfo(GetCurrentThreadId(), &gti) && gti.hwndCaret) return true;
+  return false;
+}
+
+// WH_GETMESSAGE, not WH_KEYBOARD: the keyboard hook only sees HARDWARE input
+// retrieval, so posted WM_KEYDOWNs (test rigs, accessibility tools) bypass it;
+// the get-message hook sees every retrieved message. Swallowing = rewriting to
+// WM_NULL — this runs before the app's TranslateMessage, so no WM_CHAR leaks.
+LRESULT CALLBACK transportKeyProc(int code, WPARAM wParam, LPARAM lParam) {
+  MSG* m = reinterpret_cast<MSG*>(lParam);
+  if (code == HC_ACTION && wParam == PM_REMOVE && m &&
+      (m->message == WM_KEYDOWN || m->message == WM_KEYUP)) {
+    // Space/'.'/'Numpad .' only; no modifier chords (Ctrl+Space etc. remain
+    // plugin shortcuts); no autorepeat (a held Space must not machine-gun
+    // play/stop). A swallowed keydown swallows its matching keyup too, so the
+    // plugin never sees a stray up-transition.
+    static bool s_swallowedDown[2] = {false, false}; // [0]=space, [1]=period
+    int slot = -1;
+    if (m->wParam == VK_SPACE) slot = 0;
+    else if (m->wParam == VK_OEM_PERIOD || m->wParam == VK_DECIMAL) slot = 1;
+    if (slot >= 0) {
+      if (m->message == WM_KEYUP) {
+        if (s_swallowedDown[slot]) {
+          s_swallowedDown[slot] = false;
+          m->message = WM_NULL;
+        }
+      } else if (!(m->lParam & 0x40000000) /* not autorepeat */ &&
+                 !(GetKeyState(VK_CONTROL) & 0x8000) &&
+                 !(GetKeyState(VK_MENU) & 0x8000) &&
+                 !(GetKeyState(VK_SHIFT) & 0x8000) && !focusIsTextEntry()) {
+        ServeState* s = g_pumpState;
+        if (s && s->rpc) {
+          s->rpc->push("transportKey",
+                       json{{"key", slot == 0 ? "space" : "period"}});
+          s_swallowedDown[slot] = true;
+          m->message = WM_NULL; // swallow: the plugin must not also act on it
+        }
+      }
+    }
+  }
+  return CallNextHookEx(g_transportKeyHook, code, wParam, lParam);
+}
+
+// ---------------------------------------------------------------------------
 // Notifier thread: ParamEditBuffer → `paramEdited` pushes (throttled ~30 Hz
 // per param id, leaving throttled edits dirty for the next tick) + latency
 // watch → `latencyChanged {samples}` (see NOTE(spec) at the top).
@@ -490,6 +561,10 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   g_pumpState = &s;
   g_pumpQueue = &ctlq;
   const HWND pumpWnd = createPumpWindow();
+  // Thread-scoped: fires only while a window of THIS thread (i.e. the plugin
+  // editor) has keyboard focus; zero effect on the rest of the system.
+  g_transportKeyHook =
+      SetWindowsHookExW(WH_GETMESSAGE, transportKeyProc, nullptr, GetCurrentThreadId());
 
   mydaw::JsonRpc* rpcRaw = s.rpc.get();
   DWORD mainThreadId = s.mainThreadId;
@@ -630,6 +705,10 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   }
   if (timerId) KillTimer(pumpWnd, timerId);
   if (pumpWnd) DestroyWindow(pumpWnd);
+  if (g_transportKeyHook) {
+    UnhookWindowsHookEx(g_transportKeyHook);
+    g_transportKeyHook = nullptr;
+  }
   g_pumpState = nullptr;
   g_pumpQueue = nullptr;
 

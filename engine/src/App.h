@@ -127,6 +127,10 @@ public:
     void onPluginParamEdited(uint64_t instanceId, uint32_t paramId, double value,
                              const std::string& valueText);
 
+    /** Transport key forwarded from a focused VST editor window ("space"/"period");
+     *  mirrors the UI keyboard bindings. Main thread. */
+    void onHostTransportKey(const std::string& key);
+
     /** Inject a channel-voice MIDI message (software control surface / on-screen keyboard
      *  / test). Enters MidiInput's mirror ring, so it RECORDS exactly like hardware. */
     void feedMidiEvent(int status, int data1, int data2) {

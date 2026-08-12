@@ -88,6 +88,9 @@ public:
     using ParamEditedCallback = std::function<void(uint64_t instanceId, uint32_t paramId,
                                                    double value, const std::string& valueText)>;
     using LatencyCallback = std::function<void(uint64_t instanceId, int samples)>;
+    // Transport keys forwarded from a focused VST editor window ("space"/"period");
+    // the host swallows them, so the engine is the only party that acts on them.
+    using TransportKeyCallback = std::function<void(const std::string& key)>;
 
     HostProcessManager();
     ~HostProcessManager(); // stops the worker, then destroys every live instance
@@ -109,6 +112,7 @@ public:
     void setStateCallback(StateCallback cb);
     void setParamEditedCallback(ParamEditedCallback cb);
     void setLatencyCallback(LatencyCallback cb);
+    void setTransportKeyCallback(TransportKeyCallback cb);
 
     // Spawns + initializes the host process for `instance` (instance.paramValues seeds
     // the restore cache and is applied after init; bypass/wetDry seed the node; the
@@ -223,6 +227,7 @@ private:
     StateCallback stateCb_;
     ParamEditedCallback paramEditedCb_;
     LatencyCallback latencyCb_;
+    TransportKeyCallback transportKeyCb_;
 
     mutable std::mutex pathMutex_;
     std::string host64Path_;

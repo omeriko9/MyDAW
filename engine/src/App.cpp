@@ -805,6 +805,29 @@ void App::wireHostCallbacks() {
     host->setLatencyCallback([this](uint64_t, int) {
         requestGraphRebuild(); // PDC delay lines recomputed at rebuild (SPEC §7)
     });
+    host->setTransportKeyCallback([this](const std::string& key) {
+        post([this, key] { onHostTransportKey(key); });
+    });
+}
+
+void App::onHostTransportKey(const std::string& key) {
+    // Space / '.' forwarded from a focused VST editor window. Semantics must
+    // mirror ui/src/lib/keyboard.ts exactly: space toggles play/stop, '.' is
+    // the main-row twin of Numpad . — jump to project start.
+    if (key == "space") {
+        if (transport.state() == TransportState::Stopped) {
+            transport.play();
+        } else {
+            if (isRecordingSession())
+                stopRecordingAndCommit();
+            transport.stop();
+        }
+    } else if (key == "period") {
+        transport.locate(0.0);
+    } else {
+        return; // unknown key: no broadcast
+    }
+    broadcastTransportEvent();
 }
 
 void App::onPluginParamEdited(uint64_t instanceId, uint32_t paramId, double value,

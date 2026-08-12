@@ -294,6 +294,11 @@ void HostProcessManager::setLatencyCallback(LatencyCallback cb) {
     latencyCb_ = std::move(cb);
 }
 
+void HostProcessManager::setTransportKeyCallback(TransportKeyCallback cb) {
+    std::lock_guard<std::mutex> lk(cbMutex_);
+    transportKeyCb_ = std::move(cb);
+}
+
 // ===========================================================================
 // Lookup helpers
 // ===========================================================================
@@ -1038,6 +1043,19 @@ void HostProcessManager::handlePush(uint64_t instanceId, const std::string& type
         else
             Log::info("[host %llu] %s", static_cast<unsigned long long>(instanceId),
                       msg.c_str());
+        return;
+    }
+    if (type == "transportKey") {
+        // Space / '.' pressed while a VST editor window had focus (Cubase-style
+        // forwarding; the host already swallowed the key from the plugin).
+        const std::string key = getOr(payload, "key", "");
+        TransportKeyCallback cb;
+        {
+            std::lock_guard<std::mutex> lk(cbMutex_);
+            cb = transportKeyCb_;
+        }
+        if (cb && !key.empty())
+            cb(key);
         return;
     }
     if (type == "resized")

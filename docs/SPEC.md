@@ -978,7 +978,21 @@ valueText); `setParam {id,value}` (non-RT fallback; RT path preferred); `getStat
 `setState {chunkB64}`; `getPresets` / `loadPreset {id}`; `openEditor` / `closeEditor` (host creates
 top-level window + message pump, plugin view attached); `suspend`/`resume`; `quit`.
 Host→engine push: `paramEdited {id, value, valueText}` (from native editor, throttled),
-`latencyChanged {samples}`, `resized`, `log {level,msg}`.
+`latencyChanged {samples}`, `resized`, `log {level,msg}`,
+`transportKey {key: "space"|"period"}` (see below).
+
+**Transport keys from a focused VST editor (2026-08-13, Cubase-style).** Space and `.` (main row
+or numpad) pressed while a plugin editor window has focus are forwarded to the DAW transport and
+swallowed before the plugin sees them (matching keyup swallowed too). Engine side mirrors the UI
+bindings exactly: `space` toggles play/stop (stop commits an active recording), `period` locates
+to beat 0; both broadcast `event/transport`. Host side is a thread-scoped `WH_GETMESSAGE` hook
+(not `WH_KEYBOARD` — that one never sees posted key messages, which the verification rig and
+accessibility tools rely on; not a per-window subclass — the hook also covers every child window
+the plugin creates and its modal loops). The key passes through UNTOUCHED — typing wins — when:
+autorepeat, any Ctrl/Alt/Shift chord, the focused window is an OS edit control (class `edit`
+exact or contains `richedit`; NOT a contains-"edit" test — our own frame class is
+`MyDawEditorWindow`), or any window on the host GUI thread shows a system caret
+(`GetGUIThreadInfo` — custom text fields like Kontakt's search box create one while active).
 Host watches `--parent-pid`; exits if engine dies. Engine detects host exit via process handle wait
 (registered wait callback) → crash flow.
 
