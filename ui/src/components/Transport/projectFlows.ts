@@ -37,6 +37,7 @@ import { useStore } from "../../store/store";
 import { confirmDialog } from "../Dialogs/confirm";
 import { openImportPathDialog } from "../Dialogs/PastePathDialog";
 import { showToast } from "../common/ToastHost";
+import { withBusyIndicator } from "../../lib/busy";
 
 /**
  * Log + surface a flow failure. Failures used to be console-only ("import silently
@@ -62,7 +63,7 @@ function logFlowError(what: string, e: unknown, toast = true): void {
 async function autoSaveIfDirty(title: string): Promise<boolean> {
   if (!useStore.getState().dirty) return true;
   try {
-    await saveProject();
+    await withBusyIndicator("Saving project…", () => saveProject());
     return true;
   } catch (e) {
     if (e instanceof WsRequestError && e.code === "no_path") {
@@ -88,7 +89,7 @@ async function autoSaveIfDirty(title: string): Promise<boolean> {
 export async function newProjectFlow(): Promise<void> {
   try {
     if (!(await autoSaveIfDirty("New Project"))) return;
-    await newProject();
+    await withBusyIndicator("Starting a new project…", () => newProject());
   } catch (e) {
     logFlowError("new project", e);
   }
@@ -119,7 +120,10 @@ export async function newWindowFlow(): Promise<void> {
 export async function closeProjectFlow(): Promise<void> {
   try {
     if (!(await autoSaveIfDirty("Close Project"))) return;
-    await newProject();
+    // Tearing down loaded plugin hosts can take SECONDS (6.5 s on the report that
+    // prompted this), so the click needs to say something or it reads as a dead button.
+    await withBusyIndicator("Closing project…", () => newProject());
+    showToast("Project closed.", "success");
   } catch (e) {
     logFlowError("close project", e);
   }
@@ -147,7 +151,7 @@ export async function openProjectFlow(): Promise<void> {
     const { path } = await dialogOpenProject();
     if (!path) return; // user cancelled the native dialog
     // Foreign paths (.cpr) re-run the importer — surface its skip warnings here too.
-    const { warnings } = await loadProject(path);
+    const { warnings } = await withBusyIndicator("Opening project…", () => loadProject(path));
     showImportWarnings(warnings);
   } catch (e) {
     logFlowError("open project", e);
@@ -157,7 +161,7 @@ export async function openProjectFlow(): Promise<void> {
 export async function loadRecentFlow(path: string): Promise<void> {
   try {
     if (!(await autoSaveIfDirty("Open Recent Project"))) return;
-    const { warnings } = await loadRecentProject(path);
+    const { warnings } = await withBusyIndicator("Opening project…", () => loadRecentProject(path));
     showImportWarnings(warnings); // re-imported foreign recents skip the same tracks
     // Recents include imported foreign projects (.cpr/.mid) — the engine re-imports
     // those, so run the same post-import plugin loading as Import Project.

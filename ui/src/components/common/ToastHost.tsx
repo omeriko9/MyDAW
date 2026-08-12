@@ -36,6 +36,8 @@ interface Toast {
   kind: ToastKind;
   actions?: ToastAction[];
   durationMs?: number;
+  /** A long operation is RUNNING: spinner, and never auto-dismisses (its owner closes it). */
+  busy?: boolean;
   /** Exit animation running — still in the DOM, removed after TOAST_EXIT_MS. */
   leaving?: boolean;
 }
@@ -78,7 +80,7 @@ function toastDuration(t: { kind: ToastKind; durationMs?: number }): number {
 
 function resumeAutoDismiss(id: number): void {
   const toast = toasts.find((t) => t.id === id);
-  if (!toast || timers.has(id)) return;
+  if (!toast || toast.busy || timers.has(id)) return; // a running op owns its own toast
   timers.set(id, window.setTimeout(() => dismissToast(id), toastDuration(toast)));
 }
 
@@ -106,6 +108,22 @@ export function showToast(message: string, kind: ToastKind = "info", opts?: Toas
   timers.set(id, window.setTimeout(() => dismissToast(id), toastDuration(toast)));
 }
 
+/**
+ * A toast for an operation that is STILL RUNNING; returns its closer. No auto-dismiss —
+ * it lives exactly as long as the work does.
+ *
+ * Added 2026-08-12: File ▸ Close looked dead because closing a project with plugins
+ * loaded spends seconds tearing down the hosts (6.5 s on the reporter's session) with
+ * nothing on screen. Callers should go through `withBusyIndicator`, which only shows this
+ * once an operation is slow enough to need it.
+ */
+export function showBusyToast(message: string): () => void {
+  const id = nextId++;
+  toasts = [...toasts.slice(-(MAX_TOASTS - 1)), { id, message, kind: "info", busy: true }];
+  emit();
+  return () => dismissToast(id);
+}
+
 const KIND_ICON: Record<ToastKind, IconName> = {
   info: "dot",
   success: "check",
@@ -123,12 +141,12 @@ export default function ToastHost() {
           className={`toast ${t.kind}`}
           data-leaving={t.leaving || undefined}
           role={t.kind === "error" ? "alert" : "status"}
-          title="Click to dismiss"
-          onClick={() => dismissToast(t.id)}
+          title={t.busy ? "Working…" : "Click to dismiss"}
+          onClick={() => { if (!t.busy) dismissToast(t.id); }}
           onMouseEnter={() => pauseAutoDismiss(t.id)}
           onMouseLeave={() => resumeAutoDismiss(t.id)}
         >
-          <Icon name={KIND_ICON[t.kind]} size={14} />
+          {t.busy ? <span className="toast-spinner" aria-hidden="true" /> : <Icon name={KIND_ICON[t.kind]} size={14} />}
           <div className="toast-body">
             <span className="toast-msg">{t.message}</span>
             {t.actions && t.actions.length > 0 && (

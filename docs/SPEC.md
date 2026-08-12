@@ -128,6 +128,11 @@ the entire drag.
   by the UI to silently auto-save a never-saved project before a destructive load/import;
   destructive flows auto-save instead of confirming, a discard-confirm appears only when the
   auto-save FAILS), `project/loadRecent {path}`. Replies carry `{project}` on load/new.
+  **These flows report progress** (`lib/busy.withBusyIndicator`, 2026-08-12): a spinner toast
+  appears if the work is still running after 400 ms, and Close ends with "Project closed."
+  `project/new` destroys every loaded plugin host, which took 6.5 s on the reporting session —
+  File ▸ Close was read as a dead button because nothing on screen moved for that long. The
+  400 ms delay keeps an empty project's instant close silent. Failures close the spinner too.
   `project/save` with no path
   yet → error `no_path` (UI then asks engine to open native dialog: `dialog/saveProject {}` →
   `{path|null}`; `dialog/openProject {}` → `{path|null}`; `dialog/importProject {}` →

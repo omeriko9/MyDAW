@@ -2575,6 +2575,77 @@ export const checks = [
   },
 
   {
+    id: "file-close-reports-itself",
+    title: "File ▸ Close confirms it happened, and the busy spinner is real CSS",
+    area: "menu-file",
+    guards: "2026-08-12 (Omer): 'File->Close does nothing'. It DID work — the engine log showed project/new ok 6540ms — but tearing down loaded plugin hosts takes seconds and the UI said nothing for all of it, so the click read as a dead button. Close now ends with a confirmation toast, and slow work raises a spinner toast after 400ms (lib/busy, unit-tested). The slot's project closes instantly, so the spinner cannot be provoked here — its STYLING is probed instead, the part that would rot silently.",
+    run: async (s, tt) => {
+      // Close WIPES the shared fixture project, so this check is deliberately placed
+      // SECOND-TO-LAST, just before the one that shuts the engine down. The first
+      // version sat mid-suite and stashed/restored the fixture around itself — which
+      // still broke three later checks, because saving the fixture to another path
+      // rewrites its media links. Position is the fix; nothing after this needs it.
+      await s.probe("cmd/track.add", { kind: "midi", name: "CloseMe" });
+      await s.reload();
+
+      // Toasts auto-dismiss, so observe from BEFORE the gesture (house rule).
+      await s.eval(() => {
+        window.__seen = [];
+        window.__obs?.disconnect();
+        window.__obs = new MutationObserver(() => {
+          for (const el of document.querySelectorAll(".toast")) {
+            const m = el.textContent.trim();
+            if (!window.__seen.includes(m)) window.__seen.push(m);
+          }
+        });
+        window.__obs.observe(document.body, { childList: true, subtree: true });
+        return true;
+      });
+
+      const menu = await s.eval(() => {
+        const b = [...document.querySelectorAll("[aria-label]")].find((e) => e.getAttribute("aria-label") === "File");
+        const r = b?.getBoundingClientRect();
+        return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      tt.ok(menu, "the File menu button is there");
+      await s.click(menu.x, menu.y);
+      await s.untilEval("the File menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((e) => e.textContent.trim() === "Close"));
+      const item = await s.eval(() => {
+        const it = [...document.querySelectorAll(".ctx-item")].find((e) => e.textContent.trim() === "Close");
+        const r = it.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await s.click(item.x, item.y);
+
+      await s.until("the project is actually closed", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        return (p.tracks ?? []).length === 0;
+      });
+      await s.untilEval("and Close says so out loud", () =>
+        (window.__seen ?? []).some((m) => m.includes("Project closed")));
+      tt.eq(await s.eval(() => document.querySelectorAll(".toast-spinner").length), 0,
+        "no spinner is left behind once the work is done");
+
+      // The spinner's styling: injected, because a fast close never raises one.
+      const spin = JSON.parse(await s.eval(`(() => {
+        const host = document.createElement("div");
+        host.className = "toast";
+        const sp = document.createElement("span");
+        sp.className = "toast-spinner";
+        host.appendChild(sp);
+        document.body.appendChild(host);
+        const cs = getComputedStyle(sp);
+        const out = { animation: cs.animationName, w: cs.width, radius: cs.borderTopLeftRadius };
+        host.remove();
+        return JSON.stringify(out);
+      })()`));
+      tt.eq(spin.animation, "toast-spin", "the busy spinner has its spin animation");
+      tt.ok(parseFloat(spin.w) > 0 && spin.radius !== "0px", `and real geometry (${spin.w}, r=${spin.radius})`);
+    },
+  },
+
+  {
     // ⚠️ MUST STAY THE LAST CHECK: it exits the slot's engine FOR REAL. Anything
     // added after this line will find no engine to talk to.
     id: "file-exit-shuts-the-engine-down",

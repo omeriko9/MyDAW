@@ -83,3 +83,23 @@
     transform: translateX(8px);
   }
 }
+
+/* Busy toast (lib/busy.withBusyIndicator): a long operation is still running. Not
+   click-to-dismiss — it disappears when the work does. Honors reduced motion by simply
+   not spinning; the toast text still says what is happening. */
+.toast-spinner {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-top: 1px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: toast-spin 700ms linear infinite;
+}
+@keyframes toast-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-spinner { animation: none; border-top-color: var(--accent); }
+}
