@@ -229,6 +229,46 @@ several MIDI parts should drive.
 
 ---
 
+## OPEN DECISION — plugin teardown speed (measured 2026-08-12)
+
+Closing a project takes ~6.5 s with 10 plugins loaded, which is what made File ▸ Close
+look dead. Measured on the reporter's own project (Polysix, 2 Waves VST3, Q4, Addictive
+Drums, WAVESTATION, 4× Orchestral) with the per-instance logging now in `destroyAll`:
+
+| | per instance | ×10 | share |
+|---|---|---|---|
+| RT drain `Sleep(kRtDrainMs)` | 150 ms fixed | 1501 ms | 23% |
+| RPC quit + reader join | ~0 ms | ~0 ms | 0% |
+| waiting for the host PROCESS to exit | 97–1568 ms (median ~350) | ~5030 ms | 77% |
+
+Teardown is `destroyAll` → serial `destroy()` per instance, so the total is the SUM. Both
+big terms are per-process and INDEPENDENT, i.e. parallelizable. Options, best first:
+
+1. **Reap in the background** (biggest perceived win, ~6.5 s → ~50 ms). `prepareForModelReplace`
+   already rebuilds the graph without the old nodes BEFORE tearing them down, so nothing
+   audible depends on the dying hosts — hand them to a reaper thread and let `project/new`
+   return. Watch: engine shutdown must join the reaper; reopening immediately means new
+   hosts spawn while old ones die (CPU spike, and licence-managed plugins re-init while a
+   sibling is still exiting — Waves/iLok is the risk to test).
+2. **Tear down in parallel** (~6.5 s → ~1.7 s, the slowest single host). Restructure
+   `destroyAll` into phases: disable+quit ALL, one shared drain, then wait on all the
+   processes together, then unmap each. Bounded change inside HostProcess.cpp; the
+   ordering rules (drain after disable, unregister the crash watch before the kill)
+   must hold per instance. Complements (1) — it decides when the MACHINE is free, not
+   when the UI returns.
+3. **Replace the 150 ms drain sleep with a handshake** (−1.5 s serial, −150 ms parallel):
+   an atomic in-processRt counter the teardown waits on, instead of a conservative sleep.
+   The only artificial delay of the three; independent of (1)/(2) and worth doing anyway.
+4. **Terminate instead of waiting out a polite quit** — cheap but wrong by default: the
+   ~350 ms median IS the plugin's own cleanup, and some persist settings/licence state on
+   exit. Consider only as a shorter grace when the project is being discarded.
+5. **Pool/reuse host processes across project loads** — helps open as well as close, but
+   it is an architectural change (identity, state reset, leak risk). Not now.
+
+Recommendation: (1) + (3) first, then (2) if the machine still feels busy after a close.
+
+---
+
 ## ONGOING — not blocked, just not next
 
 - **Sample-accurate live MIDI** (ROADMAP Phase 4): live input lands at block offset 0
