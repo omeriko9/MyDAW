@@ -412,6 +412,18 @@ json toJson(const Project& p) {
         {"midiMaps", std::move(midiMaps)},
         {"nextId", p.nextId},
     };
+    // Rack-owned instruments (SPEC §5.9): omit-when-empty, so older builds and older
+    // projects are byte-identical when the feature is unused.
+    if (!p.rack.empty()) {
+        json rack = json::array();
+        for (const RackInstrument& r : p.rack) {
+            json rj{{"id", r.id}, {"name", r.name}, {"plugin", toJson(r.plugin)}};
+            if (r.outputTarget != 0)
+                rj["outputTarget"] = r.outputTarget;
+            rack.push_back(std::move(rj));
+        }
+        j["rack"] = std::move(rack);
+    }
     // View-row data (TRACK_TYPES_PLAN §3.6-3.8): omit-when-empty.
     if (!p.arranger.empty())
         j["arranger"] = toJson(p.arranger);
@@ -975,6 +987,20 @@ bool fromJson(const json& j, Project& out, std::string* err) {
                 p.vcas.push_back(std::move(v));
         }
     }
+    if (hasKey(j, "rack") && j.find("rack")->is_array()) {
+        for (const json& rj : *j.find("rack")) {
+            if (!rj.is_object())
+                continue;
+            RackInstrument r;
+            r.id = getOr<uint64_t>(rj, "id", 0);
+            r.name = getOr(rj, "name", "");
+            r.outputTarget = getOr<uint64_t>(rj, "outputTarget", 0);
+            if (r.id == 0 || !rj.contains("plugin") ||
+                !fromJson(rj["plugin"], r.plugin, nullptr))
+                continue;
+            p.rack.push_back(std::move(r));
+        }
+    }
     if (hasKey(j, "midiMaps") && j.find("midiMaps")->is_array()) {
         for (const json& mj : *j.find("midiMaps")) {
             if (!mj.is_object())
@@ -1005,7 +1031,18 @@ bool fromJson(const json& j, Project& out, std::string* err) {
                 tgt = &x;
                 break;
             }
-        if (t.kind != TrackKind::Midi || !tgt || tgt->kind != TrackKind::Instrument)
+        // A rack-owned instrument (SPEC §5.9) is as valid a destination as an
+        // instrument track — without this arm, every rack routing silently died on
+        // the NEXT LOAD while the session it was made in played fine (found by
+        // rack-instrument-test's round-trip check).
+        bool rackTarget = false;
+        for (const RackInstrument& ri : p.rack)
+            if (ri.id == t.midiTarget) {
+                rackTarget = true;
+                break;
+            }
+        if (t.kind != TrackKind::Midi ||
+            !(rackTarget || (tgt && tgt->kind == TrackKind::Instrument)))
             t.midiTarget = 0;
     }
 

@@ -511,6 +511,19 @@ struct GridSettings { // project.json "grid"
     double swing = 0.0; // 0..1
 };
 
+// A rack-owned VST instrument (SPEC §5.9, 2026-08-13): a first-class instance that
+// belongs to the PROJECT, not to any track — the industry-standard third leg next to
+// MIDI tracks (notes only, routed by channel) and Instrument tracks (notes + own VST).
+// MIDI tracks point their midiTarget at a rack id exactly as at an instrument track's
+// id (both draw from Project::nextId, so the id spaces cannot collide). The old
+// "backing instrument track" workaround created hidden tracks; this replaces it.
+struct RackInstrument {
+    uint64_t id = 0;
+    std::string name;          // user label; defaults to the plugin name
+    uint64_t outputTarget = 0; // audio return: 0 = master, else a bus track id
+    PluginInstance plugin;     // the hosted VSTi (same struct as track inserts)
+};
+
 struct Project {
     int formatVersion = 1;
     std::string name = "Untitled";
@@ -531,6 +544,7 @@ struct Project {
     Track masterTrack;         // kind == Master
     std::vector<Asset> assets;
     std::vector<Vca> vcas;         // VCA control-group faders (SPEC §6)
+    std::vector<RackInstrument> rack; // rack-owned VSTi instances (SPEC §5.9); omit-when-empty
     std::vector<MidiMap> midiMaps; // hardware CC → param mappings (SPEC §5.2)
     uint64_t nextId = 1;       // next id to allocate (ids start at 1; 0 = sentinel)
     json ui = json::object();  // opaque UI state, round-tripped verbatim
@@ -597,6 +611,18 @@ public:
     }
     const Track* trackById(uint64_t id) const {
         return const_cast<Model*>(this)->trackById(id);
+    }
+
+    RackInstrument* rackById(uint64_t id) {
+        if (id == 0)
+            return nullptr;
+        for (RackInstrument& r : project.rack)
+            if (r.id == id)
+                return &r;
+        return nullptr;
+    }
+    const RackInstrument* rackById(uint64_t id) const {
+        return const_cast<Model*>(this)->rackById(id);
     }
 
     // Index within project.tracks (master excluded); -1 if absent.
@@ -697,7 +723,15 @@ public:
         for (Track& t : project.tracks)
             if (PluginInstance* pi = scan(t))
                 return pi;
-        return scan(project.masterTrack);
+        if (PluginInstance* pi = scan(project.masterTrack))
+            return pi;
+        // Rack-owned instruments (SPEC §5.9): the instance exists with no owning track,
+        // so callers that asked for outTrack get nullptr there — every plugin op that
+        // only needs the INSTANCE (params, editor, presets, state) works unchanged.
+        for (RackInstrument& ri : project.rack)
+            if (ri.plugin.instanceId == instanceId)
+                return &ri.plugin;
+        return nullptr;
     }
 
     AutomationLane* automationLane(uint64_t trackId, const std::string& paramRef,

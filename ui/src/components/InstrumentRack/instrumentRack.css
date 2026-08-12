@@ -27,3 +27,13 @@
   gap: 4px;
   align-items: center;
 }
+
+/* Rack-owned instance rows (SPEC §5.9) — subtly distinct from host-track rows. */
+.ir-rack-row { background: color-mix(in srgb, var(--accent-soft) 22%, transparent); }
+.ir-route {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}

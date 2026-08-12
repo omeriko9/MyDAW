@@ -322,6 +322,11 @@ void collectInstances(const Project& p, std::map<uint64_t, PluginInstance>& out)
     for (const Track& t : p.tracks)
         scan(t);
     scan(p.masterTrack);
+    // Rack-owned instruments (SPEC §5.9) are instances like any other; every consumer of
+    // this map — undo/redo reconciliation, dirty-instance tracking, state restore — must
+    // see them, or a rack VSTi silently escapes the model/host sync guarantees.
+    for (const RackInstrument& r : p.rack)
+        out[r.plugin.instanceId] = r.plugin;
 }
 
 void appendRestoreError(std::string* error, const std::string& message) {
@@ -1147,6 +1152,9 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/plugin.set")       return pluginSet(p, transient, r);
     if (type == "cmd/plugin.setParam")  return pluginSetParam(p, transient, r);
     if (type == "cmd/plugin.setSample") return pluginSetSample(p, r);
+    if (type == "cmd/rack.add")         return rackAdd(p, r);
+    if (type == "cmd/rack.remove")      return rackRemove(p, r);
+    if (type == "cmd/rack.set")         return rackSet(p, r);
     if (type == "cmd/vca.add")          return vcaAdd(p, r);
     if (type == "cmd/vca.remove")       return vcaRemove(p, r);
     if (type == "cmd/vca.set")          return vcaSet(p, transient, r);
@@ -1482,9 +1490,12 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
             if (t->kind != TrackKind::Midi)
                 return r.fail("bad_request", "midiTarget may only be set on midi tracks");
             const Track* tgt = m.trackById(newMidiTarget);
-            if (!tgt || tgt->kind != TrackKind::Instrument)
+            const bool trackTarget = tgt && tgt->kind == TrackKind::Instrument;
+            // Rack-owned instruments (SPEC §5.9) are equally valid destinations — ids
+            // share Project::nextId with tracks, so one field addresses both.
+            if (!trackTarget && !m.rackById(newMidiTarget))
                 return r.fail("bad_request",
-                              "midiTarget must reference an instrument track");
+                              "midiTarget must reference an instrument track or a rack instrument");
         }
         hasMidiTarget = true;
     }
@@ -5875,8 +5886,13 @@ json CommandProcessor::pluginSet(const json& p, bool transient, CmdResult& r) {
     }
     (void)transient;
     r.label = "Edit Plugin";
-    r.scope = "track";
-    r.eventTrackIds.push_back(owner->id);
+    // Rack-owned instances (SPEC §5.9) have no owning track — fall back to a full event.
+    if (owner) {
+        r.scope = "track";
+        r.eventTrackIds.push_back(owner->id);
+    } else {
+        r.fullEvent = true;
+    }
     return json::object();
 }
 
@@ -5911,12 +5927,19 @@ json CommandProcessor::pluginSetParam(const json& p, bool transient, CmdResult& 
     if (liveNode)
         liveNode->setParamRt(paramId, static_cast<float>(value));
 
-    captureAutomation(owner->id,
-                      "plugin:" + std::to_string(instanceId) + ":" + std::to_string(paramId),
-                      value, transient, r);
+    // Automation write records onto the OWNING track's lanes; a rack instance has no
+    // track (SPEC §5.9), so its knob moves are live-only — nothing to record onto.
+    if (owner)
+        captureAutomation(owner->id,
+                          "plugin:" + std::to_string(instanceId) + ":" + std::to_string(paramId),
+                          value, transient, r);
     r.label = "Edit Plugin Parameter";
-    r.scope = "track";
-    r.eventTrackIds.push_back(owner->id);
+    if (owner) {
+        r.scope = "track";
+        r.eventTrackIds.push_back(owner->id);
+    } else {
+        r.fullEvent = true;
+    }
     return json::object();
 }
 
@@ -5937,9 +5960,149 @@ json CommandProcessor::pluginSetSample(const json& p, CmdResult& r) {
         builtin_->bindSample(instanceId, assetId); // update the live node now (asset is cached)
 
     r.label = "Set Sampler Sample";
-    r.scope = "track";
     r.structural = true; // rebuild so the plan re-binds the sample deterministically
-    r.eventTrackIds.push_back(owner->id);
+    if (owner) {
+        r.scope = "track";
+        r.eventTrackIds.push_back(owner->id);
+    } else {
+        r.fullEvent = true; // rack-owned sampler (SPEC §5.9)
+    }
+    return json::object();
+}
+
+// ---------------------------------------------------------------------------
+// Rack-owned instruments (SPEC §5.9) — VSTi instances that belong to the PROJECT,
+// not to any track: the industry-standard model's third leg. MIDI tracks route at a
+// rack id via midiTarget exactly as at an instrument track (shared id space).
+// ---------------------------------------------------------------------------
+
+// cmd/rack.add {uid, name?} -> {rack:{id,name,outputTarget,plugin}}
+json CommandProcessor::rackAdd(const json& p, CmdResult& r) {
+    Model& m = model();
+    const std::string uid = getOr(p, "uid", "");
+    if (!ctx_.pluginRegistry)
+        return r.fail("plugin_load_failed", "plugin registry unavailable");
+    const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
+    if (!info)
+        return r.fail("unknown_plugin", "uid not in plugin registry: " + uid);
+    if (!info->isInstrument)
+        return r.fail("bad_request", "the rack hosts instruments, not effects: " + info->name);
+    if (info->format != "builtin" && !host_)
+        return r.fail("plugin_load_failed", "plugin hosting unavailable");
+
+    RackInstrument ri;
+    ri.id = m.nextId();
+    ri.name = getOr(p, "name", info->name);
+    ri.plugin.instanceId = m.nextId();
+    ri.plugin.uid = info->uid;
+    ri.plugin.format = info->format;
+    ri.plugin.path = info->path;
+    ri.plugin.bitness = info->bitness;
+    ri.plugin.name = info->name;
+
+    std::string err;
+    if (!createInsertNode(ri.plugin, err))
+        return r.fail("plugin_load_failed",
+                      err.empty() ? ("failed to load " + ri.plugin.name) : err);
+    json out = json{{"id", ri.id},
+                    {"name", ri.name},
+                    {"outputTarget", ri.outputTarget},
+                    {"plugin", toJson(ri.plugin)}};
+    m.project.rack.push_back(std::move(ri));
+    r.label = "Add Rack Instrument";
+    r.structural = true;
+    r.fullEvent = true; // the rack rides the full project snapshot
+    return json{{"rack", std::move(out)}};
+}
+
+// cmd/rack.remove {rackId} — destroys the instance and CLEARS every feeder pointed at
+// it (the engine owns referential integrity here; a dangling midiTarget only degrades
+// with a warning, but silently-dead routings are precisely the confusion §5.9 removes).
+json CommandProcessor::rackRemove(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t rackId = getOr<uint64_t>(p, "rackId", 0);
+    RackInstrument* ri = m.rackById(rackId);
+    if (!ri)
+        return r.fail("not_found", "unknown rackId");
+    destroyInsertNode(ri->plugin.instanceId);
+    for (Track& t : m.project.tracks)
+        if (t.kind == TrackKind::Midi && t.midiTarget == rackId)
+            t.midiTarget = 0;
+    m.project.rack.erase(
+        std::remove_if(m.project.rack.begin(), m.project.rack.end(),
+                       [rackId](const RackInstrument& x) { return x.id == rackId; }),
+        m.project.rack.end());
+    r.label = "Remove Rack Instrument";
+    r.structural = true;
+    r.fullEvent = true;
+    return json::object();
+}
+
+// cmd/rack.set {rackId, patch:{name?, outputTarget?, uid?}} — uid swaps the hosted
+// instrument IN PLACE: new instance under the same rack id, so every feeder keeps its
+// routing (the point of the rack owning the identity rather than the plugin).
+json CommandProcessor::rackSet(const json& p, CmdResult& r) {
+    Model& m = model();
+    const uint64_t rackId = getOr<uint64_t>(p, "rackId", 0);
+    RackInstrument* ri = m.rackById(rackId);
+    if (!ri)
+        return r.fail("not_found", "unknown rackId");
+    if (!p.is_object() || !p.contains("patch") || !p["patch"].is_object())
+        return r.fail("bad_request", "missing patch object");
+    const json& patch = p["patch"];
+
+    bool any = false;
+    if (hasKey(patch, "name")) {
+        ri->name = getOr(patch, "name", ri->name.c_str());
+        any = true;
+    }
+    if (hasKey(patch, "outputTarget")) {
+        const uint64_t dest = getOr<uint64_t>(patch, "outputTarget", 0);
+        if (dest != 0) {
+            const Track* bus = m.trackById(dest);
+            if (!bus || bus->kind != TrackKind::Bus)
+                return r.fail("bad_request", "outputTarget must be 0 (master) or a bus id");
+        }
+        ri->outputTarget = dest;
+        r.structural = true;
+        any = true;
+    }
+    if (hasKey(patch, "uid")) {
+        const std::string uid = getOr(patch, "uid", "");
+        if (!ctx_.pluginRegistry)
+            return r.fail("plugin_load_failed", "plugin registry unavailable");
+        const PluginInfo* info = ctx_.pluginRegistry->byUid(uid);
+        if (!info)
+            return r.fail("unknown_plugin", "uid not in plugin registry: " + uid);
+        if (!info->isInstrument)
+            return r.fail("bad_request", "the rack hosts instruments, not effects");
+        if (uid != ri->plugin.uid) {
+            PluginInstance next;
+            next.instanceId = m.nextId();
+            next.uid = info->uid;
+            next.format = info->format;
+            next.path = info->path;
+            next.bitness = info->bitness;
+            next.name = info->name;
+            std::string err;
+            if (!createInsertNode(next, err))
+                return r.fail("plugin_load_failed",
+                              err.empty() ? ("failed to load " + next.name) : err);
+            destroyInsertNode(ri->plugin.instanceId);
+            const bool renameToo = ri->name == ri->plugin.name; // default label follows
+            ri->plugin = std::move(next);
+            if (renameToo)
+                ri->name = ri->plugin.name;
+            r.structural = true;
+            any = true;
+        }
+    }
+    if (!any) {
+        r.mutated = false;
+        return json::object();
+    }
+    r.label = "Edit Rack Instrument";
+    r.fullEvent = true;
     return json::object();
 }
 

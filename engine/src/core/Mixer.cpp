@@ -128,6 +128,17 @@ SoloState computeSoloClosure(const Project& p, const std::vector<uint64_t>& solo
             for (const Track& cand : p.tracks)
                 if (cand.id != r && feedsBusViaOutput(p, cand, r))
                     addUnique(set, cand.id);
+            // Rack instruments returning into this bus stay audible — and so do their
+            // MIDI feeders, since without the feeders' events the rack VSTi is silent
+            // (mirrors the Instrument-track branch below).
+            for (const RackInstrument& ri : p.rack) {
+                if (ri.outputTarget != r)
+                    continue;
+                addUnique(set, ri.id);
+                for (const Track& cand : p.tracks)
+                    if (cand.kind == TrackKind::Midi && cand.midiTarget == ri.id)
+                        addUnique(set, cand.id);
+            }
         } else if (t->kind == TrackKind::Instrument) {
             for (const Track& cand : p.tracks)
                 if (cand.kind == TrackKind::Midi && cand.midiTarget == r)
@@ -141,8 +152,21 @@ SoloState computeSoloClosure(const Project& p, const std::vector<uint64_t>& solo
         const uint64_t id = work.back();
         work.pop_back();
         const Track* t = findTrack(p, id);
-        if (!t)
+        if (!t) {
+            // Rack-owned instrument (SPEC §5.9): not a track, but its audio RETURN is —
+            // soloing a feeder routed at a rack VSTi must keep the rack's bus audible,
+            // or the solo plays into a muted return and sounds like silence.
+            for (const RackInstrument& r : p.rack) {
+                if (r.id != id || r.outputTarget == 0)
+                    continue;
+                if (!contains(set, r.outputTarget)) {
+                    set.push_back(r.outputTarget);
+                    work.push_back(r.outputTarget);
+                }
+                break;
+            }
             continue;
+        }
         if (t->outputTarget.isTrack()) {
             const uint64_t d = t->outputTarget.trackId;
             if (!contains(set, d)) {

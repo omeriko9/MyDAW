@@ -86,6 +86,12 @@ uint64_t maxIdInProject(const Project& p) {
         maxId = std::max(maxId, mk.id);
     for (const Asset& a : p.assets)
         maxId = std::max(maxId, a.id);
+    // Rack-owned instruments (SPEC §5.9): both the rack id and its instance id draw
+    // from nextId — missing either here would let a loaded project re-allocate them.
+    for (const RackInstrument& ri : p.rack) {
+        maxId = std::max(maxId, ri.id);
+        maxId = std::max(maxId, ri.plugin.instanceId);
+    }
     return maxId;
 }
 

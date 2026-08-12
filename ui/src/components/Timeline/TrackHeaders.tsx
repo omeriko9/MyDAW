@@ -768,9 +768,25 @@ export default function TrackHeaders({
     const liveProject = useStore.getState().project;
     if (!liveProject) return;
     const hosts = liveProject.tracks.filter((x) => x.kind === "instrument");
+    const rack = liveProject.rack ?? [];
     const liveFeeder = liveProject.tracks.find((x) => x.id === t.id) ?? t;
-    const currentTarget = liveProject.tracks.find((x) => x.id === liveFeeder.midiTarget);
-    const existing: MenuEntry[] = hosts.map((host) => {
+    const currentTarget =
+      liveProject.tracks.find((x) => x.id === liveFeeder.midiTarget) ??
+      rack.find((x) => x.id === liveFeeder.midiTarget);
+    // Rack-owned instances first (SPEC §5.9): they are the standard home for shared/
+    // multitimbral instruments, so the picker leads with them.
+    const rackEntries: MenuEntry[] = rack.map((ri) => {
+      const feeders = liveProject.tracks.filter(
+        (x) => x.kind === "midi" && x.midiTarget === ri.id,
+      ).length;
+      return {
+        label: `${ri.name} · rack · ${feeders} track${feeders === 1 ? "" : "s"}`,
+        icon: "layers",
+        checked: currentTarget?.id === ri.id,
+        onClick: () => routeMidiToInstrument(t.id, ri.id),
+      };
+    });
+    const existing: MenuEntry[] = [...rackEntries, ...hosts.map((host): MenuEntry => {
       const ins = instrumentInsertOf(host);
       const feeders = instrumentFeeders(liveProject, host.id).length;
       return {
@@ -779,7 +795,7 @@ export default function TrackHeaders({
         checked: currentTarget?.id === host.id,
         onClick: () => routeMidiToInstrument(t.id, host.id),
       };
-    });
+    })];
     openContextMenu(x, y, [
       {
         label: "None",

@@ -479,6 +479,19 @@ void ProjectIO::capturePluginStates(Model& model, const std::string& targetDir,
     for (Track& t : model.project.tracks)
         capture(t);
     capture(model.project.masterTrack);
+    // Rack-owned instruments (SPEC §5.9): same capture, the instance just has no track.
+    {
+        Track shim; // capture() only reads .inserts — borrow its loop
+        for (RackInstrument& ri : model.project.rack)
+            shim.inserts.push_back(ri.plugin);
+        capture(shim);
+        // capture() stamped stateFile on the SHIM copies; mirror onto the real entries.
+        if (stampModel)
+            for (RackInstrument& ri : model.project.rack)
+                for (const PluginInstance& pi : shim.inserts)
+                    if (pi.instanceId == ri.plugin.instanceId)
+                        ri.plugin.stateFile = pi.stateFile;
+    }
 }
 
 void ProjectIO::copyExternalAssets(Model& model, const std::string& sourceDir) {

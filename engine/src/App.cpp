@@ -1046,17 +1046,26 @@ void App::prepareForModelReplace() {
 void App::recreatePluginInstances() {
     // Hosted (out-of-process) creations are the slow part — count them up front so the
     // UI's loading modal (event/pluginLoadProgress) can show "N of M: <plugin>".
-    int total = 0;
+    // Track inserts AND rack-owned instruments (SPEC §5.9): one flat list, so the
+    // rack loads with the same progress reporting, cancel, and state restore.
+    std::vector<PluginInstance*> instances;
     for (Track* t : model.allTracks(true))
         for (PluginInstance& pi : t->inserts)
-            if (pi.format != "builtin" && !pi.path.empty())
-                ++total;
+            instances.push_back(&pi);
+    for (RackInstrument& ri : model.project.rack)
+        instances.push_back(&ri.plugin);
+
+    int total = 0;
+    for (const PluginInstance* pi : instances)
+        if (pi->format != "builtin" && !pi->path.empty())
+            ++total;
     int current = 0;
     bool cancelled = false;
     pluginLoadCancelRequested_.store(false, std::memory_order_release);
     pluginLoadActive_.store(total > 0, std::memory_order_release);
-    for (Track* t : model.allTracks(true)) {
-        for (PluginInstance& pi : t->inserts) {
+    {
+        for (PluginInstance* piPtr : instances) {
+            PluginInstance& pi = *piPtr;
             if (pluginLoadCancelRequested_.load(std::memory_order_acquire)) {
                 cancelled = true;
                 break;
@@ -1105,8 +1114,6 @@ void App::recreatePluginInstances() {
             if (!bytes.empty())
                 host->setState(pi.instanceId, bytes);
         }
-        if (cancelled)
-            break;
     }
     if (total > 0) {
         broadcastEvent("event/pluginLoadProgress",

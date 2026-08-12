@@ -72,6 +72,8 @@ const SUITES = [
     note: "cycle-record lap splitting; needs midi/feedEvent to drive MIDI headlessly" },
   { id: "takes-record", tier: "fast", script: "takes-record-test.mjs", requires: needsEngine,
     note: "SPEC §8.7 record take modes: keepHistory lane stacking vs replace trim" },
+  { id: "rack-instrument", tier: "fast", script: "rack-instrument-test.mjs", requires: needsEngine,
+    note: "SPEC §5.9 rack-owned VSTi: project-level instances, feeder routing, solo law, persistence" },
   { id: "cache-clean", tier: "fast", script: "plugin-cache-clean-test.mjs", requires: needsEngine,
     note: "plugins/cleanCache prunes dead cache records; the blacklist must survive" },
   { id: "input-gain", tier: "fast", script: "input-gain-test.mjs", requires: needsEngine,

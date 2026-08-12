@@ -410,6 +410,16 @@ export interface ProjectUiState {
   [key: string]: unknown;
 }
 
+/** A rack-owned VST instrument (SPEC §5.9): a project-level instance no track owns.
+ *  MIDI tracks route at `id` via Track.midiTarget, exactly as at an instrument track. */
+export interface RackInstrument {
+  id: number;
+  name: string;
+  /** audio return: 0 = master, else a bus track id */
+  outputTarget: number;
+  plugin: PluginInstance;
+}
+
 export interface Project {
   formatVersion: 1;
   name: string;
@@ -435,6 +445,8 @@ export interface Project {
   assets: Asset[];
   /** VCA control-group faders (absent on older engines). */
   vcas?: Vca[];
+  /** rack-owned instrument instances (SPEC §5.9) — absent on older projects */
+  rack?: RackInstrument[];
   nextId: number;
   ui?: ProjectUiState;
 }
@@ -2285,6 +2297,12 @@ export interface RequestMap {
   "cmd/plugin.set": { req: PluginSetRequest; reply: EmptyObject };
   "cmd/plugin.setParam": { req: PluginSetParamRequest; reply: EmptyObject };
   "cmd/plugin.setSample": { req: { instanceId: number; assetId: number }; reply: EmptyObject };
+  "cmd/rack.add": { req: { uid: string; name?: string }; reply: { rack: RackInstrument } };
+  "cmd/rack.remove": { req: { rackId: number }; reply: EmptyObject };
+  "cmd/rack.set": {
+    req: { rackId: number; patch: { name?: string; outputTarget?: number; uid?: string } };
+    reply: EmptyObject;
+  };
   "cmd/vca.add": { req: { name?: string }; reply: { vca: Vca } };
   "cmd/vca.remove": { req: { id: number }; reply: EmptyObject };
   "cmd/vca.set": { req: { id: number; patch: { gain?: number; name?: string } }; reply: EmptyObject };

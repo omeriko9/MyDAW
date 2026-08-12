@@ -738,6 +738,51 @@ removedTrackIds?:[], removedClipIds?:[]}`. Undo/redo/load/recover always send `s
 full:<Project>`. UI store applies granular updates when present, else replaces. UI performs
 local-only preview during drags and sends one final command on mouse-up.
 
+### 5.9 Rack-owned instruments (2026-08-13)
+
+The industry-standard three-part model, adopted after the "backing instrument track"
+workaround produced hidden tracks, phantom rack rows and a drag-a-VST-per-imported-track
+workflow (Omer: "MIDI tracks cannot have a VST associated with them — that's the real issue"):
+
+- **MIDI track** — notes only, no sound of its own; its OUTPUT is a routing decision
+  (`midiTarget` + `midiOutChannel`).
+- **Instrument track** — notes + its own VST; single-part convenience, no channel selector.
+- **Rack instrument** — a VSTi instance owned by the PROJECT, not by any track:
+  `project.rack: [{id, name, outputTarget, plugin}]`. Ids draw from `Project::nextId`, so
+  `Track.midiTarget` addresses a rack instrument exactly as it addresses an instrument
+  track — one field, two destination kinds, no collisions. `outputTarget` is the audio
+  return: 0 = master, else a bus id.
+
+Commands: `cmd/rack.add {uid, name?}` (instruments only — effects refused),
+`cmd/rack.remove {rackId}` (clears every feeder's `midiTarget`: the engine owns referential
+integrity here), `cmd/rack.set {rackId, patch:{name?, outputTarget?, uid?}}` — a uid swap
+replaces the VSTi under the SAME rack id, so feeder routings survive the swap.
+
+Engineering shape: the graph SYNTHESIZES a track config per rack entry inside `buildPlan`
+(instrument kind, the plugin as sole insert, the return as outputTarget) — an
+implementation detail of the builder; the model holds no hidden tracks and nothing outside
+`buildPlan` sees them. Rack instances ride `collectInstances` (undo/redo reconciliation),
+`capturePluginStates` (save), `recreatePluginInstances` (load), and `maxIdInProject`. Solo
+law: soloing a feeder keeps its rack instrument and the rack's return bus audible; soloing
+a bus keeps rack instruments returning into it AND their feeders audible; soloing anything
+unrelated silences the rack like any other source. Load-time `midiTarget` fixup accepts
+rack ids (missing that arm silently killed every rack routing on the next load — caught by
+`rack-instrument-test`'s round-trip check).
+
+UI: the Instrument Rack's **Add Instrument creates a rack instance** (no track); each rack
+row is the ROUTING surface — "N routed" opens a multi-toggle over every MIDI track (with
+"route all unrouted here" for imports), the channel cell sets each feeder's channel
+(Any = keep the notes' own channels, which imported SMFs carry), plus Replace-in-place and
+Remove. Host-track rows below now show only instrument tracks that actually hold an
+instrument or have feeders — conversion husks are just tracks and stay out of the rack.
+Feeder pickers list rack instruments first. Automation write from a rack instance's native
+editor is live-only (no owning track = no lane to record onto) — a known, deliberate gap.
+
+Tests: `rack-instrument-test.mjs` (gate `rack-instrument`, 17 checks incl. audible
+routing via the built-in synth and the silence-after-reload regression), ui-smoke
+`rack-instrument-first-class` (the whole flow through real clicks, asserting the track
+count never changes).
+
 ## 6. Project format (`project.json` v1)
 
 A project is a folder `Name.mydaw/` containing `project.json`, `audio/`, `peaks/`,
@@ -763,6 +808,8 @@ Project = {
   tracks: Track[],                                   // ordered, tree via parentId (folders)
   masterTrack: Track,                                // kind:"master"
   assets: [{id, file, originalPath?, sampleRate, channels, lengthSamples, missing?:bool}],
+  rack?: [{id, name, outputTarget? /*bus id; absent = master*/, plugin: PluginInstance}],
+                                                     // rack-owned VSTi (§5.9); omit-when-empty
   nextId: number, ui?: {zoomX?, zoomY?, scrollX?, ...} // opaque to engine
 }
 Track = {

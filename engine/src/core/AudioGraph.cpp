@@ -265,7 +265,25 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
     // block's MIDI into the target instrument node's merge buffer and contributes no
     // audio. A target is live when it exists and is Instrument-kind; anything else
     // degrades to "unrouted" (the track plays through its own inserts) with a warning.
-    std::map<uint64_t, uint64_t> feedTarget; // feeder track id -> instrument track id
+    // Rack-owned instruments (SPEC §5.9) ride the ordinary track-node machinery via a
+    // SYNTHESIZED Track per rack entry — an implementation detail of this builder only:
+    // the model holds no hidden tracks, and nothing outside this function sees these.
+    // Instrument kind + the hosted plugin as the sole insert + the rack's audio return
+    // as outputTarget reproduces exactly what an instrument HOST track would be.
+    std::vector<Track> rackTracks;
+    rackTracks.reserve(p.rack.size());
+    for (const RackInstrument& r : p.rack) {
+        Track t;
+        t.id = r.id;
+        t.kind = TrackKind::Instrument;
+        t.name = r.name.empty() ? r.plugin.name : r.name;
+        t.outputTarget = r.outputTarget == 0 ? OutputTarget::master()
+                                             : OutputTarget::track(r.outputTarget);
+        t.inserts.push_back(r.plugin);
+        rackTracks.push_back(std::move(t));
+    }
+
+    std::map<uint64_t, uint64_t> feedTarget; // feeder track id -> instrument node id
     for (const Track& t : p.tracks) {
         if (t.kind != TrackKind::Midi || t.midiTarget == 0)
             continue;
@@ -275,6 +293,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                 tgt = &x;
                 break;
             }
+        // A rack instrument is as valid a destination as an instrument track — the two
+        // draw ids from the same Project::nextId, so a single lookup order suffices.
+        if (!tgt)
+            for (const Track& x : rackTracks)
+                if (x.id == t.midiTarget) {
+                    tgt = &x;
+                    break;
+                }
         if (tgt && tgt->kind == TrackKind::Instrument)
             feedTarget[t.id] = tgt->id;
         else
@@ -297,6 +323,11 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
     for (const Track& t : p.tracks)
         if (t.canHoldClips() && !feedTarget.count(t.id))
             ordered.push_back(&t);
+    // Rack instrument nodes: after every feeder (their MIDI must already be delivered),
+    // before buses/master (their audio accumulates into those). Same slot in the pass
+    // as a non-feeding clip track.
+    for (const Track& t : rackTracks)
+        ordered.push_back(&t);
     for (const int a : topo)
         ordered.push_back(buses[static_cast<size_t>(a)]);
     ordered.push_back(&p.masterTrack);

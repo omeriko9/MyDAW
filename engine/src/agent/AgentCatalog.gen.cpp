@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "9043453e8b2abae97bf763f946466746e455aedf16061d0e2e832d348baba392";
+const char kAgentCatalogSha256[] = "8db87ad0c147e77472f6ee865abeb5850e139270d5c9360fef8978d355921856";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -7091,6 +7091,149 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/rack.add",
+      "category": "plugins",
+      "description": "Add a rack-owned VST instrument to the project (SPEC 5.9) — an instance owned by the rack, not by any track. MIDI tracks route at its id via midiTarget.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "uid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "rack": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "rack"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "uid": "1213288274",
+            "name": "Orchestral"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/rack.remove",
+      "category": "plugins",
+      "description": "Remove a rack instrument; every MIDI track routed at it has its midiTarget cleared (SPEC 5.9).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "rackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "rackId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "rackId": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/rack.set",
+      "category": "plugins",
+      "description": "Patch a rack instrument: name, outputTarget (0=master, else bus id), or uid — a uid swap keeps the SAME rack id so feeder routings survive (SPEC 5.9).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "rackId": {
+            "type": "number"
+          },
+          "patch": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "rackId",
+          "patch"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "rackId": 7,
+            "patch": {
+              "uid": "1213288274"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/take.comp",
       "category": "clips",
       "description": "Comp a range from one take lane: split takes at the range bounds, unmute that lane inside the range and mute the other lanes, one undo (SPEC 8.7).",
@@ -11607,6 +11750,9 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/plugin.setParam",
     "cmd/plugin.setSample",
     "cmd/punch.set",
+    "cmd/rack.add",
+    "cmd/rack.remove",
+    "cmd/rack.set",
     "cmd/take.comp",
     "cmd/take.front",
     "cmd/take.lane",

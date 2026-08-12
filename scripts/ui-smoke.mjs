@@ -2248,6 +2248,68 @@ export const checks = [
   },
 
   {
+    id: "rack-instrument-first-class",
+    title: "the rack adds a PROJECT-owned instrument and routes MIDI tracks at it — no hidden tracks",
+    area: "instrument-rack",
+    guards: "SPEC §5.9 (Omer, 2026-08-13): the old 'backing instrument track' workaround minted hidden tracks and phantom rack rows, and imported multi-track MIDI needed a VST drag per track. The rack's Add Instrument now creates a rack-owned instance; its row routes MIDI tracks (multi-toggle) and the track count must NOT change at any point.",
+    run: async (s, tt) => {
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "Rack Feeder" })).payload.track;
+      const before = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const trackCount = before.tracks.length;
+
+      // Open the Instrument Rack dock tab.
+      await s.eval(() => {
+        const tab = [...document.querySelectorAll("button, .dock-tab")].find(
+          (e) => e.textContent.trim() === "Instrument Rack");
+        tab?.click();
+        return true;
+      });
+      await s.untilEval("the rack pane mounts", () => !!document.querySelector(".ir-root"));
+
+      // Add Instrument -> built-in Synth.
+      await s.eval(() => { document.querySelector(".ir-add").click(); return true; });
+      await s.untilEval("the instrument menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((e) => e.textContent.trim() === "Synth"));
+      await s.eval(() => {
+        [...document.querySelectorAll(".ctx-item")].find((e) => e.textContent.trim() === "Synth").click();
+        return true;
+      });
+      await s.until("a rack entry exists in the MODEL, and no track was created", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        return (p.rack ?? []).length === 1 && p.tracks.length === trackCount;
+      });
+      await s.untilEval("and the rack shows its row", () => !!document.querySelector(".ir-rack-row"));
+
+      // Route the MIDI track from the rack row's own control.
+      await s.eval(() => {
+        document.querySelector(".ir-rack-row .ir-route").click();
+        return true;
+      });
+      await s.untilEval("the route menu lists the MIDI track", () =>
+        [...document.querySelectorAll(".ctx-item")].some((e) => e.textContent.includes("Rack Feeder")));
+      await s.eval(() => {
+        [...document.querySelectorAll(".ctx-item")].find((e) => e.textContent.includes("Rack Feeder")).click();
+        return true;
+      });
+      await s.until("the feeder's midiTarget points at the rack id", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const f = p.tracks.find((t) => t.id === trk.id);
+        return (p.rack ?? []).length === 1 && f?.midiTarget === p.rack[0].id;
+      });
+
+      // Still no new tracks — the entire point.
+      const after = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      tt.eq(after.tracks.length, trackCount, "routing minted no hidden track");
+
+      // Clean up: remove the rack instrument (engine clears the feeder) + the track.
+      await s.probe("cmd/rack.remove", { rackId: after.rack[0].id });
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      const clean = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      tt.eq((clean.rack ?? []).length, 0, "rack cleaned up");
+    },
+  },
+
+  {
     id: "take-lanes-and-comp-click",
     title: "Show Lanes reveals take rows and a comp-tool click swaps which take plays",
     area: "timeline-takes",

@@ -2,7 +2,14 @@
 
 import type React from "react";
 import { useStore } from "../../store/store";
-import { removePlugin, removeTrack, setTrack } from "../../store/actions";
+import {
+  addRackInstrument,
+  removePlugin,
+  removeRackInstrument,
+  removeTrack,
+  setRackInstrument,
+  setTrack,
+} from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { openBestEditor } from "../PluginEditor/openEditor";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
@@ -15,7 +22,13 @@ import {
   instrumentFeeders,
   instrumentInsertOfTrack,
 } from "../Timeline/instrumentAssign";
-import type { PluginInfo, PluginInstance, Track } from "../../protocol/types";
+import type {
+  PluginInfo,
+  PluginInstance,
+  Project,
+  RackInstrument,
+  Track,
+} from "../../protocol/types";
 import { selectTrack } from "../../lib/trackSelection";
 import "./instrumentRack.css";
 
@@ -60,8 +73,10 @@ export default function InstrumentRack() {
   const registry = useStore((s) => s.registry);
   const selected = useStore((s) => s.selection.trackIds);
 
+  // SPEC §5.9: the rack's Add button creates a PROJECT-owned instance — no track is
+  // minted, hidden or otherwise. (createInstrumentHost remains the track-flow helper.)
   const addHost = (p: PluginInfo) => {
-    void createInstrumentHost(p).catch((e) => {
+    void addRackInstrument(p.uid).catch((e) => {
       console.warn("[instrument-rack] add failed:", e);
       showToast(e instanceof Error ? e.message : "Could not load instrument", "error");
     });
@@ -91,7 +106,17 @@ export default function InstrumentRack() {
     return <div className="ir-empty">Open a project to view its instruments.</div>;
   }
 
-  const hosts = project.tracks.filter((t) => t.kind === "instrument");
+  const rack = project.rack ?? [];
+  // Instrument TRACKS shown in the rack: only ones that actually host an instrument or
+  // have MIDI routed at them. A converted track holding neither is a husk from the old
+  // convert-in-place flow (Omer, 2026-08-13: "what are the first two?!") — it is just a
+  // track, and the track list is where it lives.
+  const hosts = project.tracks.filter(
+    (t) =>
+      t.kind === "instrument" &&
+      (instrumentInsertOfTrack(t) !== undefined ||
+        instrumentFeeders(project, t.id).length > 0),
+  );
   const outputOptions: SelectOption[] = [
     { value: "master", label: "Master" },
     ...project.tracks
@@ -106,7 +131,7 @@ export default function InstrumentRack() {
         <div className="ir-title">
           <Icon name="piano" size={15} />
           Instrument Rack
-          <span className="ir-count">{hosts.length}</span>
+          <span className="ir-count">{rack.length + hosts.length}</span>
         </div>
         <button type="button" className="btn primary ir-add" onClick={openAddMenu}>
           <Icon name="plus" size={13} /> Add Instrument
@@ -117,7 +142,16 @@ export default function InstrumentRack() {
         <span>Host / VST</span><span>MIDI tracks</span><span>Channels</span><span>Audio output</span><span />
       </div>
       <div className="ir-list">
-        {hosts.length === 0 ? (
+        {rack.map((ri) => (
+          <RackRow
+            key={`rack:${ri.id}`}
+            ri={ri}
+            project={project}
+            registry={registry}
+            outputOptions={outputOptions}
+          />
+        ))}
+        {rack.length === 0 && hosts.length === 0 ? (
           <div className="ir-empty">
             No instrument instances loaded. Add one here, or drag a VST onto a MIDI track.
           </div>
@@ -220,6 +254,212 @@ export default function InstrumentRack() {
             );
           })
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ * Rack-owned instrument row (SPEC §5.9) — the first-class instance. Unlike the
+ * host-track rows, this row IS the routing surface: it routes MIDI tracks here
+ * (multi-toggle) and sets each feeder's channel, so a 14-track MIDI import is
+ * "Add Instrument, route them, done" instead of a drag per track.
+ * ========================================================================= */
+
+function RackRow({
+  ri,
+  project,
+  registry,
+  outputOptions,
+}: {
+  ri: RackInstrument;
+  project: Project;
+  registry: PluginInfo[];
+  outputOptions: SelectOption[];
+}) {
+  const feeders = project.tracks.filter((t) => t.kind === "midi" && t.midiTarget === ri.id);
+  const channels = Array.from(new Set(feeders.map((t) => t.midiOutChannel ?? 0))).sort(
+    (a, b) => a - b,
+  );
+  const channelLabel =
+    channels.length === 0 ? "—" : channels.map((c) => (c === 0 ? "Any" : String(c))).join(", ");
+
+  const fire = (pr: Promise<unknown>) =>
+    void pr.catch((e) =>
+      showToast(e instanceof Error ? e.message : "Rack command failed", "error"),
+    );
+
+  // "Route MIDI tracks…": every MIDI track, checked = routed HERE. Clicking toggles;
+  // a track routed elsewhere says where, and clicking moves it here — one decision, in
+  // the place whose whole job is instrument routing.
+  const routeMenu = (): MenuEntry[] => {
+    const midiTracks = project.tracks.filter((t) => t.kind === "midi");
+    if (midiTracks.length === 0)
+      return [{ label: "No MIDI tracks in the project", disabled: true }];
+    const items: MenuEntry[] = midiTracks.map((t) => {
+      const here = t.midiTarget === ri.id;
+      const elsewhere =
+        !here && t.midiTarget
+          ? (project.rack?.find((x) => x.id === t.midiTarget)?.name ??
+            project.tracks.find((x) => x.id === t.midiTarget)?.name)
+          : undefined;
+      return {
+        label: `${t.name}${elsewhere ? ` · now → ${elsewhere}` : ""}`,
+        checked: here,
+        onClick: () => fire(setTrack(t.id, { midiTarget: here ? 0 : ri.id })),
+      };
+    });
+    const unrouted = midiTracks.filter((t) => !t.midiTarget);
+    if (unrouted.length > 1) {
+      items.push("separator", {
+        label: `Route all ${unrouted.length} unrouted MIDI tracks here`,
+        icon: "link",
+        onClick: () => {
+          for (const t of unrouted) fire(setTrack(t.id, { midiTarget: ri.id }));
+        },
+      });
+    }
+    return items;
+  };
+
+  // Per-feeder channel: "Any" keeps each note's own channel (imported files carry
+  // them); 1-16 re-stamps — how one Orchestral/Kontakt serves 16 parts.
+  const channelsMenu = (): MenuEntry[] => {
+    if (feeders.length === 0)
+      return [{ label: "No MIDI tracks routed here", disabled: true }];
+    return feeders.map(
+      (t): MenuEntry => ({
+        label: `${t.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`,
+        submenu: [
+          {
+            label: "Any (as recorded)",
+            checked: !t.midiOutChannel,
+            onClick: () => fire(setTrack(t.id, { midiOutChannel: 0 })),
+          },
+          "separator",
+          ...Array.from(
+            { length: 16 },
+            (_, i): MenuEntry => ({
+              label: `Channel ${i + 1}`,
+              checked: t.midiOutChannel === i + 1,
+              onClick: () => fire(setTrack(t.id, { midiOutChannel: i + 1 })),
+            }),
+          ),
+        ],
+      }),
+    );
+  };
+
+  const rowMenu = (): MenuEntry[] => [
+    { label: "Route MIDI tracks…", icon: "link", submenu: routeMenu() },
+    { label: "Feeder channels", icon: "midiNote", submenu: channelsMenu() },
+    "separator",
+    {
+      label: "Replace instrument…",
+      icon: "refresh",
+      title: "Swap the VSTi under the same rack slot — every routing survives",
+      submenu: groupPluginVariants(
+        registry
+          .filter((p) => p.isInstrument && !p.blacklisted)
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ).plugins.map((p) => ({
+        label: p.name,
+        checked: p.uid === ri.plugin.uid,
+        onClick: () => fire(setRackInstrument(ri.id, { uid: p.uid })),
+      })),
+    },
+    "separator",
+    {
+      label: "Remove from rack…",
+      icon: "trash",
+      danger: true,
+      onClick: () => {
+        void confirmDialog({
+          title: "Remove rack instrument",
+          message:
+            `Remove "${ri.name}"? ${feeders.length} MIDI track${feeders.length === 1 ? "" : "s"} ` +
+            `routed here will play unrouted. This can be undone.`,
+          confirmLabel: "Remove",
+          danger: true,
+        }).then((ok) => {
+          if (ok) fire(removeRackInstrument(ri.id));
+        });
+      },
+    },
+  ];
+
+  return (
+    <div
+      className="ir-row ir-rack-row"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openContextMenu(e.clientX, e.clientY, rowMenu());
+      }}
+    >
+      <div className="ir-host">
+        <Icon name="layers" size={16} />
+        <span className="ir-host-text">
+          <strong>{ri.name}</strong>
+          <small>{ri.plugin.name} · rack</small>
+        </span>
+      </div>
+      <button
+        type="button"
+        className="btn ir-route"
+        title={feeders.map((t) => t.name).join("\n") || "Route MIDI tracks at this instrument"}
+        onClick={(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          openContextMenu(r.left, r.bottom + 2, routeMenu());
+        }}
+      >
+        {feeders.length} routed <Icon name="chevronDown" size={10} />
+      </button>
+      <button
+        type="button"
+        className="btn ir-route"
+        title="Per-track MIDI channel into this instrument"
+        onClick={(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          openContextMenu(r.left, r.bottom + 2, channelsMenu());
+        }}
+      >
+        {channelLabel} <Icon name="chevronDown" size={10} />
+      </button>
+      <Select
+        value={ri.outputTarget === 0 ? "master" : String(ri.outputTarget)}
+        options={outputOptions.filter((o) => o.value !== "none")}
+        title="Audio return destination"
+        onChange={(v) =>
+          fire(setRackInstrument(ri.id, { outputTarget: v === "master" ? 0 : Number(v) }))
+        }
+      />
+      <div className="ir-actions">
+        <button
+          type="button"
+          className="btn ir-open"
+          title={`Open ${ri.plugin.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            void openBestEditor(ri.plugin);
+          }}
+        >
+          Open Editor
+        </button>
+        <button
+          type="button"
+          className="btn ir-more"
+          title="Route / replace / remove"
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            openContextMenu(r.left, r.bottom + 2, rowMenu());
+          }}
+        >
+          <Icon name="chevronDown" size={13} />
+        </button>
       </div>
     </div>
   );

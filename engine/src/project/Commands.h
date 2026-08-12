@@ -297,6 +297,9 @@ private:
     json pluginSet(const json& p, bool transient, CmdResult& r);
     json pluginSetParam(const json& p, bool transient, CmdResult& r);
     json pluginSetSample(const json& p, CmdResult& r);
+    json rackAdd(const json& p, CmdResult& r);
+    json rackRemove(const json& p, CmdResult& r);
+    json rackSet(const json& p, CmdResult& r);
     json vcaAdd(const json& p, CmdResult& r);
     json vcaRemove(const json& p, CmdResult& r);
     json vcaSet(const json& p, bool transient, CmdResult& r);

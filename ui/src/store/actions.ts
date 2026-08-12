@@ -491,6 +491,22 @@ export const exportTrackArchive = (req: ExportTrackArchiveRequest = {}) =>
 export const exportCpr = (req: ExportCprRequest = {}) => ws.request("export/cpr", req);
 
 /* ============================================================================
+ * §5.9 — rack-owned instruments
+ * ========================================================================= */
+
+/** Add a project-owned VSTi to the rack; MIDI tracks route at the returned id. */
+export const addRackInstrument = (uid: string, name?: string) =>
+  ws.request("cmd/rack.add", { uid, ...(name ? { name } : {}) });
+/** Remove it; every feeder's midiTarget is cleared by the engine. */
+export const removeRackInstrument = (rackId: number) =>
+  ws.request("cmd/rack.remove", { rackId });
+/** Patch name/outputTarget/uid — a uid swap keeps the rack id, so routings survive. */
+export const setRackInstrument = (
+  rackId: number,
+  patch: { name?: string; outputTarget?: number; uid?: string },
+) => ws.request("cmd/rack.set", { rackId, patch });
+
+/* ============================================================================
  * §5.6 — Plugins
  * ========================================================================= */
 

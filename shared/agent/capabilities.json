@@ -7083,6 +7083,149 @@
       ]
     },
     {
+      "name": "cmd/rack.add",
+      "category": "plugins",
+      "description": "Add a rack-owned VST instrument to the project (SPEC 5.9) — an instance owned by the rack, not by any track. MIDI tracks route at its id via midiTarget.",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "uid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "uid"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "rack": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "rack"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "uid": "1213288274",
+            "name": "Orchestral"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/rack.remove",
+      "category": "plugins",
+      "description": "Remove a rack instrument; every MIDI track routed at it has its midiTarget cleared (SPEC 5.9).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "rackId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "rackId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "rackId": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/rack.set",
+      "category": "plugins",
+      "description": "Patch a rack instrument: name, outputTarget (0=master, else bus id), or uid — a uid swap keeps the SAME rack id so feeder routings survive (SPEC 5.9).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "rackId": {
+            "type": "number"
+          },
+          "patch": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "rackId",
+          "patch"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "rackId": 7,
+            "patch": {
+              "uid": "1213288274"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/take.comp",
       "category": "clips",
       "description": "Comp a range from one take lane: split takes at the range bounds, unmute that lane inside the range and mute the other lanes, one undo (SPEC 8.7).",
