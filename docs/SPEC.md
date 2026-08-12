@@ -949,7 +949,12 @@ key and the question is only "same file on this disk?"; it also keeps the port d
   blacklisted copy is never hidden behind a healthy one (grouping includes the blacklist flag),
   and a copy whose canonical row is absent from a filtered list is kept rather than vanishing.
   The **Plugin Manager keeps showing every file** — it is the page about what is on disk — with
-  a `Copies` column (count + the full path list in its tooltip) and a Duplicates filter chip.
+  a `Copies` column (count + the full path list in its tooltip) and a Duplicates filter chip
+  (whose count matches what the filter shows: the whole family, canonical included). Files the
+  scan did NOT load are dimmed, italic and hatched, with Status **"Not loaded"** and the loaded
+  path in the tooltip, so the rows that were actually loaded read as the real list. Test note:
+  the smoke slot's registry holds no third-party plugins, so asserting over its live rows is
+  vacuous — the check injects a row and measures the computed style instead.
 
 Plugin Manager columns are user-resizable (drag a header's right edge, double-click to reset,
 widths persisted): full plugin paths are long, and the Folder column had no way to show one.
