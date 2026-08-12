@@ -231,6 +231,25 @@
 .pm-row.blacklisted { background: color-mix(in srgb, var(--danger-soft) 32%, transparent); }
 .pm-row.blacklisted:hover { background: var(--danger-soft); }
 
+/* A redundant copy (SPEC §8.3a): the scan answered this file from an identical binary
+   instead of loading it. Recede it so the files that WERE loaded read as the real list —
+   the point of the dedupe. Deliberately weaker than .blacklisted, which must stay the
+   loudest state; a row that is both keeps the red and just loses some contrast. */
+.pm-row.duplicate:not(.blacklisted) { --pm-row-color: var(--border); }
+.pm-row.duplicate .pm-name,
+.pm-row.duplicate .pm-td {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.pm-row.duplicate:not(.blacklisted) {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 7px,
+    color-mix(in srgb, var(--text-faint) 7%, transparent) 7px 14px
+  );
+}
+.pm-row.duplicate:not(.blacklisted):hover { background: var(--panel); }
+
 .pm-td {
   padding: 7px 10px;
   vertical-align: middle;
@@ -304,6 +323,13 @@
 }
 
 .pm-status.ok { color: var(--ok); font-weight: 600; }
+.pm-status.copy {
+  color: var(--text-faint);
+  font-weight: 600;
+  font-style: normal; /* the row is italic; the badge stays readable */
+  border-bottom: 1px dotted currentColor; /* the tooltip names the file that WAS loaded */
+  cursor: help;
+}
 .pm-status.bad {
   color: var(--danger-text, var(--danger));
   font-weight: 650;

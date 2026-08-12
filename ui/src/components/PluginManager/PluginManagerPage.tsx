@@ -49,7 +49,7 @@ type SortKey =
  *  columns actually get — and what a drag on a header edge overrides. */
 const COL_DEFAULTS: Record<string, number> = {
   favorite: 34, name: 240, kind: 90, format: 78, bitness: 60, vendor: 150,
-  category: 130, io: 70, copies: 70, folder: 320, status: 110, actions: 150,
+  category: 130, io: 70, copies: 70, folder: 320, status: 128, actions: 150,
 };
 const COL_ORDER = [
   "favorite", "name", "kind", "format", "bitness", "vendor", "category", "io",
@@ -239,7 +239,9 @@ export default function PluginManagerPage() {
     let favorites = 0;
     let duplicates = 0;
     for (const p of registry) {
-      if (p.duplicateOf) duplicates++;
+      // Count what the chip's FILTER shows — the whole family, canonical included —
+      // not just the redundant rows, or the number would never match the list.
+      if (copyCount(p) > 1) duplicates++;
       if (p.isInstrument) instruments++;
       else effects++;
       if (p.blacklisted) blacklisted++;
@@ -247,7 +249,7 @@ export default function PluginManagerPage() {
       if (isPluginFavorite(favoriteSet, p)) favorites++;
     }
     return { instruments, effects, blacklisted, bit32, favorites, duplicates };
-  }, [registry, favoriteSet]);
+  }, [registry, favoriteSet, copyCount]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -519,7 +521,11 @@ export default function PluginManagerPage() {
                   key={key}
                   className={
                     "pm-row" +
-                    (p.blacklisted ? " blacklisted" : p.isInstrument ? " instrument" : " effect")
+                    (p.blacklisted ? " blacklisted" : p.isInstrument ? " instrument" : " effect") +
+                    // A redundant copy: the scan did NOT load this file, it answered it
+                    // from the identical binary named in duplicateOf (SPEC §8.3a). Dimmed
+                    // so the rows that were actually loaded stand out at a glance.
+                    (p.duplicateOf ? " duplicate" : "")
                   }
                 >
                   <td className="pm-td pm-td-fav">
@@ -584,6 +590,14 @@ export default function PluginManagerPage() {
                     {p.blacklisted ? (
                       <span className="pm-status bad" title={p.blacklistReason || "blacklisted"}>
                         Blacklisted
+                      </span>
+                    ) : p.duplicateOf ? (
+                      // Says the quiet part out loud: this file was never loaded.
+                      <span
+                        className="pm-status copy"
+                        title={`Identical to a file already scanned, so this one was NOT loaded.\nLoaded instead:\n${p.duplicateOf}`}
+                      >
+                        Not loaded
                       </span>
                     ) : (
                       <span className="pm-status ok">OK</span>

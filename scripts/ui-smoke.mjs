@@ -543,6 +543,63 @@ export const checks = [
   },
 
   {
+    id: "plugin-manager-marks-unloaded-copies",
+    title: "the 'not loaded' duplicate styling is real CSS, not just a class name",
+    area: "plugin-manager",
+    guards: "2026-08-12 (Omer): the Manager deliberately lists every file, so the dedupe is only visible if the copies the scan did NOT load look different from the ones it did. NOTE: this slot's engine has an isolated APPDATA with no third-party plugins, so there are no real duplicate rows to look at — asserting over the live rows passed happily with the styling REMOVED. It therefore injects a row carrying the class and measures the computed style, which is the part that can silently rot.",
+    run: async (s, tt) => {
+      const base = await s.eval(`location.origin + location.pathname`);
+      try {
+        await s.send("Page.navigate", { url: `${base}?page=plugins` });
+        await s.until("the manager page mounts", async () =>
+          (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
+        await s.untilEval("rows render", () => document.querySelectorAll(".pm-row").length > 0);
+
+        const style = JSON.parse(await s.eval(`(() => {
+          const tbody = document.querySelector(".pm-table tbody");
+          const mk = (cls) => {
+            const tr = document.createElement("tr");
+            tr.className = cls;
+            const td = document.createElement("td");
+            td.className = "pm-td";
+            td.textContent = "probe";
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+            const cs = getComputedStyle(td);
+            const rs = getComputedStyle(tr);
+            const out = { fontStyle: cs.fontStyle, color: cs.color, background: rs.backgroundImage };
+            tr.remove();
+            return out;
+          };
+          return JSON.stringify({ plain: mk("pm-row effect"), dup: mk("pm-row effect duplicate") });
+        })()`));
+
+        tt.eq(style.dup.fontStyle, "italic", "a duplicate row's cells are italic");
+        tt.ok(style.plain.fontStyle !== "italic", "an ordinary row's are not");
+        tt.ok(style.dup.color !== style.plain.color,
+          `the duplicate row is dimmed to a different color (${style.plain.color} -> ${style.dup.color})`);
+        tt.ok(style.dup.background.includes("gradient"),
+          "and carries the hatched background that reads as 'inactive'");
+
+        // The label the user actually reads. Same injection trick, same reason.
+        const label = await s.eval(`(() => {
+          const el = document.createElement("span");
+          el.className = "pm-status copy";
+          document.body.appendChild(el);
+          const ok = getComputedStyle(el).cursor;
+          el.remove();
+          return ok;
+        })()`);
+        tt.eq(label, "help", "the 'Not loaded' badge advertises its explain-tooltip");
+      } finally {
+        await s.send("Page.navigate", { url: base });
+        await s.until("the DAW window comes back", async () =>
+          (await s.eval(`!!document.querySelector(".tl-headers")`)) === true, { timeout: 30000 });
+      }
+    },
+  },
+
+  {
     id: "plugin-manager-columns-resize",
     title: "Plugin Manager columns can be dragged wider (Folder especially) and the width sticks",
     area: "plugin-manager",
