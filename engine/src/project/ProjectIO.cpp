@@ -323,6 +323,48 @@ bool ProjectIO::saveAs(Model& model, const std::string& dir, std::string& err) {
     return true;
 }
 
+bool ProjectIO::rename(Model& model, const std::string& newName, std::string& err) {
+    // Same sanitization as the auto-save folder name: this string may become a directory.
+    std::string clean;
+    for (const char c : newName)
+        clean += (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' ||
+                  c == '|' || c == '?' || c == '*' || static_cast<unsigned char>(c) < 0x20)
+                     ? '_'
+                     : c;
+    while (!clean.empty() && (clean.front() == ' '))
+        clean.erase(clean.begin());
+    while (!clean.empty() && (clean.back() == ' ' || clean.back() == '.'))
+        clean.pop_back();
+    if (clean.empty()) {
+        err = "empty_name";
+        return false;
+    }
+    if (clean == model.project.name && (!hasPath() || fileName(projectDir_) == clean + ".mydaw"))
+        return true; // no-op
+
+    if (hasPath()) {
+        const std::string target = pathJoin(parentDir(projectDir_), clean + ".mydaw");
+        if (normPath(target) != normPath(projectDir_)) {
+            if (dirExists(target) || fileExists(target)) {
+                err = "exists";
+                return false;
+            }
+            if (!MoveFileExW(utf8ToWide(projectDir_).c_str(), utf8ToWide(target).c_str(),
+                             MOVEFILE_WRITE_THROUGH)) {
+                err = "rename failed (is the folder open elsewhere?)";
+                return false;
+            }
+            projectDir_ = target;
+            if (assets_)
+                assets_->setProjectDir(projectDir_); // asset paths are relative to it
+            writeSessionLock();                      // recovery must point at the new dir
+        }
+    }
+    model.project.name = clean;
+    markDirty(); // the name lives in project.json; a save makes it permanent
+    return true;
+}
+
 std::string ProjectIO::projectsBaseDir() const {
     // User-chosen base folder wins (settings.projectsFolder); "" keeps the built-in
     // <Documents>\MyDAW Projects. Everything that saves WITHOUT asking lands here, so

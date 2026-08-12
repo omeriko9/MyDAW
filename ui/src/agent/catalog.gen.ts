@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "d554c177fc6303af6db3bffedb512b4c8a9accf9a9ac9bbcdbbd0dafe317d142";
+export const AGENT_CATALOG_SHA256 = "9043453e8b2abae97bf763f946466746e455aedf16061d0e2e832d348baba392";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -9815,6 +9815,56 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "project/rename",
+      "category": "project",
+      "description": "Rename the project and, when it is saved, its folder on disk. Fails with exists when a folder of that name is already there.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "name": "Yesh Anashim"
+          }
+        }
+      ]
+    },
+    {
       "name": "project/reveal",
       "category": "project",
       "description": "Open the current project's folder in the file manager. Fails with no_path when the project has never been saved.",
@@ -11523,6 +11573,7 @@ export const ENGINE_OPERATION_NAMES = [
   "project/new",
   "project/recover",
   "project/recoveryInfo",
+  "project/rename",
   "project/reveal",
   "project/save",
   "project/saveAs",
@@ -11659,6 +11710,10 @@ export const REQUEST_COVERAGE = {
   "project/recoveryInfo": {
     "kind": "operation",
     "operation": "project/recoveryInfo"
+  },
+  "project/rename": {
+    "kind": "operation",
+    "operation": "project/rename"
   },
   "project/reveal": {
     "kind": "operation",
@@ -13079,6 +13134,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
   ],
   "project/recoveryInfo": [
     {}
+  ],
+  "project/rename": [
+    {
+      "name": "Yesh Anashim"
+    }
   ],
   "project/reveal": [
     {}

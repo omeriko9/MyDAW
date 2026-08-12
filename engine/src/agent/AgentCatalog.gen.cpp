@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "d554c177fc6303af6db3bffedb512b4c8a9accf9a9ac9bbcdbbd0dafe317d142";
+const char kAgentCatalogSha256[] = "9043453e8b2abae97bf763f946466746e455aedf16061d0e2e832d348baba392";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -9791,6 +9791,56 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       "examples": [
         {
           "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/rename",
+      "category": "project",
+      "description": "Rename the project and, when it is saved, its folder on disk. Fails with exists when a folder of that name is already there.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "name": "Yesh Anashim"
+          }
         }
       ]
     },

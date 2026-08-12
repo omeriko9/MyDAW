@@ -71,6 +71,8 @@ export const autoSaveProjectAs = () => ws.request("project/saveAs", { auto: true
 export const loadRecentProject = (path: string) => ws.request("project/loadRecent", { path });
 export const getRecoveryInfo = () => ws.request("project/recoveryInfo", {});
 export const recoverProject = () => ws.request("project/recover", {});
+/** Rename the project and (when saved) its folder — errors: bad_request | exists | rename_failed. */
+export const renameProject = (name: string) => ws.request("project/rename", { name });
 /** Open the current project's folder in Explorer (engine-side path; no arbitrary path). */
 export const revealProjectFolder = () => ws.request("project/reveal", {});
 

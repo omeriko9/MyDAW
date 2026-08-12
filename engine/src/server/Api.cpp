@@ -316,6 +316,23 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         }
         return loadProjectPath(path, ec, em);
     }
+    if (type == "project/rename") {
+        // Rename the project AND its folder together (SPEC §5.1) — a title that
+        // disagrees with the folder on disk is the confusion this area just shed.
+        const std::string name = getOr(p, "name", "");
+        std::string err;
+        if (!app_.projectIO.rename(app_.model, name, err)) {
+            ec = err == "empty_name" ? "bad_request" : (err == "exists" ? "exists" : "rename_failed");
+            em = err == "empty_name" ? "the name is empty once illegal characters are removed"
+                 : err == "exists"  ? "a project folder with that name already exists"
+                                    : err;
+            return json();
+        }
+        app_.cmd->emitFullProjectChanged();
+        return json{{"name", app_.model.project.name},
+                    {"path", app_.projectIO.hasPath() ? app_.projectIO.projectDir()
+                                                      : std::string()}};
+    }
     if (type == "project/reveal") {
         // Open the CURRENT project's folder in Explorer. No path comes from the client —
         // the engine reveals what it already has open, so this is not a general

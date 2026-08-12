@@ -30,6 +30,8 @@ import {
   setAutomationWrite,
   setLoop,
   setPunch,
+  renameProject,
+  revealProjectFolder,
   setRecordTakeMode,
   setTimeSig,
   stop,
@@ -47,9 +49,11 @@ import { IconButton } from "../common/IconButton";
 import { Toggle } from "../common/Toggle";
 import { Select } from "../common/Select";
 import { NumberDrag } from "../common/NumberDrag";
+import { TextInput } from "../common/TextInput";
 import { Meter } from "../common/Meter";
 import { Tooltip } from "../common/Tooltip";
 import { showToast } from "../common/ToastHost";
+import { WsRequestError } from "../../protocol/ws";
 import { openContextMenu } from "../common/ContextMenu";
 import type { MenuEntry } from "../common/ContextMenu";
 import TempoMapEditor from "./TempoMapEditor";
@@ -728,12 +732,12 @@ export default function TransportBar() {
             Export {Math.round(exportProgress)}%
           </span>
         )}
-        <span
-          className="tb-project-name"
-          title={project ? `${projectFileName}${dirty ? " — unsaved changes" : ""}` : "No project loaded"}
-        >
-          {projectFileName}
-        </span>
+        <ProjectNameChip
+          projectFileName={projectFileName}
+          name={project?.name ?? ""}
+          hasProject={project !== null}
+          dirty={dirty}
+        />
         <span
           className={"tb-chip mono" + (xruns > 0 || cpu >= 90 ? " warn" : "")}
           title="Engine DSP load · audio dropouts (highlighted when the engine is close to dropping out)"
@@ -816,5 +820,109 @@ export default function TransportBar() {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ============================================================================
+ * Project name — press-and-hold to rename, double-click to open the folder
+ * ========================================================================= */
+
+/**
+ * The name in the transport bar is the one place a project is always visible, so it
+ * carries the two things people reach for (Omer, 2026-08-12): a LONG PRESS (450 ms)
+ * turns it into an input — rename moves the folder on disk too, so title and location
+ * never disagree — and a DOUBLE-CLICK opens the project folder in Explorer.
+ *
+ * The two gestures cannot collide: a double-click's presses are far shorter than the
+ * hold, and the timer is cancelled on release, on movement, and on the second press.
+ */
+function ProjectNameChip({
+  projectFileName,
+  name,
+  hasProject,
+  dirty,
+}: {
+  projectFileName: string;
+  name: string;
+  hasProject: boolean;
+  dirty: boolean;
+}) {
+  const projectPath = useStore((s) => s.projectPath);
+  const [editing, setEditing] = useState(false);
+  const holdRef = useRef<number | null>(null);
+
+  const cancelHold = () => {
+    if (holdRef.current !== null) {
+      window.clearTimeout(holdRef.current);
+      holdRef.current = null;
+    }
+  };
+  useEffect(() => cancelHold, []);
+
+  if (editing) {
+    return (
+      <TextInput
+        className="tb-project-name editing"
+        value={name}
+        autoFocus
+        selectOnFocus
+        title="Rename the project — the folder on disk is renamed with it"
+        onCommit={(v) => {
+          setEditing(false);
+          const next = v.trim();
+          if (next === "" || next === name) return;
+          renameProject(next)
+            .then((r) => showToast(`Renamed to "${r.name}".`, "success"))
+            .catch((e: unknown) => {
+              const msg = e instanceof Error ? e.message : String(e);
+              showToast(`Rename failed: ${msg}`, "error");
+            });
+        }}
+      />
+    );
+  }
+
+  return (
+    <span
+      className="tb-project-name"
+      title={
+        hasProject
+          ? `${projectFileName}${dirty ? " — unsaved changes" : ""}
+` +
+            `${projectPath || "not saved yet"}
+` +
+            "hold to rename · double-click to open the folder"
+          : "No project loaded"
+      }
+      onPointerDown={(e) => {
+        if (e.button !== 0 || !hasProject) return;
+        cancelHold();
+        holdRef.current = window.setTimeout(() => {
+          holdRef.current = null;
+          setEditing(true);
+        }, 450);
+      }}
+      onPointerUp={cancelHold}
+      onPointerLeave={cancelHold}
+      onPointerMove={(e) => {
+        // A drag is not a hold — any real movement abandons the gesture.
+        if (e.buttons !== 0 && holdRef.current !== null) cancelHold();
+      }}
+      onDoubleClick={() => {
+        cancelHold();
+        if (!hasProject) return;
+        revealProjectFolder().catch((e: unknown) => {
+          // Match the CODE, not the message: the engine's text is "the project has
+          // never been saved", so a message regex silently showed the raw error.
+          if (e instanceof WsRequestError && e.code === "no_path") {
+            showToast("Save the project first — it has no folder yet.", "info");
+            return;
+          }
+          showToast(e instanceof Error ? e.message : String(e), "error");
+        });
+      }}
+    >
+      {projectFileName}
+    </span>
   );
 }

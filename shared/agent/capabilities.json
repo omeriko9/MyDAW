@@ -9787,6 +9787,56 @@
       ]
     },
     {
+      "name": "project/rename",
+      "category": "project",
+      "description": "Rename the project and, when it is saved, its folder on disk. Fails with exists when a folder of that name is already there.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "name": "Yesh Anashim"
+          }
+        }
+      ]
+    },
+    {
       "name": "project/reveal",
       "category": "project",
       "description": "Open the current project's folder in the file manager. Fails with no_path when the project has never been saved.",

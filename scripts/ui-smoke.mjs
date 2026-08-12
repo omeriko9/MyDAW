@@ -2575,6 +2575,82 @@ export const checks = [
   },
 
   {
+    id: "project-name-hold-to-rename",
+    title: "holding the project name renames it (folder included); double-click asks for the folder",
+    area: "transport",
+    guards: "2026-08-12 (Omer): the name in the transport bar was inert and jammed against the CPU chip. Long press (450ms) edits it — project/rename moves the folder on disk too, so the title can never disagree with the location — and double-click opens the folder. The double-click is exercised on an UNSAVED project on purpose: it must report 'save first' rather than open an Explorer window on the tester's desktop.",
+    run: async (s, tt) => {
+      const dir = `${process.env.TEMP}\mydaw-smoke-projects`;
+      await s.probe("settings/set", { patch: { projectsFolder: dir } });
+      await s.probe("project/saveAs", { auto: true });
+      await s.reload();
+
+      const geo = JSON.parse(await s.eval(`(() => {
+        const el = document.querySelector(".tb-project-name");
+        const chip = [...document.querySelectorAll(".tb-chip")].find((c) => /CPU/.test(c.textContent));
+        if (!el || !chip) return "null";
+        const r = el.getBoundingClientRect(), c = chip.getBoundingClientRect();
+        return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2,
+                                gap: Math.round(c.left - r.right) });
+      })()`));
+      tt.ok(geo, "the project name and the CPU chip are both on screen");
+      tt.ok(geo.gap >= 6, `the name is not jammed against the CPU chip (${geo.gap}px)`);
+
+      // A plain click must leave it alone — the hold is what edits.
+      await s.click(geo.x, geo.y);
+      tt.eq(await s.eval(() => document.querySelectorAll("input.tb-project-name.editing").length), 0,
+        "a plain click does not start editing");
+
+      // Hold.
+      await s.send("Input.dispatchMouseEvent", { type: "mousePressed", x: geo.x, y: geo.y, button: "left", buttons: 1, clickCount: 1 });
+      await new Promise((r) => setTimeout(r, 700));
+      await s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: geo.x, y: geo.y, button: "left", buttons: 0, clickCount: 1 });
+      await s.untilEval("the hold turns it into an input", () =>
+        document.querySelectorAll("input.tb-project-name.editing").length === 1);
+      await s.eval(() => {
+        const i = document.querySelector("input.tb-project-name.editing");
+        i.select();
+        return true;
+      });
+      // Unique per run: the engine refuses a rename onto an existing folder (correctly),
+      // and the previous run's folder is still sitting in TEMP.
+      const newName = `Smoke Rename ${Date.now()}`;
+      await s.type(newName);
+      await s.key("Enter");
+      await s.until("the project and its folder are renamed", async () => {
+        const h = (await s.probe("session/hello", { clientName: "smoke" })).payload;
+        return h.project.name === newName && h.projectPath.endsWith(`${newName}.mydaw`);
+      });
+
+      // Double-click with NO folder yet: reports instead of opening Explorer.
+      await s.probe("project/new", {});
+      await s.reload();
+      await s.eval(() => {
+        window.__seen = [];
+        window.__obs?.disconnect();
+        window.__obs = new MutationObserver(() => {
+          for (const el of document.querySelectorAll(".toast")) {
+            const m = el.textContent.trim();
+            if (!window.__seen.includes(m)) window.__seen.push(m);
+          }
+        });
+        window.__obs.observe(document.body, { childList: true, subtree: true });
+        return true;
+      });
+      const at = await s.eval(() => {
+        const el = document.querySelector(".tb-project-name");
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await s.click(at.x, at.y, { clicks: 2 });
+      await s.untilEval("double-click on an unsaved project says to save first", () =>
+        (window.__seen ?? []).some((m) => /save the project first/i.test(m)));
+
+      await s.probe("settings/set", { patch: { projectsFolder: "" } });
+    },
+  },
+
+  {
     id: "first-save-does-not-ask",
     title: "Save on a never-saved project saves silently into the configured folder and says where",
     area: "menu-file",

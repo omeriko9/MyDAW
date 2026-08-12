@@ -67,6 +67,14 @@ public:
     // UI auto-saves a never-saved project before load/import replaces it):
     // <Documents>\MyDAW Projects\<sanitized name>, deduped " 2"/" 3"… against the
     // "<dir>.mydaw" folder saveAs will create. Falls back to %USERPROFILE%\Documents.
+    // Rename the project IN PLACE: the model name and, when it lives on disk, its folder
+    // (<parent>/<old>.mydaw -> <parent>/<new>.mydaw). Keeping the two in step is the
+    // point — a title that disagrees with the folder is exactly the confusion §5.1 just
+    // removed. Audio is decoded into memory (AssetStore), so nothing pins the folder.
+    // Fails with "exists" if the target folder is taken, "empty_name" for a name that
+    // sanitizes to nothing, or the OS error. Not undoable: it is a file operation.
+    bool rename(Model& model, const std::string& newName, std::string& err);
+
     std::string defaultSaveAsDir(const std::string& projectName) const;
 
     // The BASE folder silent saves land in (no project name appended).

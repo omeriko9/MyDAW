@@ -399,12 +399,24 @@
 .tb-project-name {
   min-width: 0;
   max-width: 180px;
+  /* breathing room before the CPU chip — they were touching (Omer, 2026-08-12) */
+  margin-right: 8px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: default;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
+}
+/* it is interactive: hold to rename, double-click to open the folder */
+.tb-project-name:hover { background: var(--panel2); color: var(--text); }
+.tb-project-name.editing {
+  width: 180px;
+  margin-right: 8px;
+  font-size: 11px;
 }
 
 /* save indicator */

@@ -18,6 +18,7 @@ const REQUEST_TYPES = [
   "project/saveAs",
   "project/loadRecent",
   "project/recoveryInfo",
+  "project/rename",
   "project/reveal",
   "project/recover",
   "project/getImportFormats",
@@ -300,9 +301,9 @@ describe("generated agent capability catalog", () => {
       formatVersion: 1,
       schemaDialect: "https://json-schema.org/draft/2020-12/schema",
     });
-    expect(ENGINE_OPERATION_NAMES).toHaveLength(140);
+    expect(ENGINE_OPERATION_NAMES).toHaveLength(141);
     expect(UI_OPERATION_NAMES).toHaveLength(14);
-    expect(AGENT_CATALOG.operations).toHaveLength(154);
+    expect(AGENT_CATALOG.operations).toHaveLength(155);
 
     const names = AGENT_CATALOG.operations.map(({ name }) => name);
     expect(new Set(names).size).toBe(names.length);

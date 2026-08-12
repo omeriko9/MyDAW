@@ -139,6 +139,13 @@ the entire drag.
   **The base folder is a setting**: `settings.projectsFolder` ("" = the built-in
   `<Documents>\MyDAW Projects`), applied at startup and on every `settings/set`, editable in
   Settings ▸ General. Everything that saves without asking lands under it.
+  **The name in the transport bar is the handle for both** (2026-08-12): a LONG PRESS (450 ms)
+  turns it into an input — `project/rename {name}` renames the model AND, when the project is
+  saved, its folder (`<parent>/<old>.mydaw` → `<new>.mydaw`), so the title can never disagree
+  with the location; it refuses with `exists` rather than merging into an occupied folder, and
+  is not undoable (a file operation). A DOUBLE-CLICK opens the project folder; with no folder
+  yet it says to save first instead. Audio is decoded into memory (AssetStore), so nothing
+  holds the folder open during the rename.
   **The location is visible**: `session/hello` carries `projectPath` ("" = never saved) and the
   effective `projectsFolder`; the Inspector's Project ▸ Folder row shows the real path and
   opens it on click (it used to render `<name>.mydaw`, which looked like a path but answered

@@ -2132,6 +2132,7 @@ export interface RequestMap {
   "project/saveAs": { req: ProjectSaveAsRequest; reply: ProjectSaveAsReply };
   "project/loadRecent": { req: ProjectLoadRecentRequest; reply: ProjectImportForeignReply };
   "project/recoveryInfo": { req: EmptyObject; reply: RecoveryInfoReply };
+  "project/rename": { req: { name: string }; reply: { name: string; path: string } };
   "project/reveal": { req: EmptyObject; reply: { path: string } };
   "project/recover": { req: EmptyObject; reply: ProjectReply };
   "project/getImportFormats": { req: EmptyObject; reply: GetImportFormatsReply };
