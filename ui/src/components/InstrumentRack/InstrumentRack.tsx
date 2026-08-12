@@ -41,6 +41,79 @@ import "./instrumentRack.css";
  *   cleared FIRST — the engine does not clean dangling targets on track.remove,
  *   it degrades them with a warning.
  */
+const fireIR = (pr: Promise<unknown>): void =>
+  void pr.catch((e) =>
+    showToast(e instanceof Error ? e.message : "Rack command failed", "error"),
+  );
+
+/* ============================================================================
+ * Shared routing menus (SPEC §5.9) — identical for BOTH destination kinds, a
+ * rack-owned instance and an instrument host TRACK: Track.midiTarget addresses
+ * either, so the rack surface must route to either. (First shipped on rack rows
+ * only; Omer's restarted session held a track-hosted Orchestral and had no way
+ * to route at it — 2026-08-13.)
+ * ========================================================================= */
+
+/** "Route MIDI tracks…": every MIDI track, checked = routed at destId. */
+function routeMenuFor(project: Project, destId: number): MenuEntry[] {
+  const midiTracks = project.tracks.filter((t) => t.kind === "midi");
+  if (midiTracks.length === 0)
+    return [{ label: "No MIDI tracks in the project", disabled: true }];
+  const items: MenuEntry[] = midiTracks.map((t) => {
+    const here = t.midiTarget === destId;
+    const elsewhere =
+      !here && t.midiTarget
+        ? (project.rack?.find((x) => x.id === t.midiTarget)?.name ??
+          project.tracks.find((x) => x.id === t.midiTarget)?.name)
+        : undefined;
+    return {
+      label: `${t.name}${elsewhere ? ` · now → ${elsewhere}` : ""}`,
+      checked: here,
+      onClick: () => fireIR(setTrack(t.id, { midiTarget: here ? 0 : destId })),
+    };
+  });
+  const unrouted = midiTracks.filter((t) => !t.midiTarget);
+  if (unrouted.length > 1) {
+    items.push("separator", {
+      label: `Route all ${unrouted.length} unrouted MIDI tracks here`,
+      icon: "link",
+      onClick: () => {
+        for (const t of unrouted) fireIR(setTrack(t.id, { midiTarget: destId }));
+      },
+    });
+  }
+  return items;
+}
+
+/** Per-feeder channel: "Any" keeps each note's own channel (imported SMFs carry
+ *  them); 1-16 re-stamps — how one Orchestral/Kontakt serves 16 parts. */
+function channelsMenuFor(project: Project, destId: number): MenuEntry[] {
+  const feeders = project.tracks.filter((t) => t.kind === "midi" && t.midiTarget === destId);
+  if (feeders.length === 0)
+    return [{ label: "No MIDI tracks routed here", disabled: true }];
+  return feeders.map(
+    (t): MenuEntry => ({
+      label: `${t.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`,
+      submenu: [
+        {
+          label: "Any (as recorded)",
+          checked: !t.midiOutChannel,
+          onClick: () => fireIR(setTrack(t.id, { midiOutChannel: 0 })),
+        },
+        "separator",
+        ...Array.from(
+          { length: 16 },
+          (_, i): MenuEntry => ({
+            label: `Channel ${i + 1}`,
+            checked: t.midiOutChannel === i + 1,
+            onClick: () => fireIR(setTrack(t.id, { midiOutChannel: i + 1 })),
+          }),
+        ),
+      ],
+    }),
+  );
+}
+
 function removeInstrumentOnly(host: Track, ins: PluginInstance): void {
   void removePlugin(host.id, ins.instanceId).catch((e) =>
     showToast(e instanceof Error ? e.message : "Could not remove instrument", "error"),
@@ -168,6 +241,17 @@ export default function InstrumentRack() {
             const out = host.outputTarget;
             const rowMenu = (): MenuEntry[] => [
               {
+                label: "Route MIDI tracks…",
+                icon: "link",
+                submenu: routeMenuFor(project, host.id),
+              },
+              {
+                label: "Feeder channels",
+                icon: "midiNote",
+                submenu: channelsMenuFor(project, host.id),
+              },
+              "separator",
+              {
                 label: "Remove instrument (keep rack slot)",
                 icon: "x",
                 disabled: !ins || !!host.frozen,
@@ -209,10 +293,30 @@ export default function InstrumentRack() {
                   </span>
                   {host.frozen && <span className="ir-badge">Frozen</span>}
                 </div>
-                <div className="ir-feeders" title={feeders.map((t) => t.name).join("\n") || "No MIDI tracks routed here"}>
-                  {feeders.length} routed
-                </div>
-                <div className="ir-channels">{channelLabel}</div>
+                <button
+                  type="button"
+                  className="btn ir-route"
+                  title={feeders.map((t) => t.name).join("\n") || "Route MIDI tracks at this instrument"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    openContextMenu(r.left, r.bottom + 2, routeMenuFor(project, host.id));
+                  }}
+                >
+                  {feeders.length} routed <Icon name="chevronDown" size={10} />
+                </button>
+                <button
+                  type="button"
+                  className="btn ir-route"
+                  title="Per-track MIDI channel into this instrument"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const r = e.currentTarget.getBoundingClientRect();
+                    openContextMenu(r.left, r.bottom + 2, channelsMenuFor(project, host.id));
+                  }}
+                >
+                  {channelLabel} <Icon name="chevronDown" size={10} />
+                </button>
                 <Select
                   value={typeof out === "number" ? String(out) : out}
                   options={outputOptions}
@@ -284,71 +388,8 @@ function RackRow({
   const channelLabel =
     channels.length === 0 ? "—" : channels.map((c) => (c === 0 ? "Any" : String(c))).join(", ");
 
-  const fire = (pr: Promise<unknown>) =>
-    void pr.catch((e) =>
-      showToast(e instanceof Error ? e.message : "Rack command failed", "error"),
-    );
-
-  // "Route MIDI tracks…": every MIDI track, checked = routed HERE. Clicking toggles;
-  // a track routed elsewhere says where, and clicking moves it here — one decision, in
-  // the place whose whole job is instrument routing.
-  const routeMenu = (): MenuEntry[] => {
-    const midiTracks = project.tracks.filter((t) => t.kind === "midi");
-    if (midiTracks.length === 0)
-      return [{ label: "No MIDI tracks in the project", disabled: true }];
-    const items: MenuEntry[] = midiTracks.map((t) => {
-      const here = t.midiTarget === ri.id;
-      const elsewhere =
-        !here && t.midiTarget
-          ? (project.rack?.find((x) => x.id === t.midiTarget)?.name ??
-            project.tracks.find((x) => x.id === t.midiTarget)?.name)
-          : undefined;
-      return {
-        label: `${t.name}${elsewhere ? ` · now → ${elsewhere}` : ""}`,
-        checked: here,
-        onClick: () => fire(setTrack(t.id, { midiTarget: here ? 0 : ri.id })),
-      };
-    });
-    const unrouted = midiTracks.filter((t) => !t.midiTarget);
-    if (unrouted.length > 1) {
-      items.push("separator", {
-        label: `Route all ${unrouted.length} unrouted MIDI tracks here`,
-        icon: "link",
-        onClick: () => {
-          for (const t of unrouted) fire(setTrack(t.id, { midiTarget: ri.id }));
-        },
-      });
-    }
-    return items;
-  };
-
-  // Per-feeder channel: "Any" keeps each note's own channel (imported files carry
-  // them); 1-16 re-stamps — how one Orchestral/Kontakt serves 16 parts.
-  const channelsMenu = (): MenuEntry[] => {
-    if (feeders.length === 0)
-      return [{ label: "No MIDI tracks routed here", disabled: true }];
-    return feeders.map(
-      (t): MenuEntry => ({
-        label: `${t.name} · ${t.midiOutChannel ? `Ch ${t.midiOutChannel}` : "Any"}`,
-        submenu: [
-          {
-            label: "Any (as recorded)",
-            checked: !t.midiOutChannel,
-            onClick: () => fire(setTrack(t.id, { midiOutChannel: 0 })),
-          },
-          "separator",
-          ...Array.from(
-            { length: 16 },
-            (_, i): MenuEntry => ({
-              label: `Channel ${i + 1}`,
-              checked: t.midiOutChannel === i + 1,
-              onClick: () => fire(setTrack(t.id, { midiOutChannel: i + 1 })),
-            }),
-          ),
-        ],
-      }),
-    );
-  };
+  const routeMenu = () => routeMenuFor(project, ri.id);
+  const channelsMenu = () => channelsMenuFor(project, ri.id);
 
   const rowMenu = (): MenuEntry[] => [
     { label: "Route MIDI tracks…", icon: "link", submenu: routeMenu() },
@@ -366,7 +407,7 @@ function RackRow({
       ).plugins.map((p) => ({
         label: p.name,
         checked: p.uid === ri.plugin.uid,
-        onClick: () => fire(setRackInstrument(ri.id, { uid: p.uid })),
+        onClick: () => fireIR(setRackInstrument(ri.id, { uid: p.uid })),
       })),
     },
     "separator",
@@ -383,7 +424,7 @@ function RackRow({
           confirmLabel: "Remove",
           danger: true,
         }).then((ok) => {
-          if (ok) fire(removeRackInstrument(ri.id));
+          if (ok) fireIR(removeRackInstrument(ri.id));
         });
       },
     },
@@ -433,7 +474,7 @@ function RackRow({
         options={outputOptions.filter((o) => o.value !== "none")}
         title="Audio return destination"
         onChange={(v) =>
-          fire(setRackInstrument(ri.id, { outputTarget: v === "master" ? 0 : Number(v) }))
+          fireIR(setRackInstrument(ri.id, { outputTarget: v === "master" ? 0 : Number(v) }))
         }
       />
       <div className="ir-actions">

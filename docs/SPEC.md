@@ -775,8 +775,11 @@ row is the ROUTING surface — "N routed" opens a multi-toggle over every MIDI t
 (Any = keep the notes' own channels, which imported SMFs carry), plus Replace-in-place and
 Remove. Host-track rows below now show only instrument tracks that actually hold an
 instrument or have feeders — conversion husks are just tracks and stay out of the rack.
-Feeder pickers list rack instruments first. Automation write from a rack instance's native
-editor is live-only (no owning track = no lane to record onto) — a known, deliberate gap.
+Feeder pickers list rack instruments first. The routing menus are IDENTICAL on host-track
+rows — a track-hosted instrument is an equally valid shared destination, and shipping them
+rack-rows-only left a session whose Orchestral predated §5.9 with no way to route at it
+(Omer, 2026-08-13). Automation write from a rack instance's native editor is live-only (no
+owning track = no lane to record onto) — a known, deliberate gap.
 
 Tests: `rack-instrument-test.mjs` (gate `rack-instrument`, 17 checks incl. audible
 routing via the built-in synth and the silence-after-reload regression), ui-smoke

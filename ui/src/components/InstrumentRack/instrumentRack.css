@@ -3,7 +3,11 @@
 .ir-title { display:flex; align-items:center; gap:7px; font-weight:600; }
 .ir-count { min-width:20px; padding:1px 6px; border-radius:9px; text-align:center; font-size:11px; color:var(--text-dim); background:var(--surface-2); }
 .ir-add { display:flex; align-items:center; gap:5px; }
-.ir-head, .ir-row { display:grid; grid-template-columns:minmax(220px, 2fr) minmax(90px, .7fr) minmax(80px, .7fr) minmax(150px, 1fr) 100px; gap:10px; align-items:center; }
+/* Last column is AUTO: it holds "Open Editor" + a menu button (~150px), and the old
+   fixed 100px made every row overflow its own grid — the phantom horizontal scrollbar
+   (Omer, 2026-08-13). Host/VST at 1.2fr instead of 2fr: names ellipsize, columns
+   shouldn't hoard the pane. */
+.ir-head, .ir-row { display:grid; grid-template-columns:minmax(200px, 1.2fr) minmax(110px, .9fr) minmax(90px, .8fr) minmax(150px, 1fr) auto; gap:10px; align-items:center; }
 .ir-head { padding:5px 12px; color:var(--text-dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); }
 .ir-list { min-height:0; overflow:auto; }
 .ir-row { min-height:54px; padding:6px 12px; border-bottom:1px solid var(--border-subtle, var(--border)); cursor:default; }
@@ -18,7 +22,7 @@
 .ir-open { white-space:nowrap; }
 .ir-empty { flex:1; display:flex; align-items:center; justify-content:center; padding:24px; color:var(--text-dim); text-align:center; }
 @media (max-width: 720px) {
-  .ir-head, .ir-row { grid-template-columns:minmax(180px, 2fr) 80px minmax(120px, 1fr) 92px; }
+  .ir-head, .ir-row { grid-template-columns:minmax(160px, 1.2fr) 90px minmax(120px, 1fr) auto; }
   .ir-head > :nth-child(3), .ir-row > :nth-child(3) { display:none; }
 }
 

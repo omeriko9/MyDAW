@@ -2301,9 +2301,27 @@ export const checks = [
       const after = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
       tt.eq(after.tracks.length, trackCount, "routing minted no hidden track");
 
-      // Clean up: remove the rack instrument (engine clears the feeder) + the track.
+      // The rack must never scroll horizontally: the fixed 100px actions column made
+      // every row overflow its own grid (the phantom scrollbar, Omer 2026-08-13).
+      const ov = JSON.parse(await s.eval(`(() => {
+        const list = document.querySelector(".ir-list");
+        return JSON.stringify({ sw: list.scrollWidth, cw: list.clientWidth });
+      })()`));
+      tt.ok(ov.sw <= ov.cw, `no horizontal overflow (${ov.sw} <= ${ov.cw})`);
+
+      // Host-TRACK rows carry the same routing controls (a track-hosted instrument is
+      // an equally valid shared destination — first shipped rack-rows-only, which left
+      // Omer's restarted session unroutable).
+      const hostTrk = (await s.probe("cmd/track.add", { kind: "instrument", name: "HostRow" })).payload.track;
+      await s.probe("cmd/plugin.add", { trackId: hostTrk.id, uid: "builtin:synth" });
+      await s.untilEval("the host-track row renders with a route control", () =>
+        [...document.querySelectorAll(".ir-row:not(.ir-rack-row)")].some(
+          (r) => r.textContent.includes("HostRow") && r.querySelector(".ir-route")));
+
+      // Clean up: remove the rack instrument (engine clears the feeder) + the tracks.
       await s.probe("cmd/rack.remove", { rackId: after.rack[0].id });
       await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.probe("cmd/track.remove", { trackId: hostTrk.id });
       const clean = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
       tt.eq((clean.rack ?? []).length, 0, "rack cleaned up");
     },
