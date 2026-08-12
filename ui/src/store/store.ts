@@ -233,6 +233,11 @@ export interface DawState {
   project: Project | null;
   revision: number;
   dirty: boolean;
+  /** Absolute project folder; "" when the project has never been saved. The UI had no
+   *  way to answer "where is this project?" — only a 5 s toast (2026-08-12). */
+  projectPath: string;
+  /** Base folder a silent save uses (settings.projectsFolder, or the built-in default). */
+  projectsFolder: string;
 
   /* registry / session lists */
   /** Plugins for every picker/browser: ONE row per distinct binary (SPEC §8.3a). A
@@ -549,6 +554,8 @@ export const useStore = create<DawState>((set) => ({
   project: null,
   revision: 0,
   dirty: false,
+  projectPath: "",
+  projectsFolder: "",
 
   registry: [],
   registryAll: [],
@@ -805,6 +812,8 @@ async function sendHello(): Promise<void> {
       // clean — which silently disabled autoSaveIfDirty's save-before-replace guard.
       // Older engines omit the field; keep whatever we had rather than clearing it.
       ...(r.dirty !== undefined ? { dirty: r.dirty } : {}),
+      ...(r.projectPath !== undefined ? { projectPath: r.projectPath } : {}),
+      ...(r.projectsFolder !== undefined ? { projectsFolder: r.projectsFolder } : {}),
     });
     adoptCaptureState(r.captureState); // seed the capture-honesty mirror (optional field)
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)

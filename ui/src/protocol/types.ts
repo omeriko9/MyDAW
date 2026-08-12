@@ -705,6 +705,10 @@ export interface HelloReply {
   midiMaps?: MidiMapsState;
   /** engine-side unsaved-changes flag — absent on older engines */
   dirty?: boolean;
+  /** absolute project folder, "" when never saved (SPEC §5.1) */
+  projectPath?: string;
+  /** base folder silent saves land in (settings.projectsFolder or the default) */
+  projectsFolder?: string;
   /** single-capture-endpoint honesty (SPEC §5.5) — absent on older engines */
   captureState?: CaptureStateEvent;
 }
@@ -2128,6 +2132,7 @@ export interface RequestMap {
   "project/saveAs": { req: ProjectSaveAsRequest; reply: ProjectSaveAsReply };
   "project/loadRecent": { req: ProjectLoadRecentRequest; reply: ProjectImportForeignReply };
   "project/recoveryInfo": { req: EmptyObject; reply: RecoveryInfoReply };
+  "project/reveal": { req: EmptyObject; reply: { path: string } };
   "project/recover": { req: EmptyObject; reply: ProjectReply };
   "project/getImportFormats": { req: EmptyObject; reply: GetImportFormatsReply };
   "project/importForeign": { req: ProjectImportForeignRequest; reply: ProjectImportForeignReply };

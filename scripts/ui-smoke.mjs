@@ -2575,6 +2575,70 @@ export const checks = [
   },
 
   {
+    id: "first-save-does-not-ask",
+    title: "Save on a never-saved project saves silently into the configured folder and says where",
+    area: "menu-file",
+    guards: "2026-08-12 (Omer): 'with autosave it doesn't ask me for anything, yet saves it somewhere; as soon as I choose to save, it opens the pick-a-folder dialog — where was it saved before?' The app chose a location silently when IT saved (Close/Open/Exit) and demanded one when the user did. Both are silent now, into settings.projectsFolder, and the toast names the folder. NOTE: this check POINTS projectsFolder at a temp dir first — the slot's APPDATA is isolated but Documents is the real one, and a smoke run must not litter it.",
+    run: async (s, tt) => {
+      const dir = `${process.env.TEMP}\mydaw-smoke-projects`;
+      await s.probe("settings/set", { patch: { projectsFolder: dir } });
+      const before = (await s.probe("session/hello", { clientName: "smoke" })).payload;
+      tt.eq(before.projectsFolder, dir, "the engine adopted the configured projects folder");
+
+      await s.probe("cmd/track.add", { kind: "midi", name: "SaveMe" }); // make it dirty
+      await s.reload();
+      await s.eval(() => {
+        window.__seen = [];
+        window.__obs?.disconnect();
+        window.__obs = new MutationObserver(() => {
+          for (const el of document.querySelectorAll(".toast")) {
+            const m = el.textContent.trim();
+            if (!window.__seen.includes(m)) window.__seen.push(m);
+          }
+        });
+        window.__obs.observe(document.body, { childList: true, subtree: true });
+        return true;
+      });
+
+      const menu = await s.eval(() => {
+        const b = [...document.querySelectorAll("[aria-label]")].find((e) => e.getAttribute("aria-label") === "File");
+        const r = b?.getBoundingClientRect();
+        return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      tt.ok(menu, "the File menu button is there");
+      await s.click(menu.x, menu.y);
+      await s.untilEval("the File menu opens", () =>
+        [...document.querySelectorAll(".ctx-item")].some((e) => e.textContent.trim().startsWith("Save")));
+      const item = await s.eval(() => {
+        const it = [...document.querySelectorAll(".ctx-item")].find((e) => e.textContent.trim().startsWith("Save") &&
+          !e.textContent.includes("As"));
+        const r = it.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      });
+      await s.click(item.x, item.y);
+
+      // If the silent path regressed, the flow falls back to the NATIVE dialog — which
+      // blocks the engine, so this wait failing is itself the signal.
+      await s.until("the project got a home without anyone asking", async () => {
+        const h = (await s.probe("session/hello", { clientName: "smoke" })).payload;
+        return typeof h.projectPath === "string" && h.projectPath.startsWith(dir);
+      });
+      await s.untilEval("and the toast names where it went", () =>
+        (window.__seen ?? []).some((m) => /saved to/i.test(m)));
+
+      const after = (await s.probe("session/hello", { clientName: "smoke" })).payload;
+      tt.ok(after.projectPath.startsWith(dir), `saved inside the configured folder (${after.projectPath})`);
+      tt.eq(after.dirty, false, "and the project is no longer dirty");
+
+      // Back to the built-in default so nothing else inherits the temp folder.
+      await s.probe("settings/set", { patch: { projectsFolder: "" } });
+      const restored = (await s.probe("session/hello", { clientName: "smoke" })).payload;
+      tt.ok(restored.projectsFolder.endsWith("MyDAW Projects"),
+        `cleared setting falls back to the default (${restored.projectsFolder})`);
+    },
+  },
+
+  {
     id: "file-close-reports-itself",
     title: "File ▸ Close confirms it happened, and the busy spinner is real CSS",
     area: "menu-file",

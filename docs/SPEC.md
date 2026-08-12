@@ -124,10 +124,27 @@ the entire drag.
   recentProjects:[{path,name,mtime}], audioDevices: <as engine/getDevices>, midiInputs:[{id,name}],
   metronome:{enabled:bool, countInBars:0|1|2} /*engine metronome state — same object as §5.4*/}`
 - `project/new {}`, `project/load {path}`, `project/save {}`, `project/saveAs {path?, auto?}`
-  (`auto:true` with no path → engine picks `<Documents>\MyDAW Projects\<name>`, deduped — used
-  by the UI to silently auto-save a never-saved project before a destructive load/import;
+  (`auto:true` with no path → engine picks `<projects folder>\<name>`, deduped;
   destructive flows auto-save instead of confirming, a discard-confirm appears only when the
   auto-save FAILS), `project/loadRecent {path}`. Replies carry `{project}` on load/new.
+  **Nothing asks the user where** (2026-08-12): the FIRST manual Save of a never-saved project
+  takes the same silent `auto:true` path the pre-Close/Open/Exit auto-save uses. Reported
+  confusion: "with autosave it doesn't ask me for anything, yet saves it somewhere; as soon as
+  I choose to save, it opens the pick-a-folder dialog — where was it saved before?" The app was
+  choosing a location when IT initiated the save and demanding one when the USER did.
+  `Save As…` is how you choose; a failed silent save falls back to the dialog rather than
+  leaving nowhere to save. Both paths raise a 12 s toast naming the folder, with an **Open
+  folder** action (`project/reveal {}` — the engine reveals the project it already has open, so
+  this is not a general shell-open endpoint; `no_path` when never saved).
+  **The base folder is a setting**: `settings.projectsFolder` ("" = the built-in
+  `<Documents>\MyDAW Projects`), applied at startup and on every `settings/set`, editable in
+  Settings ▸ General. Everything that saves without asking lands under it.
+  **The location is visible**: `session/hello` carries `projectPath` ("" = never saved) and the
+  effective `projectsFolder`; the Inspector's Project ▸ Folder row shows the real path and
+  opens it on click (it used to render `<name>.mydaw`, which looked like a path but answered
+  nothing). Note the third mechanism keeps its own name: the periodic **recovery snapshot**
+  (§6, `autosave/project-<n>.json`, or `%APPDATA%/MyDAW/autosave/` for a never-saved project)
+  is crash insurance, NOT a project save.
   **These flows report progress** (`lib/busy.withBusyIndicator`, 2026-08-12): a spinner toast
   appears if the work is still running after 400 ms, and Close ends with "Project closed."
   `project/new` destroys every loaded plugin host, which took 6.5 s on the reporting session —

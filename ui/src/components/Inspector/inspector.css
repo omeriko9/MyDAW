@@ -231,3 +231,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Project ▸ Folder: the real path, clickable to open it in the file manager
+   (SPEC §5.1 — "where was it saved?" must be answerable without a toast). */
+.insp-path { min-width: 0; }
+.insp-path .linklike {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-align: left;
+  text-decoration: underline dotted;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* keep the project folder itself visible when the path is long */
+}
+.insp-path .linklike:hover { text-decoration: underline; }

@@ -323,7 +323,12 @@ bool ProjectIO::saveAs(Model& model, const std::string& dir, std::string& err) {
     return true;
 }
 
-std::string ProjectIO::defaultSaveAsDir(const std::string& projectName) const {
+std::string ProjectIO::projectsBaseDir() const {
+    // User-chosen base folder wins (settings.projectsFolder); "" keeps the built-in
+    // <Documents>\MyDAW Projects. Everything that saves WITHOUT asking lands here, so
+    // the setting is the single answer to "where do my projects go?".
+    if (!projectsRoot_.empty())
+        return projectsRoot_;
     std::string docs;
     PWSTR w = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, nullptr, &w)))
@@ -335,6 +340,10 @@ std::string ProjectIO::defaultSaveAsDir(const std::string& projectName) const {
         const char* prof = std::getenv("USERPROFILE");
         docs = prof ? std::string(prof) + "\\Documents" : std::string("C:\\");
     }
+    return pathJoin(docs, "MyDAW Projects");
+}
+
+std::string ProjectIO::defaultSaveAsDir(const std::string& projectName) const {
     std::string name;
     for (const char c : projectName)
         name += (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' ||
@@ -345,7 +354,7 @@ std::string ProjectIO::defaultSaveAsDir(const std::string& projectName) const {
         name.pop_back(); // Windows forbids trailing space/dot in folder names
     if (name.empty())
         name = "Untitled";
-    const std::string root = pathJoin(docs, "MyDAW Projects");
+    const std::string root = projectsBaseDir();
     // saveAs appends ".mydaw" to the dir — dedupe against the folder it will create.
     std::string dir = pathJoin(root, name);
     for (int n = 2; (dirExists(dir + ".mydaw") || fileExists(dir + ".mydaw")) && n < 1000; ++n)

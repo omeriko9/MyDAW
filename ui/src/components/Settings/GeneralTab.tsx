@@ -26,6 +26,7 @@ import {
 } from "../Transport/projectFlows";
 import { NumberDrag } from "../common/NumberDrag";
 import { Select } from "../common/Select";
+import { TextInput } from "../common/TextInput";
 import { Toggle } from "../common/Toggle";
 import {
   FUNCTION_KEY_MODE_DEFAULT,
@@ -74,6 +75,21 @@ export function GeneralTab() {
     setLocal((s) => ({ ...(s ?? {}), autosaveMinutes: minutes }));
     setErr(null);
     setSettings({ autosaveMinutes: minutes }).catch((e) => setErr(errText(e)));
+  };
+
+  // Base folder every SILENT save lands in — the first Ctrl+S on a new project and the
+  // auto-save before Close/Open/Exit (SPEC §5.1). Empty = the built-in
+  // <Documents>\MyDAW Projects; the engine reports the effective one in session/hello.
+  const effectiveProjectsFolder = useStore((s) => s.projectsFolder);
+  const [folderDraft, setFolderDraft] = useState<string | null>(null);
+  const projectsFolder =
+    folderDraft ?? (typeof settings?.projectsFolder === "string" ? settings.projectsFolder : "");
+  const commitProjectsFolder = (v: string) => {
+    const dir = v.trim();
+    setFolderDraft(null);
+    setLocal((s) => ({ ...(s ?? {}), projectsFolder: dir }));
+    setErr(null);
+    setSettings({ projectsFolder: dir }).catch((e) => setErr(errText(e)));
   };
 
   const theme = useThemeName();
@@ -192,6 +208,34 @@ export function GeneralTab() {
           </Toggle>
           <span className="sett-note">
             red frame around the arrangement while recording; applies from the next take
+          </span>
+        </div>
+        <span className="sett-label">Projects folder</span>
+        <div className="col gap1">
+          <div className="row gap1">
+            <TextInput
+              className="grow mono"
+              style={{ fontSize: 11 }}
+              value={projectsFolder}
+              onChange={setFolderDraft}
+              placeholder={effectiveProjectsFolder || "Documents\MyDAW Projects"}
+              selectOnFocus={false}
+              onCommit={commitProjectsFolder}
+            />
+            <button
+              type="button"
+              className="btn"
+              disabled={projectsFolder === ""}
+              title="Back to Documents\MyDAW Projects"
+              onClick={() => commitProjectsFolder("")}
+            >
+              Default
+            </button>
+          </div>
+          <span className="sett-note">
+            where projects are saved when nothing asks you — the first Save of a new
+            project, and the auto-save before Close/Open/Exit
+            {effectiveProjectsFolder ? ` (now: ${effectiveProjectsFolder})` : ""}
           </span>
         </div>
         <span className="sett-label">Autosave interval</span>

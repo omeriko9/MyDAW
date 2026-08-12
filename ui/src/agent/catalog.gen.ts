@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "f72f7b1d3be741b0d6b61a387f8323fe18b157fe012d56d558c12e483b598cf5";
+export const AGENT_CATALOG_SHA256 = "d554c177fc6303af6db3bffedb512b4c8a9accf9a9ac9bbcdbbd0dafe317d142";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -9815,6 +9815,43 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "project/reveal",
+      "category": "project",
+      "description": "Open the current project's folder in the file manager. Fails with no_path when the project has never been saved.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
       "name": "project/save",
       "category": "project",
       "description": "Save the current project to its existing path.",
@@ -11486,6 +11523,7 @@ export const ENGINE_OPERATION_NAMES = [
   "project/new",
   "project/recover",
   "project/recoveryInfo",
+  "project/reveal",
   "project/save",
   "project/saveAs",
   "settings/get",
@@ -11621,6 +11659,10 @@ export const REQUEST_COVERAGE = {
   "project/recoveryInfo": {
     "kind": "operation",
     "operation": "project/recoveryInfo"
+  },
+  "project/reveal": {
+    "kind": "operation",
+    "operation": "project/reveal"
   },
   "project/recover": {
     "kind": "operation",
@@ -13036,6 +13078,9 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {}
   ],
   "project/recoveryInfo": [
+    {}
+  ],
+  "project/reveal": [
     {}
   ],
   "project/save": [

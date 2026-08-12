@@ -9787,6 +9787,43 @@
       ]
     },
     {
+      "name": "project/reveal",
+      "category": "project",
+      "description": "Open the current project's folder in the file manager. Fails with no_path when the project has never been saved.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
       "name": "project/save",
       "category": "project",
       "description": "Save the current project to its existing path.",

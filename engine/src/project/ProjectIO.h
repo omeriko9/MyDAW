@@ -69,6 +69,14 @@ public:
     // "<dir>.mydaw" folder saveAs will create. Falls back to %USERPROFILE%\Documents.
     std::string defaultSaveAsDir(const std::string& projectName) const;
 
+    // The BASE folder silent saves land in (no project name appended).
+    std::string projectsBaseDir() const;
+
+    // Base folder for projects saved without asking (settings.projectsFolder).
+    // Empty restores the built-in <Documents>\MyDAW Projects.
+    void setProjectsRoot(std::string dir) { projectsRoot_ = std::move(dir); }
+    const std::string& projectsRoot() const { return projectsRoot_; }
+
     // ----- dirty tracking ----------------------------------------------------
     // Broadcasts event/dirty {dirty} via the EventBus on transitions.
     void markDirty();
@@ -132,6 +140,7 @@ private:
     void refreshMissingFlags(Model& model, std::vector<uint64_t>* missingAssets);
     void wireAssetStore(Model& model);
     void writeSessionLock();
+    std::string projectsRoot_; // "" = <Documents>\MyDAW Projects
     std::string autosaveDir() const;       // project autosave/ or appdata fallback
     std::string sessionLockPath() const;
     std::string recentJsonPath() const;

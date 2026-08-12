@@ -316,6 +316,26 @@ json Api::dispatch(const std::string& type, const json& p, const json& msg, int6
         }
         return loadProjectPath(path, ec, em);
     }
+    if (type == "project/reveal") {
+        // Open the CURRENT project's folder in Explorer. No path comes from the client —
+        // the engine reveals what it already has open, so this is not a general
+        // shell-open endpoint (same posture as plugins/revealFile).
+        if (!app_.projectIO.hasPath()) {
+            ec = "no_path";
+            em = "the project has never been saved";
+            return json();
+        }
+        const std::string dir = app_.projectIO.projectDir();
+        const std::wstring args = L"\"" + utf8ToWide(dir) + L"\"";
+        const auto rc = reinterpret_cast<intptr_t>(ShellExecuteW(
+            nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL));
+        if (rc <= 32) {
+            ec = "internal";
+            em = "explorer launch failed";
+            return json();
+        }
+        return json{{"path", dir}};
+    }
     if (type == "project/save") {
         std::string err;
         if (!app_.projectIO.save(app_.model, err)) {
@@ -653,6 +673,12 @@ json Api::sessionHello() {
                 // which also disabled its auto-save-before-replace guard (File > New/Open
                 // would then discard the edits silently). Seed it from the engine here.
                 {"dirty", app_.projectIO.isDirty()},
+                // Where this project lives on disk ("" = never saved). The UI had no way
+                // to answer "where was it saved?" — the only mention was a 5 s toast
+                // (2026-08-12). Also carries the folder silent saves would use.
+                {"projectPath", app_.projectIO.hasPath() ? app_.projectIO.projectDir()
+                                                         : std::string()},
+                {"projectsFolder", app_.projectIO.projectsBaseDir()},
                 {"midiMaps", app_.midiMapsJson()},
                 // Capture honesty (SPEC §5.5): a tab connecting mid-session must not need
                 // to wait for the next event/captureState to learn about an input conflict.

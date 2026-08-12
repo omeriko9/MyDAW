@@ -43,6 +43,11 @@ public:
     std::vector<std::string> pluginFoldersVst3() const;
     void storePluginFolders(const std::vector<std::string>& vst2,
                             const std::vector<std::string>& vst3); // + save()
+    // Base folder new projects are saved into (SPEC §5.1). "" = the built-in default,
+    // <Documents>\MyDAW Projects. Every silent save — the first Ctrl+S on a new project
+    // and the auto-save before a destructive step — lands under here.
+    std::string projectsFolder() const;
+
     std::string host32Path() const; // "" = unset
     std::string host64Path() const;
 

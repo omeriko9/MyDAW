@@ -5,8 +5,12 @@
 import React from "react";
 import type { Project } from "../../protocol/types";
 import { Section } from "./Section";
+import { useStore } from "../../store/store";
+import { revealProjectFolder } from "../../store/actions";
 
 export function ProjectOverview({ project }: { project: Project }) {
+  const projectPath = useStore((s) => s.projectPath);
+  const projectsFolder = useStore((s) => s.projectsFolder);
   const counts: Record<string, number> = {};
   let clipCount = 0;
   for (const t of project.tracks) {
@@ -30,10 +34,34 @@ export function ProjectOverview({ project }: { project: Project }) {
         <span className="insp-v" title={project.name}>
           {project.name}
         </span>
+        {/* The REAL location, not a guess: this row used to render "<name>.mydaw",
+            which looked like a path but told you nothing about where the project
+            actually lives — the question Omer asked on 2026-08-12. Never-saved
+            projects say so, and name the folder a save would use. */}
         <span className="insp-k">Folder</span>
-        <span className="insp-v mono dim" title={`${project.name}.mydaw`}>
-          {project.name}.mydaw
-        </span>
+        {projectPath ? (
+          <span className="insp-v mono dim insp-path" title={projectPath}>
+            <button
+              type="button"
+              className="linklike"
+              title={`Open ${projectPath}`}
+              onClick={() => void revealProjectFolder().catch(() => {})}
+            >
+              {projectPath}
+            </button>
+          </span>
+        ) : (
+          <span
+            className="insp-v mono dim"
+            title={
+              projectsFolder
+                ? `Not saved yet — Save will create it in ${projectsFolder}`
+                : "Not saved yet"
+            }
+          >
+            not saved yet{projectsFolder ? ` — will go to ${projectsFolder}` : ""}
+          </span>
+        )}
         <span className="insp-k">Sample rate</span>
         <span className="insp-v">{project.sampleRate.toLocaleString()} Hz</span>
         <span className="insp-k">Tempo</span>

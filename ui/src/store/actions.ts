@@ -71,6 +71,8 @@ export const autoSaveProjectAs = () => ws.request("project/saveAs", { auto: true
 export const loadRecentProject = (path: string) => ws.request("project/loadRecent", { path });
 export const getRecoveryInfo = () => ws.request("project/recoveryInfo", {});
 export const recoverProject = () => ws.request("project/recover", {});
+/** Open the current project's folder in Explorer (engine-side path; no arbitrary path). */
+export const revealProjectFolder = () => ws.request("project/reveal", {});
 
 /** Foreign-project import providers registered in the engine (id/name/extensions). */
 export const getImportFormats = () => ws.request("project/getImportFormats", {});

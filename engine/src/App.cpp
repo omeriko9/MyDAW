@@ -159,6 +159,10 @@ bool App::init(std::string& err) {
     //    before the folders were known, so re-derive it now that they are: the cache remembers
     //    every file ever scanned, and folders the user has REMOVED must not come back.
     registry.setFolders(settings.pluginFoldersVst2(), settings.pluginFoldersVst3());
+    // Where projects go when nothing asked the user (SPEC §5.1). applySettings() repeats
+    // this on every settings/set; startup needs it too, or the first silent save of the
+    // session ignores the configured folder.
+    projectIO.setProjectsRoot(settings.projectsFolder());
     registry.setBuiltins(BuiltinEffectManager::builtinPluginInfos()); // stock effects (always listed)
     scanner.refreshFromCache();
     scanner.setHostPaths(host64Path_, host32Path_);
@@ -1566,6 +1570,7 @@ void App::shutdown() {
 
 void App::applySettings() {
     autosave.setIntervalMinutes(settings.autosaveMinutes());
+    projectIO.setProjectsRoot(settings.projectsFolder()); // "" = <Documents>\MyDAW Projects
     registry.setFolders(settings.pluginFoldersVst2(), settings.pluginFoldersVst3());
     resolveHostPaths();
     host->setHostPaths(host64Path_, host32Path_);

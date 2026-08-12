@@ -117,6 +117,10 @@ int Settings::autosaveMinutes() const {
     return getOr<int>(data_, "autosaveMinutes", 2);
 }
 
+std::string Settings::projectsFolder() const {
+    return getOr(data_, "projectsFolder", "");
+}
+
 int Settings::port() const {
     const int p = getOr<int>(data_, "port", 8417);
     return (p > 0 && p <= 65535) ? p : 8417;

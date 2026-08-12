@@ -27,6 +27,7 @@ import {
   probeMedia,
   recoverProject,
   recreatePlugins,
+  revealProjectFolder,
   saveProject,
   shutdownEngine,
   saveProjectAs,
@@ -68,8 +69,8 @@ async function autoSaveIfDirty(title: string): Promise<boolean> {
   } catch (e) {
     if (e instanceof WsRequestError && e.code === "no_path") {
       try {
-        const { project } = await autoSaveProjectAs();
-        showToast(`"${project.name}" auto-saved to Documents\\MyDAW Projects.`, "info");
+        const { project, path } = await autoSaveProjectAs();
+        announceSavedTo(project.name, path);
         return true;
       } catch (e2) {
         logFlowError("auto-save", e2, false);
@@ -171,14 +172,55 @@ export async function loadRecentFlow(path: string): Promise<void> {
   }
 }
 
-/** Save; on no_path falls through to Save As. Returns true if the project was saved. */
+/**
+ * "<name>" saved to <folder>, with a button that opens it. The answer to "where did it
+ * go?" must outlive a 5-second info toast, so this one is long-lived and actionable.
+ */
+function announceSavedTo(name: string, jsonPath?: string): void {
+  // saveAs replies with the project.json path; the FOLDER is what a user wants to see.
+  const raw = jsonPath ?? useStore.getState().projectPath;
+  const folder = raw.replace(/[\/]project\.json$/i, "");
+  showToast(`"${name}" saved to ${folder || "your projects folder"}.`, "success", {
+    durationMs: 12_000,
+    ...(folder
+      ? {
+          actions: [
+            {
+              label: "Open folder",
+              onClick: () => void revealProjectFolder().catch(() => {}),
+            },
+          ],
+        }
+      : {}),
+  });
+}
+
+/**
+ * Save. A project that has never been saved gets a home WITHOUT a dialog — the same one
+ * the auto-save before Close/Open/Exit picks: <projects folder>/<name>.
+ *
+ * Reported 2026-08-12: "with autosave it doesn't ask me for anything, yet saves it
+ * somewhere; as soon as I choose to save, it opens the pick-a-folder dialog — where was
+ * it saved before?" The app chose a location silently when IT initiated the save and
+ * demanded one when the USER did. Both behave the same now; choosing a location is what
+ * Save As… is for, and the folder itself is configurable (Settings ▸ General).
+ */
 export async function saveProjectFlow(): Promise<boolean> {
   try {
-    await saveProject();
+    await withBusyIndicator("Saving project…", () => saveProject());
     return true;
   } catch (e) {
     if (e instanceof WsRequestError && e.code === "no_path") {
-      return saveProjectAsFlow();
+      try {
+        const r = await withBusyIndicator("Saving project…", () => autoSaveProjectAs());
+        announceSavedTo(r.project.name, r.path);
+        return true;
+      } catch (e2) {
+        // The configured folder can be unwritable (a drive that moved away) — fall back
+        // to asking rather than leaving the user with nowhere to save.
+        logFlowError("save", e2, false);
+        return saveProjectAsFlow();
+      }
     }
     logFlowError("save", e);
     return false;

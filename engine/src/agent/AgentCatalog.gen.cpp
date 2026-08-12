@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "f72f7b1d3be741b0d6b61a387f8323fe18b157fe012d56d558c12e483b598cf5";
+const char kAgentCatalogSha256[] = "d554c177fc6303af6db3bffedb512b4c8a9accf9a9ac9bbcdbbd0dafe317d142";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -9787,6 +9787,43 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "output": {
         "$ref": "#/schemas/RecoveryInfoReply"
+      },
+      "examples": [
+        {
+          "input": {}
+        }
+      ]
+    },
+    {
+      "name": "project/reveal",
+      "category": "project",
+      "description": "Open the current project's folder in the file manager. Fails with no_path when the project has never been saved.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [
+        "project"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
       },
       "examples": [
         {
