@@ -51,8 +51,8 @@ Complementary docs: [STUBS.md](STUBS.md) (where each interface lives), [SPEC.md]
 - **Loop-record lap splitting** — DONE (2026-07-31): placement comes from a SEGMENT LEDGER rather than
   arithmetic — `AudioRecorder` records each contiguous run with both coordinates (timeline
   position and offset within the take file), and `recordingCommit` groups runs by start
-  position. (Laps used to become take lanes; take folders were REMOVED 2026-08-11, so every
-  lap is now a plain clip stacked at the loop start.) That replaced `laps = ceil(frames/loopLen)`, which assumed the take began at
+  position. (Where laps LAND is now the record take mode's business — SPEC §8.7: Keep
+  History stacks each lap on its own take lane, Replace keeps only the last.) That replaced `laps = ceil(frames/loopLen)`, which assumed the take began at
   the loop start and ran without a gap — already wrong after any dropped block, since the file
   stayed contiguous and everything after the gap was attributed a block early. MIDI laps are
   bucketed by ARRIVAL, not position: a cycle re-enters the same span every lap, so all laps
@@ -198,19 +198,31 @@ to unity). Next: VST3 aux-input bus activation so out-of-process plugins can be 
 (engine: route the extra input tap through shm — extend `ShmHeader.numIn`); per-insert (not
 per-instance) UI in the mixer strip; sidechain HPF on the detector.
 
-## Comping / take folders / versions — REMOVED (2026-08-11)
+## Take lanes & comping — REMOVED, then REBUILT from a brief (2026-08-11) 🔶
 
-Built 2026-07-03 (comp segments), refactored 2026-08-11 into a mute-only "versions" model,
-then removed entirely at Omer's request — along with the older whole-track `cmd/version.*`
-playlists. No take folders, lanes, comping or versions exist in MyDAW today.
+The 2026-07-03 comp-segment take folders, their 2026-08-11 mute-model "versions" successor,
+and the older whole-track `cmd/version.*` playlists were all removed at Omer's request
+("the experience is horrible"). What made them unusable: two features both called
+"Versions", and one switch that was both a record mode and a view toggle. Last
+implementation preserved on branch `backup/versions-feature-2026-08-11`.
 
-Recording never folds: a pass over existing material overlaps it, and cycle recording stacks
-one plain clip per lap (all audible). The lap-SPLITTING ledger survives and is still pinned by
-`midi-lap-test.mjs` and `punch-test.mjs`.
+Omer then supplied a Cubase Artist behaviour brief
+(`cubase_artist_lanes_comping_track_versions.md`, kept outside the repo) — written AFTER
+the removal, as the corrective spec — and the feature is being rebuilt from it one
+verifiable layer at a time. Record mode, lanes view and what plays are now three
+independent things.
 
-If rebuilt, learn from the failure rather than the code: two features both called "Versions",
-and one switch that was both a record mode and a view toggle, is what made it unusable.
-Last implementation preserved on branch `backup/versions-feature-2026-08-11`.
+Shipped (SPEC §8.7): Keep History / Replace record take modes; per-clip `lane` int (no
+container object); Show Lanes ("L" toggle, view-only); comp tool click-to-front
+(`cmd/take.front`); comp drag-a-range (`cmd/take.comp`, splits at both bounds, unsnapped).
+Pinned by `takes-record-test.mjs` (26 checks) + ui-smoke `take-lanes-and-comp-click`.
+
+Still to build: comp boundary dragging, lane solo, Ctrl-click audition, Clean Up Lanes /
+Bounce Selection, Alt+click split & Alt+Shift slip, and whole-track alternates (the
+brief's "Track Versions" — must not carry that name in the UI). See docs/NEXT.md "NOW".
+
+The lap-SPLITTING ledger is unchanged throughout and still pinned by `midi-lap-test.mjs`
+and `punch-test.mjs`.
 
 ## Phase 5 — Drivers, remote UI, distribution ⬜
 

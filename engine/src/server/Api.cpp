@@ -643,6 +643,10 @@ json Api::sessionHello() {
                                    {"countInBars", app_.transport.countInBars()},
                                    {"firstBeatVolume", app_.metronome->firstBeatVolume()},
                                    {"otherBeatVolume", app_.metronome->otherBeatVolume()}}},
+                {"recordTakeMode",
+                 app_.transport.recordTakeMode() == Transport::RecordTakeMode::Replace
+                     ? "replace"
+                     : "keepHistory"},
                 {"automationWrite", app_.transport.automationWrite()},
                 // The UI's dirty flag is client-side, so a reload or a second tab used to
                 // come up believing a project with unsaved engine-side edits was clean —
@@ -1093,6 +1097,19 @@ json Api::handleTransport(const std::string& type, const json& p, std::string& e
         if (hasKey(p, "otherBeatVolume"))
             app_.metronome->setOtherBeatVolume(
                 static_cast<float>(getOr<double>(p, "otherBeatVolume", 1.0)));
+    } else if (type == "transport/setRecordMode") {
+        // Record take mode (SPEC §8.7): "keepHistory" | "replace". Unknown values keep
+        // the current mode (tolerant, like other transport ops).
+        const std::string mode = getOr(p, "mode", "");
+        if (mode == "keepHistory")
+            app_.transport.setRecordTakeMode(Transport::RecordTakeMode::KeepHistory);
+        else if (mode == "replace")
+            app_.transport.setRecordTakeMode(Transport::RecordTakeMode::Replace);
+        else {
+            ec = "bad_request";
+            em = "mode must be \"keepHistory\" or \"replace\"";
+            return json();
+        }
     } else if (type == "transport/setAutomationWrite") {
         app_.transport.setAutomationWrite(getOr<bool>(p, "enabled", false));
     } else {

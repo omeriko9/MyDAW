@@ -27,6 +27,7 @@ import {
   reorderTrack,
   setAutomation,
   setTrack,
+  takeLane,
   unfreezeTrack,
 } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
@@ -53,6 +54,7 @@ import { confirmRemoveTracks } from "../../lib/trackActions";
 import { Resizer } from "../common/Resizer";
 import { showToast } from "../common/ToastHost";
 import { pluginParamsFor, useAutomationUi } from "./automationUi";
+import { takeLaneMenuItems, useTakesUi } from "./takesUi";
 import { openContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { openBestEditor } from "../PluginEditor/openEditor";
 import { confirmDialog } from "../Dialogs/confirm";
@@ -72,6 +74,7 @@ import {
   trackAcceptsClip,
   trackKindIcon,
   type LaneRowL,
+  type TakeRowL,
   type Row,
   type TrackRowL,
 } from "./layout";
@@ -247,6 +250,7 @@ export default function TrackHeaders({
   const setSelection = useStore((s) => s.setSelection);
   const registry = useStore((s) => s.registry);
   const lanesExpanded = useAutomationUi((s) => s.expanded);
+  const takesExpanded = useTakesUi((s) => s.expanded);
   // "Is this track's instrument loading right now" — one hook for every row.
   const instrumentBusy = useInstrumentBusyCheck();
 
@@ -1054,6 +1058,16 @@ export default function TrackHeaders({
                 W
               </Toggle>
             )}
+            {(t.kind === "audio" || t.kind === "midi" || t.kind === "instrument") && (
+              <Toggle
+                on={takesExpanded.has(t.id)}
+                onChange={() => useTakesUi.getState().setExpanded(t.id, !takesExpanded.has(t.id))}
+                className="tlh-btn"
+                tooltip="Show take lanes — reveals stacked takes underneath (view only; the front take is what plays)"
+              >
+                L
+              </Toggle>
+            )}
             <Toggle
               on={lanesExpanded.has(t.id)}
               onChange={() => toggleLanes(t)}
@@ -1230,6 +1244,64 @@ export default function TrackHeaders({
     );
   };
 
+  /** Every take on this lane is in the (clip-scoped) selection — and there is at least one. */
+  const laneSelected = (t: Track, lane: number): boolean => {
+    if (selection.scope !== "clips") return false;
+    const ids = t.clips.filter((c) => (c.lane ?? 0) === lane).map((c) => c.id);
+    return ids.length > 0 && ids.every((id) => selection.clipIds.includes(id));
+  };
+
+  const renderTake = (row: TakeRowL) => {
+    const t = row.track;
+    const takes = t.clips.filter((c) => (c.lane ?? 0) === row.lane);
+    const audible = takes.some((c) => !c.muted);
+    return (
+      <div
+        key={`take:${t.id}:${row.lane}`}
+        className={"tlh-lane tlh-take" + (audible ? " audible" : "")}
+        style={{ top: row.top, height: row.height, paddingLeft: 10 + row.depth * 14 }}
+        data-selected={laneSelected(t, row.lane) ? "true" : undefined}
+        onPointerDown={(e) => {
+          // Clicking a lane selects everything on it — the lane analogue of clicking a
+          // track header. Clip-SCOPED on purpose: Delete then removes those takes (and
+          // with them the lane), never the track. Ctrl/Cmd adds to the current clips.
+          if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+          e.stopPropagation();
+          const ids = t.clips.filter((c) => (c.lane ?? 0) === row.lane).map((c) => c.id);
+          const additive = e.ctrlKey || e.metaKey;
+          const cur = useStore.getState().selection;
+          setSelection({
+            clipIds:
+              additive && cur.scope === "clips"
+                ? [...new Set([...cur.clipIds, ...ids])]
+                : ids,
+            trackIds: [],
+            noteIds: [],
+            scope: ids.length > 0 ? "clips" : "none",
+          });
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openContextMenu(e.clientX, e.clientY, takeLaneMenuItems(t, row.lane));
+        }}
+      >
+        <span className="tlh-lane-label">{row.lane === 0 ? "Main" : `Lane ${row.lane + 1}`}</span>
+        <span className="tlh-lane-value">
+          {takes.length === 0 ? "" : audible ? "▶" : `${takes.length}`}
+        </span>
+        {row.lane === 0 && (
+          <IconButton
+            icon="chevronUp"
+            size={18}
+            tooltip="Collapse take lanes"
+            onClick={() => useTakesUi.getState().setExpanded(t.id, false)}
+          />
+        )}
+      </div>
+    );
+  };
+
   const popTrack = popover && project ? project.tracks.find((t) => t.id === popover.trackId) : null;
 
   return (
@@ -1371,7 +1443,7 @@ export default function TrackHeaders({
       >
         <div className="tl-headers-inner" style={{ transform: `translateY(${-scrollY}px)` }}>
           {rows.map((r) =>
-            r.kind === "track" ? renderRow(r) : renderLane(r),
+            r.kind === "track" ? renderRow(r) : r.kind === "take" ? renderTake(r) : renderLane(r),
           )}
         </div>
         {reorderVis && reorderVis.dropLineY !== null && (

@@ -95,6 +95,7 @@ const TOOLS: Array<{ tool: Tool; label: string; icon: IconName; shortcut: string
   { tool: "draw", label: "Draw Tool", icon: "pencil", shortcut: "2" },
   { tool: "erase", label: "Erase Tool", icon: "eraser", shortcut: "3" },
   { tool: "split", label: "Split Tool", icon: "split", shortcut: "4" },
+  { tool: "comp", label: "Comp Tool", icon: "layers", shortcut: "6" },
 ];
 
 /** Transport + tool commands that have no menu-bar home. */

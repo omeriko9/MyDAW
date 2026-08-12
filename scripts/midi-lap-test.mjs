@@ -109,9 +109,10 @@ try {
 
   const hello = await req("session/hello", {});
   const t = hello.payload.project.tracks.find((x) => x.id === track.id);
-  // Take folders were removed on 2026-08-11: every lap is now a plain clip stacked at
-  // the cycle start. What still matters — and what this suite exists for — is that the
-  // recorder SPLIT the laps at all instead of merging them into one long clip.
+  // Laps land as ordinary clips carrying a take-lane index (SPEC §8.7, default record
+  // mode Keep History): consecutive lanes, newest lap in front (unmuted), older laps
+  // muted. What this suite exists for is unchanged — the recorder must SPLIT the laps
+  // instead of merging them into one long clip; takes-record-test owns the mode matrix.
   const lapClips = t.clips ?? [];
   report("cycle-record produced one clip per lap, not one merged clip",
     lapClips.length >= 2,
@@ -140,6 +141,17 @@ try {
   report("all laps are anchored at the cycle start",
     lapClips.every((c) => Math.abs((c.startBeat ?? -1) - 0) < 1e-9),
     JSON.stringify(lapClips.map((c) => c.startBeat)));
+
+  // Keep History (the default): laps stack on consecutive take lanes with only the
+  // NEWEST lap audible — the SPEC §8.7 invariant for a freshly recorded stack.
+  const lanes = lapClips.map((c) => c.lane ?? 0).sort((a, b) => a - b);
+  report("laps occupy consecutive take lanes from 0",
+    lanes.every((l, i) => l === i), JSON.stringify(lanes));
+  const unmuted = lapClips.filter((c) => !c.muted);
+  const maxLane = Math.max(...lapClips.map((c) => c.lane ?? 0));
+  report("only the newest lap is audible",
+    unmuted.length === 1 && (unmuted[0].lane ?? 0) === maxLane,
+    JSON.stringify(lapClips.map((c) => ({ lane: c.lane ?? 0, muted: !!c.muted }))));
 } catch (e) {
   report("harness completed", false, e?.stack ?? String(e));
 }

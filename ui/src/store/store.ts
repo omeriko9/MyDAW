@@ -53,6 +53,7 @@ import type {
   MidiMap,
   MidiMapsState,
   MidiActivityEvent,
+  RecordTakeMode,
   RecordingNotesEvent,
   RecordingPeaksEvent,
   MidiInputInfo,
@@ -123,7 +124,8 @@ export const recordingPeaksBus: Bus<RecordingPeaksEvent> = makeBus<RecordingPeak
 /** Timeline tools: select(1) / draw(2) / erase(3) / split(4) (SPEC §9). */
 /** "mute" is the X tool: click any clip anywhere to toggle its mute. It is what makes
  *  version combinations possible (unmute several clips across several lanes). */
-export type Tool = "select" | "draw" | "erase" | "split" | "mute";
+/** "comp" is the take comp tool (SPEC §8.7): click a take to bring it to front. */
+export type Tool = "select" | "draw" | "erase" | "split" | "mute" | "comp";
 
 /** Clip-edge resize behavior (Cubase sizing modes): normal trim, contents ride with
  *  the dragged edge, or the content time-stretches to the new duration. */
@@ -233,7 +235,14 @@ export interface DawState {
   dirty: boolean;
 
   /* registry / session lists */
+  /** Plugins for every picker/browser: ONE row per distinct binary (SPEC §8.3a). A
+   *  machine with years of installers, capture folders and backups holds the same DLL
+   *  many times over — 416 files collapsing to 269 plugins on the author's — and every
+   *  copy used to appear as its own identical row. */
   registry: PluginInfo[];
+  /** Every scanned row INCLUDING the redundant copies. Only the Plugin Manager wants
+   *  this: it is the page whose job is showing what is actually on disk. */
+  registryAll: PluginInfo[];
   recentProjects: RecentProject[];
   audioDevices: GetDevicesReply | null;
   midiInputs: MidiInputInfo[];
@@ -255,6 +264,11 @@ export interface DawState {
   /* automationWrite — UI mirror of the engine arm (same seeding/reconcile path as metronome):
      while ON and playing, fader/knob drags record automation points at the playhead. */
   automationWrite: boolean;
+
+  /* recordTakeMode — UI mirror of the transport's record take mode (SPEC §8.7, same
+     seeding/reconcile path as metronome). keepHistory stacks takes in lanes; replace
+     overwrites. Session state on the engine — deliberately NOT project data. */
+  recordTakeMode: RecordTakeMode;
 
   /* MIDI control-surface maps + learn arm (seeded from session/hello, reconciled from
      event/midiMaps). armed = the paramRef awaiting the next CC, or null. */
@@ -483,7 +497,11 @@ const prefWorkspaces = loadPref<WorkspacesState>(
   validWorkspaces,
 );
 prefPanels.shellPanes = shellVisiblePanes(prefShellMode, prefRibbon, prefWorkspaces);
-const prefTool = loadPref<Tool>("ui.tool", "select", oneOf("select", "draw", "erase", "split"));
+const prefTool = loadPref<Tool>(
+  "ui.tool",
+  "select",
+  oneOf("select", "draw", "erase", "split", "mute", "comp"),
+);
 const prefSizingMode = loadPref<SizingMode>(
   "ui.sizingMode",
   "normal",
@@ -500,6 +518,28 @@ function raisePluginEditor(dialogs: DialogsState, instanceId: number): DialogsSt
   return { ...dialogs, pluginEditors: [...eds.filter((id) => id !== instanceId), instanceId] };
 }
 
+/**
+ * One row per distinct plugin BINARY (SPEC §8.3a). The engine marks every redundant copy
+ * with `duplicateOf`, so this drops those. Two guards matter:
+ *  - a blacklisted copy never stands in for a healthy one (and vice versa): grouping is
+ *    by contentKey + blacklisted, so a file blacklisted at one path still shows up;
+ *  - older engines send neither field, and then nothing is dropped.
+ */
+export function dedupePlugins(all: PluginInfo[]): PluginInfo[] {
+  const canonical = new Set(all.filter((p) => !p.duplicateOf).map((p) => p.path));
+  const seen = new Set<string>();
+  return all.filter((p) => {
+    if (!p.contentKey) return true; // older engine: no identity, keep everything
+    // A duplicate whose canonical copy is missing from this list (blacklist filtering,
+    // a targeted rescan) must still be shown rather than vanish with it.
+    if (p.duplicateOf && !canonical.has(p.duplicateOf)) return true;
+    const key = `${p.contentKey}|${p.blacklisted ? 1 : 0}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export const useStore = create<DawState>((set) => ({
   connected: false,
   shutdownByUser: false,
@@ -511,6 +551,7 @@ export const useStore = create<DawState>((set) => ({
   dirty: false,
 
   registry: [],
+  registryAll: [],
   recentProjects: [],
   audioDevices: null,
   midiInputs: [],
@@ -518,6 +559,7 @@ export const useStore = create<DawState>((set) => ({
   transport: initialTransport,
   metronome: { enabled: false, countIn: 0, firstBeatVolume: 1, otherBeatVolume: 1 },
   automationWrite: false,
+  recordTakeMode: "keepHistory",
   midiMaps: [],
   midiLearnArm: null,
   pluginStates: {},
@@ -545,16 +587,22 @@ export const useStore = create<DawState>((set) => ({
 
   setProject: (project) => set({ project }),
   setEngineStatus: (engineStatus) => set({ engineStatus }),
-  setRegistry: (registry) => set({ registry }),
+  setRegistry: (registry) => set({ registry: dedupePlugins(registry), registryAll: registry }),
   setMidiInputs: (midiInputs) => set({ midiInputs }),
   setAudioDevices: (audioDevices) => set({ audioDevices }),
   setSelection: (patch) =>
     set((s) => {
       const next = { ...s.selection, ...patch };
+      // Scope decides what Delete/Ctrl+A act on. Track scope is only ever entered by a
+      // gesture that actually TOUCHED trackIds — never by a patch that merely emptied
+      // the clip selection. Track selection is sticky across canvas clicks (2026-08-11),
+      // so the old "trackIds non-empty ⇒ tracks" fallback meant an empty-space click, or
+      // a marquee that caught nothing, silently re-armed Delete on the whole track:
+      // pressing Delete then offered to remove the track and every lane on it.
       const scope = patch.scope ?? (
         next.noteIds.length > 0 ? "notes" :
         next.clipIds.length > 0 ? "clips" :
-        next.trackIds.length > 0 ? "tracks" : "none"
+        patch.trackIds !== undefined && next.trackIds.length > 0 ? "tracks" : "none"
       );
       return { selection: { ...next, scope } };
     }),
@@ -707,6 +755,13 @@ export function reconcileAutomationWrite(v: boolean | undefined): void {
   if (useStore.getState().automationWrite !== v) useStore.setState({ automationWrite: v });
 }
 
+/** Adopt the engine-reported record take mode (hello + transport events/replies).
+ *  Optional on the wire — older engines omit it and the local mirror stands. */
+export function reconcileRecordTakeMode(v: RecordTakeMode | undefined): void {
+  if (v === undefined) return;
+  if (useStore.getState().recordTakeMode !== v) useStore.setState({ recordTakeMode: v });
+}
+
 /** Adopt the engine-reported MIDI maps + learn arm (session/hello + event/midiMaps). */
 export function reconcileMidiMaps(s: MidiMapsState | undefined): void {
   if (!s) return;
@@ -740,7 +795,8 @@ async function sendHello(): Promise<void> {
     useStore.setState({
       engineInfo: r.engine,
       project: r.project,
-      registry: r.pluginRegistry,
+      registry: dedupePlugins(r.pluginRegistry),
+      registryAll: r.pluginRegistry,
       recentProjects: r.recentProjects,
       audioDevices: r.audioDevices,
       midiInputs: r.midiInputs,
@@ -753,6 +809,7 @@ async function sendHello(): Promise<void> {
     adoptCaptureState(r.captureState); // seed the capture-honesty mirror (optional field)
     reconcileMetronome(r.metronome); // seed the metronome mirror (optional field)
     reconcileAutomationWrite(r.automationWrite);
+    reconcileRecordTakeMode(r.recordTakeMode);
     reconcileMidiMaps(r.midiMaps);
     syncMidiThru(); // engine restarts forget the thru set — reseed from selection
   } catch (e) {
@@ -808,6 +865,7 @@ ws.on("event/transport", (ev) => {
   // Reconcile the metronome mirror when the event carries it (no-op when unchanged).
   reconcileMetronome(ev.metronome);
   reconcileAutomationWrite(ev.automationWrite);
+  reconcileRecordTakeMode(ev.recordTakeMode);
   // Mirror into React state only on state/loop transitions (avoid 20 Hz re-renders).
   const t = useStore.getState().transport;
   if (
@@ -876,7 +934,11 @@ ws.on("event/scanProgress", (ev) => {
 });
 
 ws.on("event/scanDone", (ev) => {
-  useStore.setState({ registry: ev.registry, scanProgress: null });
+  useStore.setState({
+    registry: dedupePlugins(ev.registry),
+    registryAll: ev.registry,
+    scanProgress: null,
+  });
 });
 
 ws.on("event/importProgress", (ev) => {

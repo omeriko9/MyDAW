@@ -911,9 +911,10 @@ function onKeyDown(e: KeyboardEvent): void {
     case "2":
     case "3":
     case "5":
+    case "6":
     case "4": {
       consume();
-      const tools = ["select", "draw", "erase", "split", "mute"] as const;
+      const tools = ["select", "draw", "erase", "split", "mute", "comp"] as const;
       useStore.getState().setTool(tools[Number(key) - 1]);
       return;
     }

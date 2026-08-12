@@ -37,9 +37,44 @@ import { Icon } from "../common/icons";
 import BlacklistPanel from "./BlacklistPanel";
 import HealthPanel from "./HealthPanel";
 
-type KindFilter = "all" | "instruments" | "effects" | "blacklisted" | "bit32" | "favorites";
+type KindFilter =
+  | "all" | "instruments" | "effects" | "blacklisted" | "bit32" | "favorites" | "duplicates";
 type SortKey =
-  | "favorite" | "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io" | "folder" | "status";
+  | "favorite" | "name" | "kind" | "format" | "bitness" | "vendor" | "category" | "io"
+  | "copies" | "folder" | "status";
+
+/* ----------------------------------------------------------------- columns */
+
+/** Default widths (px). The table is `table-layout: fixed`, so these are what the
+ *  columns actually get — and what a drag on a header edge overrides. */
+const COL_DEFAULTS: Record<string, number> = {
+  favorite: 34, name: 240, kind: 90, format: 78, bitness: 60, vendor: 150,
+  category: 130, io: 70, copies: 70, folder: 320, status: 110, actions: 150,
+};
+const COL_ORDER = [
+  "favorite", "name", "kind", "format", "bitness", "vendor", "category", "io",
+  "copies", "folder", "status", "actions",
+] as const;
+const COL_W_PREF = "mydaw.ui.pluginManagerColWidths";
+const MIN_COL_W = 34;
+
+function loadColWidths(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(COL_W_PREF);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (COL_ORDER.includes(k as (typeof COL_ORDER)[number]) && typeof v === "number" &&
+          Number.isFinite(v) && v >= MIN_COL_W) {
+        out[k] = v;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function folderOf(p: PluginInfo): string {
   if (p.format === "builtin") return "";
@@ -68,6 +103,7 @@ function sortValue(p: PluginInfo, key: SortKey, favoriteSet: ReadonlySet<string>
     case "vendor": return p.vendor.toLowerCase();
     case "category": return p.category.toLowerCase();
     case "io": return p.numInputs * 1000 + p.numOutputs;
+    case "copies": return 0; // replaced below — needs the whole registry to count
     case "folder": return folderOf(p).toLowerCase();
     case "status": return p.blacklisted ? 1 : 0;
   }
@@ -81,6 +117,8 @@ export default function PluginManagerPage() {
   const [filter, setFilter] = useState<KindFilter>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /** Per-column widths, persisted across sessions (drag a header edge; dbl-click resets). */
+  const [colW, setColW] = useState<Record<string, number>>(loadColWidths);
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<readonly string[]>(loadPluginFavorites);
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
@@ -175,20 +213,40 @@ export default function PluginManagerPage() {
     [],
   );
 
+  // Copies of the same BINARY (SPEC §8.3a): contentKey -> every path carrying it. The
+  // manager deliberately lists all of them (this is the page about what is on disk),
+  // while the DAW's own pickers show one row per binary.
+  const copies = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const p of registry) {
+      if (!p.contentKey) continue;
+      const list = m.get(p.contentKey);
+      if (list) list.push(p.path);
+      else m.set(p.contentKey, [p.path]);
+    }
+    return m;
+  }, [registry]);
+  const copyCount = useCallback(
+    (p: PluginInfo) => (p.contentKey ? (copies.get(p.contentKey)?.length ?? 1) : 1),
+    [copies],
+  );
+
   const counts = useMemo(() => {
     let instruments = 0;
     let effects = 0;
     let blacklisted = 0;
     let bit32 = 0;
     let favorites = 0;
+    let duplicates = 0;
     for (const p of registry) {
+      if (p.duplicateOf) duplicates++;
       if (p.isInstrument) instruments++;
       else effects++;
       if (p.blacklisted) blacklisted++;
       if (p.bitness === 32) bit32++;
       if (isPluginFavorite(favoriteSet, p)) favorites++;
     }
-    return { instruments, effects, blacklisted, bit32, favorites };
+    return { instruments, effects, blacklisted, bit32, favorites, duplicates };
   }, [registry, favoriteSet]);
 
   const rows = useMemo(() => {
@@ -199,6 +257,9 @@ export default function PluginManagerPage() {
       if (filter === "blacklisted" && !p.blacklisted) return false;
       if (filter === "bit32" && p.bitness !== 32) return false;
       if (filter === "favorites" && !isPluginFavorite(favoriteSet, p)) return false;
+      // "Duplicates" shows the whole family (canonical + copies), not just the copies —
+      // seeing "8 of these" is only useful next to the one that is actually used.
+      if (filter === "duplicates" && copyCount(p) < 2) return false;
       if (q === "") return true;
       return (
         p.name.toLowerCase().includes(q) ||
@@ -214,8 +275,8 @@ export default function PluginManagerPage() {
     });
     const { key, dir } = sort;
     out = out.slice().sort((a, b) => {
-      const va = sortValue(a, key, favoriteSet);
-      const vb = sortValue(b, key, favoriteSet);
+      const va = key === "copies" ? copyCount(a) : sortValue(a, key, favoriteSet);
+      const vb = key === "copies" ? copyCount(b) : sortValue(b, key, favoriteSet);
       if (va < vb) return -dir;
       if (va > vb) return dir;
       // stable-ish secondary: name then path
@@ -225,10 +286,64 @@ export default function PluginManagerPage() {
       return a.path < b.path ? -1 : 1;
     });
     return out;
-  }, [registry, query, filter, sort, favoriteSet]);
+  }, [registry, query, filter, sort, favoriteSet, copyCount]);
 
   const clickSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+
+  /* --------------------------------------------------------- column resize */
+
+  const widthOf = (key: string) => colW[key] ?? COL_DEFAULTS[key] ?? 120;
+
+  // Drag the right edge of any header to resize that column; double-click resets it.
+  // Pointer capture on the handle, so the drag survives leaving the 5px strip, and the
+  // press never reaches the header's sort handler.
+  const startResize = (key: string, e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // never let the press reach the header's sort handler
+    const startX = e.clientX;
+    const startW = widthOf(key);
+    // WINDOW listeners, not pointer capture on the handle: capture needs a live pointer
+    // id and silently throws for some synthetic/pen inputs, which left the drag dead.
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.max(MIN_COL_W, Math.round(startW + (ev.clientX - startX)));
+      setColW((w) => ({ ...w, [key]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setColW((w) => {
+        try {
+          localStorage.setItem(COL_W_PREF, JSON.stringify(w));
+        } catch { /* private mode / quota — the widths just don't persist */ }
+        return w;
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const resizeHandle = (key: string) => (
+    <span
+      className="pm-col-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize column`}
+      onPointerDown={(e) => startResize(key, e)}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setColW((w) => {
+          const next = { ...w };
+          delete next[key];
+          try {
+            localStorage.setItem(COL_W_PREF, JSON.stringify(next));
+          } catch { /* ignore */ }
+          return next;
+        });
+      }}
+      title="Drag to resize · double-click to reset"
+    />
+  );
 
   const th = (key: SortKey, label: string, extraClass = "") => (
     // Sortable headers are real controls: focusable + Enter/Space so the table can be
@@ -250,6 +365,7 @@ export default function PluginManagerPage() {
     >
       {label}
       {sort.key === key && <span className="pm-sort">{sort.dir === 1 ? "▲" : "▼"}</span>}
+      {resizeHandle(key)}
     </th>
   );
 
@@ -327,6 +443,7 @@ export default function PluginManagerPage() {
             {chip("effects", "Effects", counts.effects, "fx")}
             {chip("bit32", "32-bit", counts.bit32, "b32")}
             {chip("blacklisted", "Blacklisted", counts.blacklisted, "bl")}
+            {counts.duplicates > 0 && chip("duplicates", "Duplicates", counts.duplicates, "dup")}
             <input
               className="pm-search"
               type="search"
@@ -368,6 +485,14 @@ export default function PluginManagerPage() {
           <HealthPanel connected={connState === "open"} />
         ) : (
         <table className="pm-table">
+          {/* fixed layout: the <col> widths below are what the columns actually get,
+              which is what makes the header-edge drag meaningful (and lets Folder be
+              widened until a full path fits). */}
+          <colgroup>
+            {COL_ORDER.map((k) => (
+              <col key={k} style={{ width: widthOf(k) }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               {th("favorite", "★", "pm-th-fav")}
@@ -378,9 +503,10 @@ export default function PluginManagerPage() {
               {th("vendor", "Vendor")}
               {th("category", "Category")}
               {th("io", "I/O")}
+              {th("copies", "Copies")}
               {th("folder", "Folder", "pm-th-folder")}
               {th("status", "Status")}
-              <th className="pm-th pm-th-actions" />
+              <th className="pm-th pm-th-actions">{resizeHandle("actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -432,6 +558,25 @@ export default function PluginManagerPage() {
                   <td className="pm-td pm-td-vendor" title={p.vendor}>{p.vendor || "—"}</td>
                   <td className="pm-td" title={p.category}>{p.category || "—"}</td>
                   <td className="pm-td pm-td-io">{p.numInputs}→{p.numOutputs}</td>
+                  {/* Copies of this exact binary elsewhere on disk. The DAW's own
+                      pickers list it once; this page shows every file, so the count
+                      (and its tooltip) is how you find out WHERE they are. */}
+                  <td className="pm-td pm-td-copies">
+                    {copyCount(p) > 1 ? (
+                      <span
+                        className={"pm-copies" + (p.duplicateOf ? " dup" : "")}
+                        title={
+                          `${copyCount(p)} identical copies of this file:\n` +
+                          (copies.get(p.contentKey ?? "") ?? []).join("\n") +
+                          (p.duplicateOf ? `\n\nLoaded from: ${p.duplicateOf}` : "\n\n(this one is the copy that gets loaded)")
+                        }
+                      >
+                        ×{copyCount(p)}
+                      </span>
+                    ) : (
+                      <span className="pm-faint">—</span>
+                    )}
+                  </td>
                   <td className="pm-td pm-td-folder" title={p.path}>
                     {p.format === "builtin" ? <span className="pm-faint">stock</span> : folderOf(p)}
                   </td>

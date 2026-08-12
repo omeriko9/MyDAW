@@ -52,6 +52,9 @@ import {
   setAutomation,
   setChord,
   setClip,
+  takeComp,
+  takeFront,
+
   setTrack,
   setLoop,
   setMarker,
@@ -73,6 +76,7 @@ import {
 import { isViewRowKind } from "../../protocol/types";
 import { copySelection, cutSelection, findClipById, hasClipboard, pasteAt } from "../../lib/clipboard";
 import { useAutomationUi } from "./automationUi";
+import { takeLaneMenuItems } from "./takesUi";
 import { registerKeyContext, toggleLoop, zoomToFitPane } from "../../lib/keyboard";
 import { openPieMenu, type PieItem } from "../common/PieMenu";
 import { computeLensValues, heatHex, type LensId } from "../../lib/xray";
@@ -139,6 +143,7 @@ import {
   type LaneRowL,
   type Row,
   type TrackRowL,
+  type TakeRowL,
 } from "./layout";
 import type { AudioClip, AutomationPoint, Clip, ClipEdge, NormalizeMode, Project, StereoFlipMode, Track } from "../../protocol/types";
 
@@ -149,17 +154,18 @@ const CURVE_PX_GAIN = 0.02;
 /** cmd/clip.stretch clamps the varispeed ratio to 0.25×–4×, i.e. exactly ±24 semitones. */
 const MAX_PITCH_SHIFT_ST = 24;
 
-/** Right-click toolbox entries (mirror the transport tool buttons + 1-4 keys). */
+/** Right-click toolbox entries (mirror the transport tool buttons + 1-6 keys). */
 const TIMELINE_TOOLS: Array<{
   tool: Tool;
   label: string;
-  icon: "pointer" | "pencil" | "eraser" | "scissors";
+  icon: "pointer" | "pencil" | "eraser" | "scissors" | "layers";
   shortcut: string;
 }> = [
   { tool: "select", label: "Select", icon: "pointer", shortcut: "1" },
   { tool: "draw", label: "Draw", icon: "pencil", shortcut: "2" },
   { tool: "erase", label: "Erase", icon: "eraser", shortcut: "3" },
   { tool: "split", label: "Split", icon: "scissors", shortcut: "4" },
+  { tool: "comp", label: "Comp", icon: "layers", shortcut: "6" },
 ];
 
 const fire = (p: Promise<unknown>): void => {
@@ -235,6 +241,8 @@ interface MoveOrigin {
   startBeat: number;
   lenBeats: number;
   type: "audio" | "midi";
+  /** take lane the clip started on (SPEC §8.7) */
+  lane: number;
 }
 
 type Drag =
@@ -249,6 +257,9 @@ type Drag =
       allowTrack: boolean;
       deltaBeats: number;
       targetTrackId: number | null;
+      /** take lane row the pointer is over on the SOURCE track (SPEC §8.7); null = no
+       *  lane change. Only meaningful while the lanes are expanded. */
+      targetLane: number | null;
       /** dropped past the last track row: the commit CREATES the track(s) (Cubase) */
       newTrack: boolean;
       valid: boolean;
@@ -279,6 +290,17 @@ type Drag =
     }
   | { kind: "fade"; clipId: number; which: "in" | "out"; sec: number; origSec: number; moved: boolean }
   | { kind: "draw"; trackId: number; anchor: number; start: number; end: number }
+  | {
+      /** comp-tool range drag on a take lane row (SPEC §8.7) — unsnapped on purpose */
+      kind: "comp";
+      trackId: number;
+      lane: number;
+      anchor: number;
+      cur: number;
+      /** the press-point clip: a stationary release comps by CLICK (bring to front) */
+      hitClipId: number | null;
+      moved: boolean;
+    }
   | { kind: "marquee"; b0: number; y0: number; b1: number; y1: number; base: number[]; additive: boolean }
   | {
       kind: "pan";
@@ -344,7 +366,7 @@ type Drag =
 type Zone = "body" | "l" | "r" | "fadeIn" | "fadeOut";
 
 interface ClipHit {
-  row: TrackRowL;
+  row: TrackRowL | TakeRowL;
   clip: Clip;
   x0: number;
   x1: number;
@@ -556,8 +578,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const ymax = Math.max(d.y0, d.y1);
     for (const row of rws) {
       if (row.top > ymax || row.top + row.height < ymin) continue;
-      if (row.kind !== "track") continue;
+      // Take lane rows sweep too, but only over the takes they actually show — a
+      // rubber band across one lane must not grab the takes stacked above it.
+      if (row.kind !== "track" && row.kind !== "take") continue;
       for (const clip of row.track.clips) {
+        if (row.kind === "take" && (clip.lane ?? 0) !== row.lane) continue;
         const len = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
         if (clip.startBeat <= bmax && clip.startBeat + len >= bmin) out.add(clip.id);
       }
@@ -688,6 +713,12 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
 
       const track = row.track;
+      // Take lane sub-row (SPEC §8.7): the same clip pipeline below, filtered to this
+      // lane; a soft wash separates the lane strip from the main row above it.
+      if (row.kind === "take") {
+        ctx.fillStyle = withAlpha(colors.border, 0.1);
+        ctx.fillRect(0, ry, w, row.height);
+      }
       ctx.strokeStyle = withAlpha(colors.border, 0.8);
       ctx.beginPath();
       ctx.moveTo(0, ry + row.height - 0.5);
@@ -718,6 +749,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
 
       for (const clip of track.clips) {
+        if (row.kind === "take" && (clip.lane ?? 0) !== row.lane) continue;
         if (hideOriginals?.has(clip.id)) continue;
         let startBeat = clip.startBeat;
         let lenBeats = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
@@ -985,6 +1017,33 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
     }
 
+    // comp-drag preview (SPEC §8.7): accent wash over the dragged range on its lane
+    // row, and boundary guides down the whole take stack — the cut lands on EVERY lane.
+    if (d && d.kind === "comp" && d.moved) {
+      const stack = rws.filter(
+        (r) => (r.kind === "take" || r.kind === "track") && r.track.id === d.trackId,
+      );
+      const laneRow = rws.find(
+        (r) => r.kind === "take" && r.track.id === d.trackId && r.lane === d.lane,
+      );
+      if (laneRow && stack.length > 0) {
+        const x0 = beatToPx(Math.min(d.anchor, d.cur), v);
+        const x1 = beatToPx(Math.max(d.anchor, d.cur), v);
+        ctx.fillStyle = withAlpha(colors.accent, 0.22);
+        ctx.fillRect(x0, laneRow.top - scrollY + 1, Math.max(2, x1 - x0), laneRow.height - 2);
+        const stackTop = Math.min(...stack.map((r) => r.top)) - scrollY;
+        const stackBot = Math.max(...stack.map((r) => r.top + r.height)) - scrollY;
+        ctx.strokeStyle = colors.accent;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x0 + 0.5, stackTop);
+        ctx.lineTo(x0 + 0.5, stackBot);
+        ctx.moveTo(x1 + 0.5, stackTop);
+        ctx.lineTo(x1 + 0.5, stackBot);
+        ctx.stroke();
+      }
+    }
+
     // draw-tool preview
     if (d && d.kind === "draw") {
       const row = trackRowOf(rws, d.trackId);
@@ -1038,9 +1097,12 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const { project: proj, rows: rws, vp: v, tool: tl, selection: sel } = stateRef.current;
     if (!proj) return null;
     const row = rowAtY(rws, cy);
-    if (!row || row.kind !== "track") return null;
+    if (!row || (row.kind !== "track" && row.kind !== "take")) return null;
     const yIn = cy - row.top;
-    const clips = row.track.clips;
+    const clips =
+      row.kind === "take"
+        ? row.track.clips.filter((c) => (c.lane ?? 0) === row.lane)
+        : row.track.clips;
     for (let i = clips.length - 1; i >= 0; i--) {
       const clip = clips[i];
       const lenBeats = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
@@ -1073,7 +1135,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const tl = st.tool;
     let cursor = "default";
     if (tl === "draw" || tl === "split") cursor = "crosshair";
-    else if (tl === "erase") cursor = "pointer";
+    else if (tl === "erase" || tl === "comp") cursor = "pointer";
     let hov: { clipId: number; zone: Zone } | null = null;
     let laneHov: { trackId: number; paramRef: string; pointId: number } | null = null;
     const row = rowAtY(st.rows, cy);
@@ -1148,6 +1210,8 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       { icon: "pencil", label: "Draw tool (2)", active: s.tool === "draw", onClick: setTool("draw") },
       { icon: "eraser", label: "Erase tool (3)", active: s.tool === "erase", onClick: setTool("erase") },
       { icon: "split", label: "Split tool (4)", active: s.tool === "split", onClick: setTool("split") },
+      { icon: "x", label: "Mute tool (5)", active: s.tool === "mute", onClick: setTool("mute") },
+      { icon: "layers", label: "Comp tool (6)", active: s.tool === "comp", onClick: setTool("comp") },
       { icon: "zoomIn", label: "Fit view (F)", onClick: () => zoomToFitPane("timeline") },
       { icon: "redo", label: "Redo (Ctrl+Y)", onClick: () => void redo().catch(() => {}) },
       { icon: "undo", label: "Undo (Ctrl+Z)", onClick: () => void undo().catch(() => {}) },
@@ -1364,6 +1428,30 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
 
+    // Comp tool (SPEC §8.7): click a take → bring it to front (unmute it, mute what it
+    // overlaps, ONE undo). Works on the main row and take lane rows alike; empty space
+    // does nothing. Changing your mind is one click on another take.
+    if (st.tool === "comp") {
+      // On a take lane row a PRESS starts a range drag — release without movement is
+      // the click (bring take to front), a real drag comps the range from that lane
+      // (cmd/take.comp). On the main row only the click applies.
+      if (row && row.kind === "take") {
+        dragRef.current = {
+          kind: "comp",
+          trackId: row.track.id,
+          lane: row.lane,
+          anchor: rawBeat,
+          cur: rawBeat,
+          hitClipId: hit?.clip.id ?? null,
+          moved: false,
+        };
+        capture();
+        return;
+      }
+      if (hit) fire(takeFront(hit.clip.id));
+      return;
+    }
+
     if (st.tool === "draw" && !hit) {
       if (track && trackAcceptsClip(track, "midi")) {
         const a = snapB(rawBeat, grid, e.shiftKey, "floor");
@@ -1429,7 +1517,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         return;
       }
       const pendingToggle = e.shiftKey;
-      const wasSelected = st.selection.clipIds.includes(clip.id);
+      // A TRACK selection also lists every clip on the track (trackSelection.ts commits
+      // them together), so "already selected" is only meaningful while the selection is
+      // clip-scoped. Without that guard, pressing one clip on a selected track kept the
+      // whole track selected AND left scope "tracks" — and Delete then offered to remove
+      // the track with all its lanes instead of the clip under the pointer.
+      const wasSelected =
+        st.selection.scope === "clips" && st.selection.clipIds.includes(clip.id);
       const ids = wasSelected ? st.selection.clipIds : [clip.id];
       // With a deferred toggle we must not disturb the selection on press.
       if (!wasSelected && !pendingToggle) selectClips(ids, [hit.row.track.id]);
@@ -1446,6 +1540,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           startBeat: found.clip.startBeat,
           lenBeats: clipLengthBeats(found.clip, proj.tempoMap, proj.sampleRate),
           type: found.clip.type,
+          lane: found.clip.lane ?? 0,
         });
         if (found.clip.startBeat < minStart) minStart = found.clip.startBeat;
         if (firstTrack < 0) firstTrack = found.track.id;
@@ -1462,6 +1557,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         allowTrack: sameTrack,
         deltaBeats: 0,
         targetTrackId: null,
+        targetLane: null,
         newTrack: false,
         valid: true,
         dup: e.altKey,
@@ -1560,10 +1656,27 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           d.newTrack = belowLastRow;
           d.valid = true;
         }
+        // Take lanes (SPEC §8.7): dragging onto another lane row of the SOURCE track
+        // restacks the take there; the track's own row means lane 0 (the main lane).
+        // Only for single-track drags — a multi-track selection has no one lane to land on.
+        d.targetLane = null;
+        if (d.targetTrackId === null && !d.newTrack && row && row.track.id === d.sourceTrackId) {
+          const sameTrackOnly = [...d.origins.values()].every(
+            (or) => or.trackId === d.sourceTrackId,
+          );
+          if (sameTrackOnly) {
+            if (row.kind === "take") d.targetLane = row.lane;
+            else if (row.kind === "track") d.targetLane = 0;
+          }
+        }
+        const laneChange =
+          d.targetLane !== null &&
+          d.targetLane !== (d.origins.get(d.primaryId)?.lane ?? 0);
         if (
           !d.moved &&
           (Math.abs((rawBeat - d.grabBeat) * st.vp.zoomX) > MOVE_THRESHOLD_PX ||
             d.targetTrackId !== null ||
+            laneChange ||
             d.newTrack)
         ) {
           d.moved = true;
@@ -1581,6 +1694,9 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             pos +
               (d.dup ? " · copy" : "") +
               newTrackHint +
+              (laneChange
+                ? ` · ${d.targetLane === 0 ? "main lane" : `lane ${(d.targetLane ?? 0) + 1}`}`
+                : "") +
               snapHint(e.shiftKey) +
               (d.targetTrackId !== null && !d.valid ? " · incompatible track" : ""),
           );
@@ -1655,6 +1771,21 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           `${formatBarsBeatsShort(d.start, proj.timeSigMap)} → ${formatBarsBeatsShort(d.end, proj.timeSigMap)} · ${trimNum(d.end - d.start)}b` +
             snapHint(e.shiftKey),
         );
+        draw();
+        return;
+      }
+      case "comp": {
+        d.cur = rawBeat; // unsnapped: comp cuts land where the phrase is, not the grid
+        if (!d.moved && Math.abs(d.cur - d.anchor) * st.vp.zoomX > 3) d.moved = true;
+        if (d.moved) {
+          const b0 = Math.min(d.anchor, d.cur);
+          const b1 = Math.max(d.anchor, d.cur);
+          showDragHud(
+            e.clientX,
+            e.clientY,
+            `comp ${formatBarsBeatsShort(b0, proj.timeSigMap)} → ${formatBarsBeatsShort(b1, proj.timeSigMap)}`,
+          );
+        }
         draw();
         return;
       }
@@ -1868,6 +1999,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           d.targetTrackId !== null && d.valid && d.targetTrackId !== d.sourceTrackId
             ? d.targetTrackId
             : undefined;
+        // Take lane retarget (SPEC §8.7) — rides in the same move command, so restacking
+        // a take is one undo. Never combined with a track change (lanes don't travel).
+        const lane =
+          tgt === undefined &&
+          d.targetLane !== null &&
+          d.targetLane !== (d.origins.get(d.primaryId)?.lane ?? 0)
+            ? d.targetLane
+            : undefined;
         if (d.dup) {
           // Copies land ON the originals (atSource), then move by the drag delta —
           // Alt+drag to another track at the same position keeps the same startBeat
@@ -1876,14 +2015,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           duplicateClips(d.ids, true)
             .then(async (r) => {
               const newIds = r.clips.map((c) => c.id);
-              if (d.deltaBeats !== 0 || tgt !== undefined) {
-                await moveClips(newIds, d.deltaBeats, tgt);
+              if (d.deltaBeats !== 0 || tgt !== undefined || lane !== undefined) {
+                await moveClips(newIds, d.deltaBeats, tgt, lane);
               }
               selectClips(newIds);
             })
             .catch((err) => console.warn("[timeline] duplicate-drag failed:", err));
-        } else if (d.deltaBeats !== 0 || tgt !== undefined) {
-          fire(moveClips(d.ids, d.deltaBeats, tgt));
+        } else if (d.deltaBeats !== 0 || tgt !== undefined || lane !== undefined) {
+          fire(moveClips(d.ids, d.deltaBeats, tgt, lane));
         }
         break;
       }
@@ -1936,6 +2075,14 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         addMidiClip(d.trackId, d.start, len)
           .then((r) => selectClips([r.clip.id]))
           .catch((err) => console.warn("[timeline] draw clip failed:", err));
+        break;
+      }
+      case "comp": {
+        if (d.moved) {
+          fire(takeComp(d.trackId, d.lane, Math.min(d.anchor, d.cur), Math.max(d.anchor, d.cur)));
+        } else if (d.hitClipId !== null) {
+          fire(takeFront(d.hitClipId)); // a stationary press is the comp CLICK
+        }
         break;
       }
       case "marquee": {
@@ -2443,6 +2590,21 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const hit = hitTest(vx, cy);
     const mx = e.clientX;
     const my = e.clientY;
+    // On a take lane row (SPEC §8.7) the LANE's own actions are available too — but as a
+    // submenu, and never above the clip's own entries. Leading with a lane-level
+    // "Delete" made the clip's plain Delete look missing (it was last in a long menu):
+    // the thing you right-clicked is the subject, the lane is context.
+    const laneMenu: MenuEntry[] =
+      row && row.kind === "take"
+        ? [
+            "separator",
+            {
+              label: `Take Lane · ${row.lane === 0 ? "Main" : `Lane ${row.lane + 1}`}`,
+              icon: "layers",
+              submenu: takeLaneMenuItems(row.track, row.lane),
+            },
+          ]
+        : [];
 
     if (!hit) {
       // Cubase-style toolbox first: right-click on empty space is how DAW users switch
@@ -2478,6 +2640,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         },
         "separator",
         { label: "Add Track", icon: "plus", submenu: addTrackMenuItems() },
+        ...laneMenu,
       ]);
       return;
     }
@@ -2819,6 +2982,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         danger: true,
         onClick: () => fire(deleteClips(ids)),
       },
+      ...laneMenu,
     ];
     openContextMenu(mx, my, items);
   };

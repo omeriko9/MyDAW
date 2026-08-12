@@ -81,6 +81,10 @@ json PluginInfo::toJson() const {
         j["blacklisted"] = true;
         j["blacklistReason"] = blacklistReason;
     }
+    if (!contentKey.empty())
+        j["contentKey"] = contentKey;
+    if (!duplicateOf.empty())
+        j["duplicateOf"] = duplicateOf;
     return j;
 }
 
@@ -98,6 +102,8 @@ PluginInfo PluginInfo::fromJson(const json& j) {
     p.numOutputs = getOr<int>(j, "numOutputs", 0);
     p.blacklisted = getOr<bool>(j, "blacklisted", false);
     p.blacklistReason = getOr(j, "blacklistReason", "");
+    p.contentKey = getOr(j, "contentKey", "");
+    p.duplicateOf = getOr(j, "duplicateOf", "");
     return p;
 }
 

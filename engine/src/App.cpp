@@ -93,6 +93,7 @@ bool App::init(std::string& err) {
 
     // 3. MIDI input + recorder mirror wiring (E5 requirement).
     midiInput.start();
+    midiOutput.setNullDeviceEnabled(opts.nullMidiOut);
     midiOutput.start(); // sender thread; devices open lazily per Track::midiOutDevice
     midiRecorder.setInput(&midiInput);
     midiInput.setActivityCallback([this](const std::string& deviceId) {
@@ -992,7 +993,14 @@ void App::stopRecordingAndCommit() {
         std::string ec, em;
         cmd->execute("internal/recording.commit",
                      json{{"audio", std::move(audioArr)},
-                          {"midi", std::move(midiArr)}},
+                          {"midi", std::move(midiArr)},
+                          // Take mode rides IN the payload so the command layer never
+                          // reads the Transport — test scripts drive both modes by
+                          // calling internal/recording.commit directly (SPEC §8.7).
+                          {"takeMode",
+                           transport.recordTakeMode() == Transport::RecordTakeMode::Replace
+                               ? "replace"
+                               : "keepHistory"}},
                      false, ec, em);
         if (!ec.empty())
             Log::error("recording.commit failed: %s", em.c_str());
@@ -1186,6 +1194,10 @@ json App::transportJson() const {
                                    {"countInBars", transport.countInBars()},
                                    {"firstBeatVolume", metronome->firstBeatVolume()},
                                    {"otherBeatVolume", metronome->otherBeatVolume()}}},
+                {"recordTakeMode",
+                 transport.recordTakeMode() == Transport::RecordTakeMode::Replace
+                     ? "replace"
+                     : "keepHistory"},
                 {"automationWrite", transport.automationWrite()}};
 }
 

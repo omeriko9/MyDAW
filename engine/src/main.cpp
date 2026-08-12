@@ -110,6 +110,9 @@ bool parseArgs(const std::vector<std::string>& args, mydaw::AppOptions& opts) {
             opts.noBrowser = true;
         } else if (args[i] == "--exit-when-idle") {
             opts.exitWhenIdle = true;
+        } else if (args[i] == "--null-midi-out") {
+            // Test affordance: a MIDI output sink that swallows events (see App.h).
+            opts.nullMidiOut = true;
         } else if (take(i, "--null-input", v)) {
             // Test affordance: synthesize N capture channels on the null driver so the
             // recording path is reachable headlessly. Never on by default.

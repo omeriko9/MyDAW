@@ -273,6 +273,10 @@
         "id": {
           "type": "number"
         },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
+          "type": "number"
+        },
         "lengthSamples": {
           "type": "number"
         },
@@ -1186,6 +1190,10 @@
         "deltaBeats": {
           "type": "number"
         },
+        "lane": {
+          "description": "move the clips to this take lane (same track only, SPEC 8.7)",
+          "type": "number"
+        },
         "targetTrackId": {
           "type": "number"
         }
@@ -1222,6 +1230,10 @@
           "type": "number"
         },
         "gain": {
+          "type": "number"
+        },
+        "lane": {
+          "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
         },
         "muted": {
@@ -2305,6 +2317,10 @@
         "id": {
           "type": "number"
         },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
+          "type": "number"
+        },
         "lengthBeats": {
           "type": "number"
         },
@@ -2919,6 +2935,14 @@
           "type": "boolean"
         },
         "category": {
+          "type": "string"
+        },
+        "contentKey": {
+          "description": "identity of the plugin BINARY, \"<size>-<hash>\" — copies in several folders share it (SPEC 8.3a)",
+          "type": "string"
+        },
+        "duplicateOf": {
+          "description": "path of the first copy of this same binary; set only on redundant copies",
           "type": "string"
         },
         "format": {
@@ -7059,6 +7083,163 @@
       ]
     },
     {
+      "name": "cmd/take.comp",
+      "category": "clips",
+      "description": "Comp a range from one take lane: split takes at the range bounds, unmute that lane inside the range and mute the other lanes, one undo (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "startBeat": {
+            "type": "number"
+          },
+          "endBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "startBeat",
+          "endBeat"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "startBeat": 4,
+            "endBeat": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.front",
+      "category": "clips",
+      "description": "Bring a take to the front: unmute the clip and mute every clip on the same track that strictly overlaps it, as one undo entry (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.lane",
+      "category": "clips",
+      "description": "Whole take lane: front makes it active where it has material; delete removes its clips, closes the gap and unmutes what it covered (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "action": {
+            "enum": [
+              "front",
+              "delete"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "action": "front"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/tempo.set",
       "category": "arrangement",
       "description": "Set the project's base tempo.",
@@ -9826,6 +10007,46 @@
           "input": {
             "enabled": true,
             "countInBars": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport/setRecordMode",
+      "category": "transport",
+      "description": "Set the record take mode: keepHistory stacks new takes in lanes over existing material; replace overwrites it (SPEC 8.7).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "keepHistory",
+              "replace"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "mode": "keepHistory"
           }
         }
       ]

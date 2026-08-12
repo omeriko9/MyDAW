@@ -339,6 +339,7 @@ struct AudioClip {
     std::vector<ClipProcess> processes;
     bool muted = false;  // optional in JSON
     std::string color;   // optional, "" = inherit track color
+    int lane = 0;        // take lane, 0 = main (optional in JSON, SPEC §8.7)
 };
 
 struct MidiClip {
@@ -351,6 +352,7 @@ struct MidiClip {
     std::string color;
     std::vector<Note> notes; // kept sorted by startBeat (helpers don't enforce; E3 does)
     std::vector<MidiCc> cc;  // kept sorted by (controller, beat)
+    int lane = 0;            // take lane, 0 = main (optional in JSON, SPEC §8.7)
 };
 
 // Track.clips element: ordered (AudioClip|MidiClip)[] per SPEC §6.
@@ -385,6 +387,12 @@ inline bool clipMuted(const Clip& c) {
 }
 inline void setClipMuted(Clip& c, bool m) {
     std::visit([m](auto& v) { v.muted = m; }, c);
+}
+inline int clipLane(const Clip& c) {
+    return std::visit([](const auto& v) { return v.lane; }, c);
+}
+inline void setClipLane(Clip& c, int lane) {
+    std::visit([lane](auto& v) { v.lane = lane < 0 ? 0 : lane; }, c);
 }
 inline const std::string& clipColor(const Clip& c) {
     return std::visit([](const auto& v) -> const std::string& { return v.color; }, c);

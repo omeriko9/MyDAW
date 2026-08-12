@@ -59,6 +59,18 @@ void MidiOutput::stop() {
 std::vector<MidiOutDeviceInfo> MidiOutput::devices() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<MidiOutDeviceInfo> out;
+    if (nullDevice_.load(std::memory_order_relaxed)) {
+        MidiOutDeviceInfo d;
+        d.id = "null";
+        d.name = kNullDeviceName;
+        for (int s = 0; s < usedSlots_; ++s) {
+            if (slots_[static_cast<size_t>(s)].name == d.name) {
+                d.open = true;
+                d.sent = slots_[static_cast<size_t>(s)].sent.load(std::memory_order_relaxed);
+            }
+        }
+        out.push_back(std::move(d));
+    }
     const UINT n = midiOutGetNumDevs();
     for (UINT i = 0; i < n; ++i) {
         MIDIOUTCAPSA caps{};
@@ -84,8 +96,24 @@ int MidiOutput::ensureOpenByName(const std::string& name) {
         return -1;
     std::lock_guard<std::mutex> lock(mutex_);
     for (int s = 0; s < usedSlots_; ++s) {
-        if (slots_[static_cast<size_t>(s)].name == name)
+        if (slots_[static_cast<size_t>(s)].name == name) {
+            if (slots_[static_cast<size_t>(s)].isNull.load(std::memory_order_relaxed))
+                return s; // the null sink is "open" without a handle
             return slots_[static_cast<size_t>(s)].handle != nullptr ? s : -1;
+        }
+    }
+    // The synthetic sink (--null-midi-out): claim a slot, no winmm call at all.
+    if (nullDevice_.load(std::memory_order_relaxed) && name == kNullDeviceName) {
+        if (usedSlots_ >= kMaxSlots)
+            return -1;
+        const int slot = usedSlots_++;
+        Slot& s = slots_[static_cast<size_t>(slot)];
+        s.name = name;
+        s.handle = nullptr;
+        s.isNull.store(true, std::memory_order_release);
+        s.sent.store(0, std::memory_order_relaxed);
+        Log::info("midiOut: opened null sink (slot %d) — events are counted, not sent", slot);
+        return slot;
     }
     // find the winmm index carrying this name right now
     const UINT n = midiOutGetNumDevs();
@@ -153,6 +181,13 @@ void MidiOutput::allNotesOff() {
 void MidiOutput::allNotesOffLocked_() {
     for (int s = 0; s < usedSlots_; ++s) {
         Slot& slot = slots_[static_cast<size_t>(s)];
+        // Null sink: no handle to write to, but it still ACCOUNTS for the flush — the
+        // counter is the only observable this path has, and a sink that silently
+        // skipped it would hide a regression in the real one.
+        if (slot.isNull.load(std::memory_order_relaxed)) {
+            slot.sent.fetch_add(3 * 16, std::memory_order_relaxed);
+            continue;
+        }
         if (slot.handle == nullptr)
             continue;
         HMIDIOUT h = static_cast<HMIDIOUT>(slot.handle);
@@ -176,11 +211,17 @@ void MidiOutput::senderLoop_() {
             did = true;
             if (m.slot < 0 || m.slot >= kMaxSlots)
                 continue;
-            void* h = slots_[static_cast<size_t>(m.slot)].rtHandle.load(std::memory_order_acquire);
+            Slot& slot = slots_[static_cast<size_t>(m.slot)];
+            // Null sink: count it and drop it — there is no handle to write to.
+            if (slot.isNull.load(std::memory_order_acquire)) {
+                slot.sent.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            void* h = slot.rtHandle.load(std::memory_order_acquire);
             if (h == nullptr)
                 continue;
             if (midiOutShortMsg(static_cast<HMIDIOUT>(h), m.packed) == MMSYSERR_NOERROR)
-                slots_[static_cast<size_t>(m.slot)].sent.fetch_add(1, std::memory_order_relaxed);
+                slot.sent.fetch_add(1, std::memory_order_relaxed);
         }
         if (!did)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

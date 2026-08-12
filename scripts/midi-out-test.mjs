@@ -6,8 +6,13 @@
  *
  * There is no loopback to assert audio against, so the observable is the engine's own
  * delivery counter: midi/getOutputs reports `sent` = short messages ACTUALLY handed to
- * winmm since the device opened. Windows always ships "Microsoft GS Wavetable Synth",
- * so the test normally has a real device; a machine with zero MIDI outputs SKIPs.
+ * the device since it opened.
+ *
+ * The device is the engine's SYNTHETIC sink (--null-midi-out): it counts events and
+ * sends nothing. Previously this test picked the first real port, which on Windows is
+ * the GS Wavetable Synth — so every gate run played its notes out loud through the
+ * user's speakers (reported 2026-08-12). The null sink also removes the old SKIP path:
+ * the suite no longer depends on the machine having any MIDI hardware at all.
  *
  * Covered: device enumeration, Track.midiOutDevice patch (midi/instrument only —
  * audio tracks refuse), playback events reaching the device (baked path through
@@ -35,7 +40,7 @@ const report = (name, ok, detail = "") => {
 
 const engine = spawn(
   path.join(ROOT, "build", "bin", "Release", "mydaw-engine.exe"),
-  ["--driver", "null", "--no-browser", "--port", String(PORT)],
+  ["--driver", "null", "--null-midi-out", "--no-browser", "--port", String(PORT)],
   { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, APPDATA: TMP } },
 );
 engine.stderr.on("data", () => {});
@@ -79,12 +84,13 @@ try {
   /* ---- 1. enumeration ---- */
   const list1 = (await req("midi/getOutputs", {})).outputs;
   if (!Array.isArray(list1)) die(1, "midi/getOutputs returned no outputs array");
-  if (list1.length === 0) {
-    console.log("[SKIP] no MIDI output devices on this machine (even GS Wavetable is absent)");
-    cleanup();
-    setTimeout(() => process.exit(0), 400);
-  }
-  const dev = list1.find((d) => /GS Wavetable/i.test(d.name)) ?? list1[0];
+  // The synthetic sink must be there — the engine was started with --null-midi-out —
+  // and the test targets ONLY it, so no audible synth is ever opened. Its absence is a
+  // real failure (the flag or the device list broke), not a reason to skip.
+  const dev = list1.find((d) => d.name === "Null Output (MyDAW)");
+  report("the null MIDI sink is offered under --null-midi-out",
+    !!dev, `${list1.length} device(s): ${list1.map((d) => d.name).join(", ")}`);
+  if (!dev) die(1, "no null MIDI output — nothing safe to send to");
   report("midi/getOutputs lists devices", list1.every((d) => typeof d.name === "string" && typeof d.sent === "number"),
     `${list1.length}: ${list1.map((d) => d.name).join(", ")}`);
   report("devices start closed with sent=0", list1.every((d) => !d.open && d.sent === 0));

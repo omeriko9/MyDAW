@@ -45,6 +45,67 @@ namespace {
 constexpr double kMinClipBeats = 1e-3;
 constexpr double kMinNoteBeats = 1e-3;
 
+// SPEC §8.7 take lanes. Strict overlap: touching edges do not overlap.
+constexpr double kTakeOverlapEps = 1e-9;
+
+// Put a take stack back in order after clips were removed from it:
+//
+//   compact — lane numbers close up (an emptied lane disappears instead of leaving a
+//             hole in the lane rows, so deleting a lane's last take deletes the lane);
+//   heal    — a clip that is muted and no longer sits under an audible one is unmuted,
+//             newest lane first. Front-ness is mute state here, so without this,
+//             deleting the front take leaves silence over material plainly still there.
+//
+// No-op on tracks that never stacked (nothing above lane 0): a plain track's manual
+// clip mutes are the user's business and must survive an unrelated neighbour's deletion.
+bool settleTakeLanes(Track& t, const TempoMap& T) {
+    std::set<int> used;
+    for (const Clip& c : t.clips)
+        used.insert(clipLane(c));
+    if (used.empty() || *used.rbegin() == 0)
+        return false;
+
+    bool changed = false;
+    std::map<int, int> remap;
+    int next = 0;
+    for (int lane : used)
+        remap[lane] = next++;
+    for (Clip& c : t.clips) {
+        const int lane = remap[clipLane(c)];
+        if (lane == clipLane(c))
+            continue;
+        setClipLane(c, lane);
+        changed = true;
+    }
+
+    std::vector<Clip*> order;
+    order.reserve(t.clips.size());
+    for (Clip& c : t.clips)
+        order.push_back(&c);
+    std::sort(order.begin(), order.end(),
+              [](const Clip* a, const Clip* b) { return clipLane(*a) > clipLane(*b); });
+    const auto overlaps = [&](const Clip& a, const Clip& b) {
+        return std::min(clipEndBeat(a, T), clipEndBeat(b, T)) -
+                   std::max(clipStartBeat(a), clipStartBeat(b)) >
+               kTakeOverlapEps;
+    };
+    for (Clip* c : order) {
+        if (!clipMuted(*c))
+            continue;
+        bool shadowed = false;
+        for (const Clip& o : t.clips)
+            if (!clipMuted(o) && clipId(o) != clipId(*c) && overlaps(*c, o)) {
+                shadowed = true;
+                break;
+            }
+        if (!shadowed) {
+            setClipMuted(*c, false);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 // 12-color track palette — mirrors ui/src/lib/canvas.ts TRACK_COLORS exactly.
 constexpr const char* kTrackColors[] = {
     "#e25d5d", "#e2814d", "#d8a14a", "#bdb84f", "#8fc457", "#56c596",
@@ -1049,6 +1110,9 @@ json CommandProcessor::dispatch(const std::string& type, const json& p, bool tra
     if (type == "cmd/clip.delete")      return clipDelete(p, r);
     if (type == "cmd/clip.duplicate")   return clipDuplicate(p, r);
     if (type == "cmd/clip.set")         return clipSet(p, r);
+    if (type == "cmd/take.front")       return takeFront(p, r);
+    if (type == "cmd/take.comp")        return takeComp(p, r);
+    if (type == "cmd/take.lane")        return takeLane(p, r);
     if (type == "cmd/notes.edit")       return notesEdit(p, r);
     if (type == "cmd/notes.quantize")   return notesQuantize(p, r);
     if (type == "cmd/cc.edit")          return ccEdit(p, r);
@@ -2700,6 +2764,12 @@ json CommandProcessor::clipMove(const json& p, CmdResult& r) {
     if (minStart + delta < 0.0)
         delta = -minStart;
 
+    // Optional take-lane retarget (SPEC §8.7): dragging a take onto another lane row
+    // moves it there in the SAME undo entry as the positional move. Ignored when the
+    // clips also change track — lane numbers are meaningless across tracks.
+    const bool hasLane = hasKey(p, "lane") && target == nullptr;
+    const int destLane = std::max(0, getOr<int>(p, "lane", 0));
+
     std::set<Track*> touched;
     for (uint64_t id : ids) {
         ClipRef ref = m.clipById(id); // fresh lookup; earlier moves shift vectors
@@ -2709,10 +2779,14 @@ json CommandProcessor::clipMove(const json& p, CmdResult& r) {
             Clip moved;
             takeClip(*ref.track, id, moved);
             setClipStartBeat(moved, ns);
+            setClipLane(moved, 0); // lane numbers are meaningless on another track
+
             touched.insert(ref.track);
             dst->clips.push_back(std::move(moved));
         } else {
             setClipStartBeat(*ref.clip, ns);
+            if (hasLane)
+                setClipLane(*ref.clip, destLane);
         }
         touched.insert(dst);
         r.eventClips.emplace_back(dst->id, id);
@@ -4016,6 +4090,7 @@ json CommandProcessor::clipSplit(const json& p, CmdResult& r) {
             right.name = mc->name;
             right.color = mc->color;
             right.muted = mc->muted;
+            right.lane = mc->lane;
             right.startBeat = atBeat;
             right.lengthBeats = mc->lengthBeats - rel;
             std::vector<Note> leftNotes;
@@ -4157,20 +4232,33 @@ json CommandProcessor::clipDelete(const json& p, CmdResult& r) {
     if (ids.empty())
         return r.fail("bad_request", "clipIds is empty");
     bool any = false;
+    std::set<Track*> touched;
     for (uint64_t id : ids) {
         const ClipRef ref = m.clipById(id);
         if (!ref)
             continue; // tolerate already-gone clips in batch deletes
         Clip dropped;
+        touched.insert(ref.track);
         takeClip(*ref.track, id, dropped);
         r.removedClipIds.push_back(id);
         any = true;
     }
     if (!any)
         return r.fail("not_found", "no matching clips");
+    // Deleting takes out of a stack closes the lane gap and re-exposes what they were
+    // covering (SPEC §8.7) — selecting a lane and pressing Delete therefore removes the
+    // lane, exactly like the lane menu's Delete entry.
+    bool settled = false;
+    for (Track* t : touched)
+        settled |= settleTakeLanes(*t, tm());
     r.label = "Delete Clips";
     r.structural = true;
-    r.scope = "clip";
+    // Lane renumbering/unmuting touches clips the caller never named, so the granular
+    // clip scope would under-report the change — send the whole track set instead.
+    if (settled)
+        r.fullEvent = true;
+    else
+        r.scope = "clip";
     return json::object();
 }
 
@@ -4245,6 +4333,13 @@ json CommandProcessor::clipSet(const json& p, CmdResult& r) {
         setClipMuted(*ref.clip, getOr<bool>(patch, "muted", clipMuted(*ref.clip)));
         any = true;
         audible = true;
+    }
+    if (hasKey(patch, "lane")) {
+        // Take lane (SPEC §8.7). Purely which row the clip shows on — mutes decide what
+        // plays — so it is cosmetic for the graph. Gaps are allowed here; the next
+        // delete settles them.
+        setClipLane(*ref.clip, getOr<int>(patch, "lane", clipLane(*ref.clip)));
+        any = true;
     }
     if (AudioClip* a = asAudio(ref.clip)) {
         if (hasKey(patch, "gain")) {
@@ -6141,7 +6236,364 @@ json CommandProcessor::recreatePlugins(const json& p, std::string& ec, std::stri
 
 namespace {
 
+// Trim an audio clip's normalized gain envelope to a sub-range [f0,f1] of its former
+// extent (same interpolation as clipSplit's cut; boundary values pinned).
+void trimEnvelope(std::vector<ClipEnvPoint>& env, double f0, double f1) {
+    if (env.empty() || f1 <= f0)
+        return;
+    const auto evalAt = [&](double pos) {
+        if (pos <= env.front().pos)
+            return env.front().value;
+        if (pos >= env.back().pos)
+            return env.back().value;
+        for (size_t i = 0; i + 1 < env.size(); ++i) {
+            if (pos <= env[i + 1].pos) {
+                const double span = env[i + 1].pos - env[i].pos;
+                const double t = span > 0.0 ? (pos - env[i].pos) / span : 1.0;
+                return env[i].value + (env[i + 1].value - env[i].value) * t;
+            }
+        }
+        return env.back().value;
+    };
+    const double v0 = evalAt(f0);
+    const double v1 = evalAt(f1);
+    const double w = f1 - f0;
+    std::vector<ClipEnvPoint> out;
+    out.push_back({0.0, v0});
+    for (const ClipEnvPoint& pt : env)
+        if (pt.pos > f0 && pt.pos < f1)
+            out.push_back({(pt.pos - f0) / w, pt.value});
+    out.push_back({1.0, v1});
+    env = std::move(out);
+}
+
+// Places one recorded unit's laps [uS,uE) onto track t under the given take mode
+// (SPEC §8.7). Keep History: existing overlapped clips are muted WHOLE (never split —
+// comp their tails back with the comp tool) and each lap lands on its own fresh lane,
+// newest in front. Replace: only the final lap survives, on lane 0, and existing
+// material in the range is deleted or trimmed. `soloName` names a lone unstacked lap.
+void placeRecordedUnit(Model& m, Track& t, const TempoMap& T, double uS, double uE,
+                       std::vector<Clip>&& laps, bool keepHistory,
+                       const std::string& soloName, json& clipsOut) {
+    if (laps.empty())
+        return;
+    const auto overlaps = [&](const Clip& c) {
+        const double s = clipStartBeat(c);
+        const double e = clipEndBeat(c, T);
+        return std::min(e, uE) - std::max(s, uS) > kTakeOverlapEps;
+    };
+
+    if (keepHistory) {
+        int base = 0;
+        for (Clip& c : t.clips) {
+            if (!overlaps(c))
+                continue;
+            base = std::max(base, clipLane(c) + 1);
+            setClipMuted(c, true);
+        }
+        const bool stacked = base > 0 || laps.size() >= 2;
+        for (size_t i = 0; i < laps.size(); ++i) {
+            setClipLane(laps[i], base + static_cast<int>(i));
+            setClipMuted(laps[i], i + 1 != laps.size()); // newest lap in front
+            if (stacked)
+                setClipName(laps[i], "Take " + std::to_string(base + static_cast<int>(i) + 1));
+            else if (!soloName.empty())
+                setClipName(laps[i], soloName);
+        }
+        for (Clip& lap : laps) {
+            clipsOut.push_back(toJson(lap));
+            t.clips.emplace_back(std::move(lap));
+        }
+    } else {
+        // Replace: clear [uS,uE) of existing material, then land ONLY the final lap.
+        const int64_t sSmp = llround(T.beatsToSamplesF(uS));
+        const int64_t eSmp = llround(T.beatsToSamplesF(uE));
+        std::vector<Clip> keep;
+        keep.reserve(t.clips.size() + 2);
+        for (Clip& c : t.clips) {
+            if (!overlaps(c)) {
+                keep.emplace_back(std::move(c));
+                continue;
+            }
+            const double s = clipStartBeat(c);
+            const double e = clipEndBeat(c, T);
+            const bool headSurvives = s < uS - kTakeOverlapEps;
+            const bool tailSurvives = e > uE + kTakeOverlapEps;
+            if (!headSurvives && !tailSurvives)
+                continue; // fully covered: deleted
+            if (AudioClip* a = asAudio(&c)) {
+                const int64_t cs = llround(T.beatsToSamplesF(s));
+                const int64_t fullLen = a->lengthSamples;
+                if (tailSurvives) {
+                    AudioClip tail = *a;
+                    if (headSurvives)
+                        tail.id = m.nextId(); // both halves survive: tail is a new clip
+                    const int64_t d = std::min<int64_t>(eSmp - cs, fullLen - 1);
+                    tail.srcOffsetSamples = a->srcOffsetSamples + d;
+                    tail.lengthSamples = fullLen - d;
+                    tail.startBeat = T.samplesToBeats(cs + d);
+                    tail.fadeInSec = 0.0;
+                    trimEnvelope(tail.env, static_cast<double>(d) / fullLen, 1.0);
+                    if (tail.lengthSamples > 0)
+                        keep.emplace_back(std::move(tail));
+                }
+                if (headSurvives) {
+                    a->lengthSamples =
+                        std::max<int64_t>(1, std::min<int64_t>(fullLen, sSmp - cs));
+                    a->fadeOutSec = 0.0;
+                    trimEnvelope(a->env, 0.0, static_cast<double>(a->lengthSamples) / fullLen);
+                    keep.emplace_back(std::move(c));
+                }
+            } else if (MidiClip* mc = asMidi(&c)) {
+                if (tailSurvives) {
+                    MidiClip tail = *mc;
+                    if (headSurvives)
+                        tail.id = m.nextId();
+                    const double rel = uE - s;
+                    tail.startBeat = uE;
+                    tail.lengthBeats = mc->lengthBeats - rel;
+                    tail.notes.clear();
+                    for (Note n : mc->notes) // crossing notes belong to the cut region
+                        if (n.startBeat >= rel) {
+                            n.startBeat -= rel;
+                            tail.notes.push_back(n);
+                        }
+                    tail.cc.clear();
+                    for (MidiCc cev : mc->cc)
+                        if (cev.beat >= rel) {
+                            cev.beat -= rel;
+                            tail.cc.push_back(cev);
+                        }
+                    if (tail.lengthBeats >= kMinClipBeats)
+                        keep.emplace_back(std::move(tail));
+                }
+                if (headSurvives) {
+                    const double rel = uS - s;
+                    std::vector<Note> headNotes;
+                    for (Note n : mc->notes) {
+                        if (n.startBeat >= rel)
+                            continue;
+                        if (n.startBeat + n.lengthBeats > rel)
+                            n.lengthBeats = rel - n.startBeat;
+                        if (n.lengthBeats >= kMinNoteBeats)
+                            headNotes.push_back(n);
+                    }
+                    mc->notes = std::move(headNotes);
+                    std::vector<MidiCc> headCc;
+                    for (const MidiCc& cev : mc->cc)
+                        if (cev.beat < rel)
+                            headCc.push_back(cev);
+                    mc->cc = std::move(headCc);
+                    mc->lengthBeats = rel;
+                    keep.emplace_back(std::move(c));
+                }
+            }
+        }
+        t.clips = std::move(keep);
+        Clip last = std::move(laps.back());
+        setClipLane(last, 0);
+        setClipMuted(last, false);
+        if (!soloName.empty())
+            setClipName(last, soloName);
+        clipsOut.push_back(toJson(last));
+        t.clips.emplace_back(std::move(last));
+    }
+    sortClipsByStart(t);
+}
+
 } // namespace
+
+// cmd/take.front {clipId} — SPEC §8.7 comp tool: bring a take to the front. The clip is
+// unmuted and every clip on the same track that STRICTLY overlaps it is muted, as ONE
+// undo entry. Front-ness IS the mute state — there is no separate z-order — so undo
+// restores the previous audible combination exactly. Lane numbers are untouched.
+json CommandProcessor::takeFront(const json& p, CmdResult& r) {
+    Model& m = model();
+    const TempoMap& T = tm();
+    const uint64_t id = getOr<uint64_t>(p, "clipId", 0);
+    const ClipRef ref = m.clipById(id);
+    if (!ref)
+        return r.fail("not_found", "unknown clipId");
+    const double s = clipStartBeat(*ref.clip);
+    const double e = clipEndBeat(*ref.clip, T);
+
+    bool any = false;
+    for (Clip& c : ref.track->clips) {
+        const bool self = clipId(c) == id;
+        const bool overlap =
+            std::min(clipEndBeat(c, T), e) - std::max(clipStartBeat(c), s) >
+            kTakeOverlapEps;
+        const bool want = self ? false : (overlap ? true : clipMuted(c));
+        if (clipMuted(c) == want)
+            continue;
+        setClipMuted(c, want);
+        r.eventClips.emplace_back(ref.track->id, clipId(c));
+        any = true;
+    }
+    if (!any) {
+        r.mutated = false; // already in front — nothing to undo
+        return json::object();
+    }
+    r.label = "Bring Take to Front";
+    r.structural = true; // mute state feeds the audio graph, like clip.set muted
+    r.scope = "clip";
+    return json::object();
+}
+
+// cmd/take.comp {trackId, lane, startBeat, endBeat} — SPEC §8.7 comp DRAG: choose one
+// lane's material for a sub-range. Every take crossing a range bound is split there
+// (via the ordinary clipSplit path, so envelope/note math lives in one place), then
+// inside the range the chosen lane is unmuted and every other lane is muted. Material
+// outside the range is untouched — that is the whole point of the boundaries. ONE undo
+// entry; comping a range where the chosen lane is empty is legal and yields silence
+// (how a cough on every other take gets removed).
+json CommandProcessor::takeComp(const json& p, CmdResult& r) {
+    Model& m = model();
+    const TempoMap& T = tm();
+    Track* t = m.trackById(getOr<uint64_t>(p, "trackId", 0));
+    if (!t)
+        return r.fail("not_found", "unknown trackId");
+    const int lane = std::max(0, getOr<int>(p, "lane", 0));
+    double s = getOr<double>(p, "startBeat", 0.0);
+    double e = getOr<double>(p, "endBeat", 0.0);
+    if (e < s)
+        std::swap(s, e);
+    if (e - s <= kMinClipBeats)
+        return r.fail("bad_request", "comp range is empty");
+
+    bool any = false;
+    for (const double at : {s, e}) {
+        std::vector<uint64_t> crossing;
+        for (Clip& c : t->clips) {
+            const double cs = clipStartBeat(c);
+            const double ce = clipEndBeat(c, T);
+            if (at > cs + kMinClipBeats && at < ce - kMinClipBeats)
+                crossing.push_back(clipId(c));
+        }
+        if (crossing.empty())
+            continue;
+        CmdResult sub;
+        json sp;
+        sp["clipIds"] = crossing;
+        sp["atBeat"] = at;
+        clipSplit(sp, sub);
+        if (!sub.errCode.empty())
+            return r.fail(sub.errCode.c_str(), sub.errMsg);
+        any = true;
+    }
+
+    // Every clip is now fully inside or outside [s, e): choose the lane within.
+    for (Clip& c : t->clips) {
+        const double cs = clipStartBeat(c);
+        const double ce = clipEndBeat(c, T);
+        if (std::min(ce, e) - std::max(cs, s) <= kTakeOverlapEps)
+            continue;
+        const bool want = clipLane(c) != lane;
+        if (clipMuted(c) != want) {
+            setClipMuted(c, want);
+            any = true;
+        }
+    }
+    if (!any) {
+        r.mutated = false; // range already reads from this lane — nothing to undo
+        return json::object();
+    }
+    r.label = "Comp Take Range";
+    r.structural = true;
+    r.fullEvent = true; // splits + mutes across the stack: no useful granular shape
+    return json::object();
+}
+
+// cmd/take.lane {trackId, lane, action:"front"|"delete"} — SPEC §8.7 whole-lane
+// operations, the lane-row right-click menu's two entries.
+//
+//   front  — make this lane the active one for everything it covers: unmute all its
+//            clips, mute every clip on another lane that strictly overlaps one of them.
+//            Material the lane does not cover is left exactly as it was, so fronting a
+//            lane that only holds one phrase does not silence the rest of the comp.
+//   delete — remove the lane's clips, then close the gap (lanes above shift DOWN by one,
+//            so the rows never grow holes), then HEAL audibility: any remaining clip
+//            that is muted and no longer overlaps an audible one is unmuted, newest lane
+//            first. Without the heal, deleting the front lane leaves a silent hole over
+//            material that is plainly sitting right there.
+//
+// One undo entry either way.
+json CommandProcessor::takeLane(const json& p, CmdResult& r) {
+    Model& m = model();
+    const TempoMap& T = tm();
+    Track* t = m.trackById(getOr<uint64_t>(p, "trackId", 0));
+    if (!t)
+        return r.fail("not_found", "unknown trackId");
+    const int lane = std::max(0, getOr<int>(p, "lane", 0));
+    const std::string action = getOr(p, "action", "front");
+    if (action != "front" && action != "delete")
+        return r.fail("bad_request", "action must be \"front\" or \"delete\"");
+
+    const auto overlaps = [&](const Clip& a, const Clip& b) {
+        return std::min(clipEndBeat(a, T), clipEndBeat(b, T)) -
+                   std::max(clipStartBeat(a), clipStartBeat(b)) >
+               kTakeOverlapEps;
+    };
+
+    bool any = false;
+    if (action == "front") {
+        std::vector<const Clip*> chosen;
+        for (const Clip& c : t->clips)
+            if (clipLane(c) == lane)
+                chosen.push_back(&c);
+        if (chosen.empty())
+            return r.fail("bad_request", "lane is empty");
+        for (Clip& c : t->clips) {
+            bool want;
+            if (clipLane(c) == lane) {
+                want = false;
+            } else {
+                bool covered = false;
+                for (const Clip* ch : chosen)
+                    if (overlaps(c, *ch)) {
+                        covered = true;
+                        break;
+                    }
+                if (!covered)
+                    continue; // outside the lane's reach: leave the comp alone
+                want = true;
+            }
+            if (clipMuted(c) == want)
+                continue;
+            setClipMuted(c, want);
+            r.eventClips.emplace_back(t->id, clipId(c));
+            any = true;
+        }
+    } else {
+        std::vector<Clip> keep;
+        keep.reserve(t->clips.size());
+        for (Clip& c : t->clips) {
+            if (clipLane(c) == lane) {
+                r.removedClipIds.push_back(clipId(c));
+                any = true;
+                continue;
+            }
+            keep.emplace_back(std::move(c));
+        }
+        t->clips = std::move(keep);
+        if (!any) {
+            r.mutated = false; // nothing on that lane
+            return json::object();
+        }
+        // Same settle as an ordinary delete of those clips: close the lane gap, then
+        // unmute whatever the lane was covering.
+        settleTakeLanes(*t, T);
+    }
+    if (!any) {
+        r.mutated = false;
+        return json::object();
+    }
+    r.label = action == "front" ? "Set Active Lane" : "Delete Lane";
+    r.structural = true;
+    if (action == "delete")
+        r.fullEvent = true; // clips removed + lanes renumbered: no granular shape
+    return json::object();
+}
 
 json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     // One contiguous run of captured material: where it belongs on the timeline, and where
@@ -6155,6 +6607,9 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
     Model& m = model();
     const TempoMap& T = tm();
     const std::string pdir = projectIO_ ? projectIO_->projectDir() : std::string();
+    // Take mode rides IN the payload (App forwards the transport setting) so this
+    // command never reads the Transport; absent = keepHistory (SPEC §8.7).
+    const bool keepHistory = getOr(p, "takeMode", "keepHistory") != std::string("replace");
 
     json assetsOut = json::array();
     json clipsOut = json::array();
@@ -6230,32 +6685,25 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
             for (int64_t key : order) {
                 const std::vector<RecSegment>& group = byStart[key];
                 const double groupBeat = std::max(0.0, T.samplesToBeats(key));
-                // Build the unit's laps first — both the Keep Takes fold and the legacy
-                // append consume the same clips.
+                // Build the unit's laps, then let the take-mode policy place them
+                // (lane assignment, mutes, naming — SPEC §8.7).
                 int64_t longest = 0;
                 std::vector<Clip> laps;
                 laps.reserve(group.size());
-                int k = 0;
                 for (const RecSegment& sg : group) {
                     longest = std::max(longest, sg.frames);
                     AudioClip c;
                     c.id = m.nextId();
-                    c.name = group.size() >= 2 ? "Take " + std::to_string(++k)
-                                               : fileStem(wavPath);
+                    c.name = fileStem(wavPath);
                     c.startBeat = groupBeat;
                     c.assetId = a.id;
                     c.srcOffsetSamples = sg.fileOffset;
                     c.lengthSamples = sg.frames;
                     laps.emplace_back(std::move(c));
                 }
-                // Every lap lands as a plain clip. Cycle recording therefore stacks
-                // overlapping clips at the loop start (they all sound) — take folders
-                // were removed on 2026-08-11 and nothing selects between laps now.
-                for (Clip& lap : laps) {
-                    clipsOut.push_back(toJson(lap));
-                    t->clips.emplace_back(std::move(lap));
-                }
-                sortClipsByStart(*t);
+                const double unitEnd = T.samplesToBeats(key + longest);
+                placeRecordedUnit(m, *t, T, groupBeat, unitEnd, std::move(laps),
+                                  keepHistory, fileStem(wavPath), clipsOut);
             }
             any = true;
         }
@@ -6368,15 +6816,16 @@ json CommandProcessor::recordingCommit(const json& p, CmdResult& r) {
                 continue;
             std::vector<MidiClip>& group = groups[key];
 
-            // Every lap lands as a plain clip (take folders removed 2026-08-11).
-            int k = 0;
+            // Take-mode policy places the laps (lanes, mutes, naming — SPEC §8.7).
+            double unitEnd = key.second;
+            std::vector<Clip> laps;
+            laps.reserve(group.size());
             for (MidiClip& c : group) {
-                if (group.size() >= 2)
-                    c.name = "Take " + std::to_string(++k);
-                clipsOut.push_back(toJson(c));
-                t->clips.emplace_back(std::move(c));
+                unitEnd = std::max(unitEnd, c.startBeat + c.lengthBeats);
+                laps.emplace_back(std::move(c));
             }
-            sortClipsByStart(*t);
+            placeRecordedUnit(m, *t, T, key.second, unitEnd, std::move(laps), keepHistory,
+                              t->name, clipsOut);
         }
     }
 

@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { metersBus, useStore } from "../../store/store";
+import { metersBus, reconcileRecordTakeMode, useStore } from "../../store/store";
 import type { SizingMode, Tool } from "../../store/store";
 import {
   commitParam,
@@ -30,6 +30,7 @@ import {
   setAutomationWrite,
   setLoop,
   setPunch,
+  setRecordTakeMode,
   setTimeSig,
   stop,
   transientParam,
@@ -39,7 +40,7 @@ import { applyMetronome } from "../../store/metronome";
 import { timeSigAtBeat } from "../../lib/time";
 import { quantizeSelection } from "../../lib/keyboard";
 import { describeCaptureState } from "../../lib/captureConflict";
-import type { Grid } from "../../protocol/types";
+import type { Grid, RecordTakeMode } from "../../protocol/types";
 import { Icon } from "../common/icons";
 import type { IconName } from "../common/icons";
 import { IconButton } from "../common/IconButton";
@@ -121,6 +122,56 @@ function MetronomeControl() {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           openMenu(r.left, r.bottom + 4);
         }}
+      />
+    </span>
+  );
+}
+
+/* ============================================================================
+ * Record button + take mode (SPEC §8.7)
+ * ========================================================================= */
+
+function RecordControl({ recording }: { recording: boolean }) {
+  // Mirror of the transport's record take mode (seeded from session/hello, reconciled
+  // from transport events/replies). Keep History stacks new takes in lanes; Replace
+  // overwrites. Deliberately independent of any lanes VIEW state — the mode changes
+  // what the NEXT recording does, never what the arrangement shows.
+  const mode = useStore((s) => s.recordTakeMode);
+
+  const apply = (m: RecordTakeMode) => {
+    useStore.setState({ recordTakeMode: m }); // optimistic; the reply reconciles
+    fire(setRecordTakeMode(m).then((r) => reconcileRecordTakeMode(r.recordTakeMode)));
+  };
+  const openMenu = (x: number, y: number) => {
+    const items: MenuEntry[] = [
+      {
+        label: "Keep History — new takes stack in lanes",
+        checked: mode === "keepHistory",
+        onClick: () => apply("keepHistory"),
+      },
+      {
+        label: "Replace — recording overwrites what's under it",
+        checked: mode === "replace",
+        onClick: () => apply("replace"),
+      },
+    ];
+    openContextMenu(x, y, items);
+  };
+
+  return (
+    <span
+      className="tb-group"
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openMenu(e.clientX, e.clientY);
+      }}
+    >
+      <Toggle
+        on={recording}
+        onChange={(on) => fire(on ? record() : stop())}
+        variant="danger"
+        icon="record"
+        tooltip={`Record (R) — mode: ${mode === "replace" ? "Replace" : "Keep History"}; right-click to change`}
       />
     </span>
   );
@@ -528,6 +579,7 @@ const TOOLS: Array<{ tool: Tool; icon: IconName; tip: string }> = [
   { tool: "split", icon: "scissors", tip: "Split (4)" },
   // X = mute anything. Not bound to the X KEY: that is Crossfade and stays that way.
   { tool: "mute", icon: "x", tip: "Mute (5) — click any clip to mute or unmute it" },
+  { tool: "comp", icon: "layers", tip: "Comp (6) — click a take to bring it to front" },
 ];
 
 const SIZING_MODES: Array<{ mode: SizingMode; label: string; title: string }> = [
@@ -633,13 +685,7 @@ export default function TransportBar() {
           onClick={() => fire(playing ? pause() : play())}
         />
         <IconButton icon="stop" size={28} tooltip="Stop (Space)" onClick={() => fire(stop())} />
-        <Toggle
-          on={recording}
-          onChange={(on) => fire(on ? record() : stop())}
-          variant="danger"
-          icon="record"
-          tooltip="Record (R)"
-        />
+        <RecordControl recording={recording} />
         <Toggle
           on={loop.enabled}
           onChange={(on) => fire(setLoop(loop.startBeat, loop.endBeat, on))}

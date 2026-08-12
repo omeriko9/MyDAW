@@ -4,7 +4,93 @@
 the project is for and what each phase contains; this says what to pick up now. If the two
 ever disagree, this one is wrong — fix it here rather than starting a third list somewhere.
 
-Last updated: 2026-08-07 (evening) — **MULTI-ENDPOINT CAPTURE SHIPPED.** Omer hit the
+Last updated: 2026-08-11 (night) — **LANES & COMPING REBUILD, 4 of ~9 layers shipped.**
+See the section directly below; everything before it predates that work.
+
+---
+
+## NOW — lanes & comping (SPEC §8.7), rebuilt from Omer's brief
+
+The brief is Omer's `cubase_artist_lanes_comping_track_versions.md` (kept outside the repo,
+in his Downloads): a walkthrough of Cubase Artist's take lanes, Comp tool and Track
+Versions, written AFTER the first attempt was deleted — so it is the corrective spec, not
+a description of what was removed. Ask him for it before continuing; SPEC §8.7 records
+everything already built from it.
+
+Context: the 2026-08-11 daytime take-folder/versions features were removed entirely at
+Omer's request ("the experience is horrible") — commit `0bafa7b`, backup branch
+`backup/versions-feature-2026-08-11`. The rebuild starts from the brief and adds one
+verifiable layer at a time. Design lesson being obeyed: the record MODE, the lanes VIEW,
+and what PLAYS are three independent things — never one switch.
+
+**Shipped (uncommitted on main, fast gate 34/34):**
+
+1. **Record take modes** — `transport/setRecordMode {keepHistory|replace}`, session state
+   (never project data), right-click the record button. Keep History stacks each pass/lap
+   on a fresh lane with older material muted whole; Replace overwrites (trims/deletes
+   underlying material). One undo per pass. Per-clip `lane` int is the only new model
+   field — no container object.
+2. **Show Lanes** — the "L" header toggle expands a track into one row per take lane
+   (`TakeRowL`, volatile `takesUi` store, never persisted). Pure view.
+3. **Comp click** — Comp tool (slot 6, key `6`); click a take → `cmd/take.front` brings it
+   to front (unmute it, mute what it strictly overlaps, one undo).
+4. **Comp drag** — drag across a phrase on a lane → `cmd/take.comp` splits every take at
+   both range bounds and chooses that lane inside the range only. Unsnapped by design.
+5. **Lane row right-click** — `cmd/take.lane {action:"front"|"delete"}`: set the whole lane
+   active, or delete it (higher lanes shift down, covered takes become audible again).
+   Same menu from the lane's header row and from its strip on the canvas.
+
+6. **Lane selection + delete scope** (2026-08-12 bug report): clicking a lane row selects
+   its takes; deleting clips settles the stack (lanes close up, uncovered takes unmute),
+   so "click lane, press Delete" deletes the lane. Two selection bugs fixed with it —
+   pressing one take on a selected track dragged the whole track, and Delete after an
+   empty-space click offered to delete the track with all its lanes.
+
+7. **Lane surface audit** (2026-08-12): every interaction was walked against the running
+   app, not reasoned about. Fixed: rubber-band selection was dead on lane rows; a vertical
+   drag between lanes was ignored (now restacks via `cmd/clip.move {lane}`, one undo); the
+   clip menu led with a lane-level Delete. Verified working and left alone: click/marquee
+   select, move/trim, double-click → editor, split/erase/mute tools, Ctrl+D, undo of a
+   lane drag, save/load. Known wart: paste lands on lane 0, not the pointed-at lane.
+
+**Lesson for whoever picks this up:** each of the first four bug reports here came from
+Omer, not from the tests, because increments were shipped after checking only the path
+just written. Walk the whole surface of a feature against the running app before calling
+it done — `scratchpad/audit*.mjs` (openSlot + dump menus/state) is the pattern that found
+three gaps in one pass.
+
+Tests: `scripts/takes-record-test.mjs` (33 checks, gate id `takes-record`), ui-smoke
+`take-lanes-and-comp-click`, `lane-selection-and-clip-delete-scope`,
+`lane-row-behaves-like-a-track-row` (every regression verified to FAIL without its fix).
+Catalog 138 engine + 14 UI = 152.
+
+**Yet to be done, in the order I'd take them:**
+
+- **Comp boundary dragging** — grab the vertical split between two comped sections and
+  slide it; the brief's "bad cut / nicer cut" gesture. Needs a hit zone on the boundary
+  (comp tool only) and a command that moves a split across the whole stack — the pieces
+  either side belong to different lanes, so it is a paired resize, not `clip.resize`.
+- **Lane solo (S per lane row)** — audition one lane in project context without
+  disturbing the comp's mute state. Needs a view-level solo that OVERRIDES mute for
+  playback rather than writing mutes (writing them would destroy the comp).
+- **Ctrl-click audition** — with the comp tool, Ctrl temporarily becomes the Speaker
+  tool: click to start playback there. (No Speaker tool exists yet — check whether
+  audition should be its own tool first.)
+- **Clean Up Lanes / Delete Overlaps / Bounce Selection** — the "what happens when you're
+  finished" chapter: resolve overlaps, drop empty lanes, optionally flatten the comp into
+  one clip. `cmd/clip.join` already exists and may cover Bounce Selection.
+- **Alt+click split / Alt+Shift+drag slip** on the comp tool (brief's cheat sheet).
+- **Track Versions** — whole-track alternate timelines, the brief's second half. Deliberately
+  LAST, and it must NOT be called "Versions" in the UI: two features owning that word is
+  precisely what made the removed attempt incomprehensible. Suggest "Track Alternates".
+
+Open questions worth asking Omer before building further: should lane rows accept the
+ordinary tools (they do today) or only the comp tool? Should Show Lanes persist per
+project? Neither is answered by the brief.
+
+---
+
+Earlier: 2026-08-07 (evening) — **MULTI-ENDPOINT CAPTURE SHIPPED.** Omer hit the
 single-endpoint wall the same day it was surfaced (Rode on default + condenser on the
 Audio Kontrol 1: the warning fired — with a raw GUID in it — and the second mic was
 unreachable). The honest-v1 warning became the real fix within the day: one WASAPI
@@ -150,8 +236,9 @@ several MIDI parts should drive.
   are already captured for recording. The dominant remaining input-timing error now that
   exclusive-mode WASAPI removed the ~23 ms shared-mode offset (2026-07-31).
 - **Automation touch/latch write modes** — needs a continuous per-block writer.
-- **Take-lane polish**: quick-swap hotkeys; comp swipe snapping is deliberately unsnapped
-  (matches the Inspector) — revisit if it feels loose.
+- **Take-lane polish**: quick-swap hotkeys; comp drag snapping is deliberately unsnapped
+  (matches the Inspector) — revisit if it feels loose. See the NOW section for the
+  remaining §8.7 layers.
 - `rebuild.ps1` kills running engines it did not start (killed a live session once,
   2026-07-31) — known, deliberately left for Omer's call.
 

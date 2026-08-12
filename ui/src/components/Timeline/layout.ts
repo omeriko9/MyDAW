@@ -49,6 +49,7 @@ export const MAX_TRACK_H = 400;
 /** Automation lane row height (not affected by vertical zoom). */
 export const LANE_H = 44;
 /** Take lane row height (fixed, like automation lanes). */
+export const TAKE_LANE_H = 44;
 
 /** store.viewport.zoomY === BASE_ZOOM_Y → track-height scale 1. */
 export const BASE_ZOOM_Y = 16;
@@ -108,7 +109,18 @@ export interface LaneRowL {
   depth: number;
 }
 
-export type Row = TrackRowL | LaneRowL;
+/** Take lane sub-row (SPEC §8.7): shows only the track's clips with `clip.lane === lane`.
+ *  Pure VIEW — expanding lanes never changes what plays (that is mute state). */
+export interface TakeRowL {
+  kind: "take";
+  track: Track;
+  lane: number;
+  top: number;
+  height: number;
+  depth: number;
+}
+
+export type Row = TrackRowL | LaneRowL | TakeRowL;
 
 export interface RowsOptions {
   collapsedFolders: ReadonlySet<number>;
@@ -116,7 +128,8 @@ export interface RowsOptions {
   autoExpanded: ReadonlySet<number>;
   /** locally added (still point-less) lanes per trackId */
   extraLanes: ReadonlyMap<number, readonly string[]>;
-  /** tracks with their take-folder lanes expanded (SPEC §8.7) */
+  /** tracks with their take lanes expanded (SPEC §8.7) */
+  takesExpanded: ReadonlySet<number>;
   /** live height preview during a header height drag (display px) */
   heightOverride?: { trackId: number; height: number } | null;
   vScale: number;
@@ -170,6 +183,18 @@ export function computeRows(project: Project | null, o: RowsOptions): Row[] {
     const depth = depthOf(t);
     rows.push({ kind: "track", track: t, depth, top, height: h, flatIndex });
     top += h;
+    // Take lanes come directly under the track row (Cubase order), before automation
+    // lanes. Lane count = highest clip.lane + 1, so an unstacked track shows a single
+    // lane (the toggle is still visibly doing something) and the rows never outlive
+    // their clips: deleting the last lane-2 clip removes the lane-2 row on reconcile.
+    if (o.takesExpanded.has(t.id)) {
+      let laneCount = 1;
+      for (const c of t.clips) laneCount = Math.max(laneCount, (c.lane ?? 0) + 1);
+      for (let lane = 0; lane < laneCount; lane++) {
+        rows.push({ kind: "take", track: t, lane, top, height: TAKE_LANE_H, depth });
+        top += TAKE_LANE_H;
+      }
+    }
     if (o.autoExpanded.has(t.id)) {
       const seen = new Set<string>();
       const extras = o.extraLanes.get(t.id) ?? [];

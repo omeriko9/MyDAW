@@ -258,6 +258,9 @@ private:
     json clipDelete(const json& p, CmdResult& r);
     json clipDuplicate(const json& p, CmdResult& r);
     json clipSet(const json& p, CmdResult& r);
+    json takeFront(const json& p, CmdResult& r);
+    json takeComp(const json& p, CmdResult& r);
+    json takeLane(const json& p, CmdResult& r);
     json notesEdit(const json& p, CmdResult& r);
     json notesQuantize(const json& p, CmdResult& r);
     json ccEdit(const json& p, CmdResult& r);

@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "63266538c892a1d560f1b4db796f185ef8c1a6f70d914c6464f50bc544d0e5b1";
+export const AGENT_CATALOG_SHA256 = "7da49c66ff54a775ea8513c87b26015b6115614bad85494d2336e13c2eba6d20";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -299,6 +299,10 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "number"
         },
         "id": {
+          "type": "number"
+        },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
           "type": "number"
         },
         "lengthSamples": {
@@ -1214,6 +1218,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "deltaBeats": {
           "type": "number"
         },
+        "lane": {
+          "description": "move the clips to this take lane (same track only, SPEC 8.7)",
+          "type": "number"
+        },
         "targetTrackId": {
           "type": "number"
         }
@@ -1250,6 +1258,10 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "number"
         },
         "gain": {
+          "type": "number"
+        },
+        "lane": {
+          "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
         },
         "muted": {
@@ -2333,6 +2345,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "id": {
           "type": "number"
         },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
+          "type": "number"
+        },
         "lengthBeats": {
           "type": "number"
         },
@@ -2947,6 +2963,14 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "boolean"
         },
         "category": {
+          "type": "string"
+        },
+        "contentKey": {
+          "description": "identity of the plugin BINARY, \"<size>-<hash>\" — copies in several folders share it (SPEC 8.3a)",
+          "type": "string"
+        },
+        "duplicateOf": {
+          "description": "path of the first copy of this same binary; set only on redundant copies",
           "type": "string"
         },
         "format": {
@@ -7087,6 +7111,163 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "cmd/take.comp",
+      "category": "clips",
+      "description": "Comp a range from one take lane: split takes at the range bounds, unmute that lane inside the range and mute the other lanes, one undo (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "startBeat": {
+            "type": "number"
+          },
+          "endBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "startBeat",
+          "endBeat"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "startBeat": 4,
+            "endBeat": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.front",
+      "category": "clips",
+      "description": "Bring a take to the front: unmute the clip and mute every clip on the same track that strictly overlaps it, as one undo entry (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.lane",
+      "category": "clips",
+      "description": "Whole take lane: front makes it active where it has material; delete removes its clips, closes the gap and unmutes what it covered (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "action": {
+            "enum": [
+              "front",
+              "delete"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "action": "front"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/tempo.set",
       "category": "arrangement",
       "description": "Set the project's base tempo.",
@@ -9859,6 +10040,46 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "transport/setRecordMode",
+      "category": "transport",
+      "description": "Set the record take mode: keepHistory stacks new takes in lanes over existing material; replace overwrites it (SPEC 8.7).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "keepHistory",
+              "replace"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "mode": "keepHistory"
+          }
+        }
+      ]
+    },
+    {
       "name": "transport/stop",
       "category": "transport",
       "description": "Stop transport playback or recording.",
@@ -11134,6 +11355,9 @@ export const ENGINE_OPERATION_NAMES = [
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
   "cmd/punch.set",
+  "cmd/take.comp",
+  "cmd/take.front",
+  "cmd/take.lane",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -11221,6 +11445,7 @@ export const ENGINE_OPERATION_NAMES = [
   "transport/record",
   "transport/setAutomationWrite",
   "transport/setMetronome",
+  "transport/setRecordMode",
   "transport/stop"
 ] as const satisfies readonly RequestType[];
 export const UI_OPERATION_NAMES = [
@@ -11279,6 +11504,9 @@ export const BATCHABLE_OPERATION_NAMES = [
   "cmd/plugin.setParam",
   "cmd/plugin.setSample",
   "cmd/punch.set",
+  "cmd/take.comp",
+  "cmd/take.front",
+  "cmd/take.lane",
   "cmd/tempo.set",
   "cmd/tempoMap.set",
   "cmd/timeSigMap.set",
@@ -11487,6 +11715,18 @@ export const REQUEST_COVERAGE = {
     "kind": "operation",
     "operation": "cmd/clip.set"
   },
+  "cmd/take.front": {
+    "kind": "operation",
+    "operation": "cmd/take.front"
+  },
+  "cmd/take.comp": {
+    "kind": "operation",
+    "operation": "cmd/take.comp"
+  },
+  "cmd/take.lane": {
+    "kind": "operation",
+    "operation": "cmd/take.lane"
+  },
   "cmd/notes.edit": {
     "kind": "operation",
     "operation": "cmd/notes.edit"
@@ -11634,6 +11874,10 @@ export const REQUEST_COVERAGE = {
   "transport/setMetronome": {
     "kind": "operation",
     "operation": "transport/setMetronome"
+  },
+  "transport/setRecordMode": {
+    "kind": "operation",
+    "operation": "transport/setRecordMode"
   },
   "transport/setAutomationWrite": {
     "kind": "operation",
@@ -12277,6 +12521,26 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "enabled": true
     }
   ],
+  "cmd/take.comp": [
+    {
+      "trackId": 3,
+      "lane": 2,
+      "startBeat": 4,
+      "endBeat": 8
+    }
+  ],
+  "cmd/take.front": [
+    {
+      "clipId": 21
+    }
+  ],
+  "cmd/take.lane": [
+    {
+      "trackId": 3,
+      "lane": 2,
+      "action": "front"
+    }
+  ],
   "cmd/tempo.set": [
     {
       "bpm": 124
@@ -12755,6 +13019,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "enabled": true,
       "countInBars": 1
+    }
+  ],
+  "transport/setRecordMode": [
+    {
+      "mode": "keepHistory"
     }
   ],
   "transport/stop": [

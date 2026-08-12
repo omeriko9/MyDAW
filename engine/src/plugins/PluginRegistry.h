@@ -41,6 +41,17 @@ struct PluginInfo {
     bool blacklisted = false;
     std::string blacklistReason;
 
+    // Duplicate detection (SPEC §8.3a). contentKey identifies the BINARY, not the path:
+    // "<size>-<64-bit content hash>". Copies of the same DLL in several folders — the
+    // normal state of a machine with years of installers and capture folders — share it.
+    // duplicateOf holds the path of the first copy seen this scan (the canonical one) and
+    // is empty on that canonical entry; the scanner never re-loads a duplicate, and the
+    // UI shows one row per contentKey. Different BUILDS of a plugin differ in content and
+    // therefore stay separate entries, which is the whole point of hashing rather than
+    // matching on file name or uid (VST2 shell uids are not unique either).
+    std::string contentKey;
+    std::string duplicateOf;
+
     // §5.6 wire shape: {uid, format, path, bitness, name, vendor, category, isInstrument,
     // numInputs, numOutputs, blacklisted?, blacklistReason?} (last two only when set).
     json toJson() const;

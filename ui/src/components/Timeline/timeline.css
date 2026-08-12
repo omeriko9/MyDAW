@@ -359,6 +359,19 @@
   color: var(--text-faint);
 }
 
+/* Take lane header sub-rows (SPEC §8.7): the audible lane's ▶ marker takes the accent. */
+.tlh-take.audible .tlh-lane-value {
+  color: var(--accent);
+}
+
+.tlh-take {
+  cursor: pointer; /* the row selects its takes */
+}
+
+.tlh-take[data-selected="true"] {
+  background: var(--accent-soft);
+}
+
 /* reorder indicator */
 .tlh-drop-line {
   position: absolute;

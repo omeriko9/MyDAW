@@ -105,6 +105,8 @@ json toJson(const AudioClip& c) {
         j["muted"] = true;
     if (!c.color.empty())
         j["color"] = c.color;
+    if (c.lane > 0)
+        j["lane"] = c.lane;
     return j;
 }
 
@@ -130,6 +132,8 @@ json toJson(const MidiClip& c) {
         j["muted"] = true;
     if (!c.color.empty())
         j["color"] = c.color;
+    if (c.lane > 0)
+        j["lane"] = c.lane;
     return j;
 }
 
@@ -737,6 +741,7 @@ bool fromJson(const json& j, Clip& out, std::string* err) {
         }
         c.muted = getOr<bool>(j, "muted", false);
         c.color = getOr(j, "color", "");
+        c.lane = std::max(0, getOr<int>(j, "lane", 0));
         out = std::move(c);
         return true;
     }
@@ -748,6 +753,7 @@ bool fromJson(const json& j, Clip& out, std::string* err) {
         c.lengthBeats = getOr<double>(j, "lengthBeats", 4.0);
         c.muted = getOr<bool>(j, "muted", false);
         c.color = getOr(j, "color", "");
+        c.lane = std::max(0, getOr<int>(j, "lane", 0));
         if (hasKey(j, "notes") && j.find("notes")->is_array()) {
             for (const json& nj : *j.find("notes")) {
                 Note n;

@@ -226,6 +226,8 @@ export interface AudioClip {
   dopLengthSamples?: number;
   muted?: boolean;
   color?: string;
+  /** take lane, 0/absent = main (SPEC §8.7) */
+  lane?: number;
 }
 
 export interface MidiClip {
@@ -239,6 +241,8 @@ export interface MidiClip {
   notes: Note[];
   /** CC / pitch-bend / aftertouch points (optional, [] default). */
   cc?: MidiCc[];
+  /** take lane, 0/absent = main (SPEC §8.7) */
+  lane?: number;
 }
 
 /** Discriminated union on `type`. */
@@ -452,6 +456,12 @@ export interface PluginInfo {
   numOutputs: number;
   blacklisted?: boolean;
   blacklistReason?: string;
+  /** "<size>-<hash>" of the BINARY (SPEC §8.3a) — copies of one DLL in several folders
+   *  share it, different builds do not. Absent on older engines. */
+  contentKey?: string;
+  /** path of the first copy of this same binary; set only on the redundant copies, so
+   *  `!duplicateOf` selects exactly one row per distinct plugin file. */
+  duplicateOf?: string;
   /** the last real session load or probe of this plugin failed (PluginHealth) —
    *  surfaces as a warning badge; details live in the Plugin Manager. */
   problem?: "load_failed";
@@ -687,6 +697,8 @@ export interface HelloReply {
   midiInputs: MidiInputInfo[];
   /** authoritative metronome state — absent on older engines */
   metronome?: MetronomeState;
+  /** record take mode (SPEC §8.7) — absent on older engines */
+  recordTakeMode?: RecordTakeMode;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
   /** MIDI control-surface maps + learn-arm — absent on older engines */
@@ -935,6 +947,8 @@ export interface ClipMoveRequest {
   clipIds: number[];
   deltaBeats: number;
   targetTrackId?: number;
+  /** move onto this take lane — same track only, ignored with targetTrackId (SPEC §8.7) */
+  lane?: number;
 }
 
 export type ClipEdge = "l" | "r";
@@ -1002,6 +1016,8 @@ export interface ClipPatch {
   /** REPLACES the whole gain envelope; [] clears it. */
   env?: ClipEnvPoint[];
   muted?: boolean;
+  /** take lane, 0 = main (SPEC §8.7) */
+  lane?: number;
 }
 
 /** Exactly two audio clips on one track; they must overlap on the timeline. */
@@ -1373,9 +1389,15 @@ export interface SetMetronomeRequest {
   otherBeatVolume?: number;
 }
 
+/** Record take mode (SPEC §8.7): what recording over existing material does.
+ *  keepHistory stacks new takes in lanes (newest in front); replace overwrites. */
+export type RecordTakeMode = "keepHistory" | "replace";
+
 /** Every transport/* reply echoes the authoritative metronome + automation-write state. */
 export interface TransportReply {
   metronome?: MetronomeState;
+  /** absent on older engines */
+  recordTakeMode?: RecordTakeMode;
   automationWrite?: boolean;
 }
 
@@ -1908,6 +1930,8 @@ export interface TransportEvent {
   punch?: LoopRegion;
   /** authoritative metronome state — absent on older engines */
   metronome?: MetronomeState;
+  /** record take mode (SPEC §8.7) — absent on older engines */
+  recordTakeMode?: RecordTakeMode;
   /** automation-write arm — absent on older engines */
   automationWrite?: boolean;
 }
@@ -2144,6 +2168,15 @@ export interface RequestMap {
   "cmd/clip.delete": { req: ClipDeleteRequest; reply: EmptyObject };
   "cmd/clip.duplicate": { req: ClipDuplicateRequest; reply: ClipDuplicateReply };
   "cmd/clip.set": { req: ClipSetRequest; reply: EmptyObject };
+  "cmd/take.front": { req: { clipId: number }; reply: EmptyObject };
+  "cmd/take.comp": {
+    req: { trackId: number; lane: number; startBeat: number; endBeat: number };
+    reply: EmptyObject;
+  };
+  "cmd/take.lane": {
+    req: { trackId: number; lane: number; action: "front" | "delete" };
+    reply: EmptyObject;
+  };
   "cmd/notes.edit": { req: NotesEditRequest; reply: EmptyObject };
   "cmd/notes.quantize": { req: NotesQuantizeRequest; reply: EmptyObject };
   "cmd/cc.edit": { req: CcEditRequest; reply: EmptyObject };
@@ -2183,6 +2216,7 @@ export interface RequestMap {
   "transport/record": { req: EmptyObject; reply: TransportReply };
   "transport/locate": { req: TransportLocateRequest; reply: TransportReply };
   "transport/setMetronome": { req: SetMetronomeRequest; reply: TransportReply };
+  "transport/setRecordMode": { req: { mode: RecordTakeMode }; reply: TransportReply };
   "transport/setAutomationWrite": { req: { enabled: boolean }; reply: TransportReply };
   "engine/getDevices": { req: EmptyObject; reply: GetDevicesReply };
   "engine/setAudioConfig": { req: SetAudioConfigRequest; reply: SetAudioConfigReply };
@@ -2361,6 +2395,12 @@ export const ClipCmd = {
   delete: "cmd/clip.delete",
   duplicate: "cmd/clip.duplicate",
   set: "cmd/clip.set",
+  /** SPEC §8.7 comp tool: unmute this clip, mute what it strictly overlaps (one undo). */
+  takeFront: "cmd/take.front",
+  /** SPEC §8.7 comp drag: split at range bounds, choose one lane inside (one undo). */
+  takeComp: "cmd/take.comp",
+  /** SPEC §8.7 lane row menu: front the whole lane, or delete it. */
+  takeLane: "cmd/take.lane",
 } as const satisfies Record<string, RequestType>;
 
 export const NotesCmd = {
@@ -2408,6 +2448,7 @@ export const TransportMsg = {
   record: "transport/record",
   locate: "transport/locate",
   setMetronome: "transport/setMetronome",
+  setRecordMode: "transport/setRecordMode",
 } as const satisfies Record<string, RequestType>;
 
 export const EngineMsg = {

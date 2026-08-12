@@ -114,6 +114,34 @@ bool fileStat(const fs::path& p, int64_t& size, int64_t& mtimeMs) {
     return true;
 }
 
+// Content identity for duplicate detection (SPEC §8.3a): "<size>-<hash>", where hash is
+// FNV-1a/64 over the WHOLE file. Not cryptographic and doesn't need to be — it decides
+// only whether two files on this machine are the same binary, and the size is part of the
+// key, so a false match would need a same-size collision (~1e-13 across a few thousand
+// files). Chosen over a real digest because it needs no new dependency and stays portable
+// for the Linux/macOS port; over sampling head+tail because two builds of one plugin can
+// share both. Sequential read, so the cost is I/O — and it is paid once per file, then
+// carried in the cache next to {size,mtimeMs}.
+std::string contentKeyOf(const fs::path& p, int64_t size) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f.is_open())
+        return {};
+    uint64_t h = 1469598103934665603ULL; // FNV-1a offset basis
+    std::vector<char> buf(1 << 20);
+    while (f) {
+        f.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        const std::streamsize got = f.gcount();
+        for (std::streamsize i = 0; i < got; ++i) {
+            h ^= static_cast<unsigned char>(buf[static_cast<size_t>(i)]);
+            h *= 1099511628211ULL; // FNV prime
+        }
+    }
+    char out[48];
+    std::snprintf(out, sizeof(out), "%lld-%016llx", static_cast<long long>(size),
+                  static_cast<unsigned long long>(h));
+    return out;
+}
+
 // Reads IMAGE_FILE_HEADER.Machine straight from the file (SPEC §8.3 — route x86 vs x64
 // without spawning both hosts). Returns 0 if the file is not a PE binary.
 uint16_t readPeMachine(const fs::path& p) {
@@ -399,6 +427,7 @@ void PluginScanner::loadCache() {
         e.error = getOr(je, "error", "");
         e.verdict = getOr(je, "verdict", "");
         e.lastScanMs = getOr<int64_t>(je, "lastScanMs", 0);
+        e.contentKey = getOr(je, "contentKey", "");
         e.hostTail = getOr(je, "hostTail", "");
         if (e.path.empty())
             continue;
@@ -430,6 +459,8 @@ void PluginScanner::saveCache() {
                 je["verdict"] = e.verdict;
             if (e.lastScanMs > 0)
                 je["lastScanMs"] = e.lastScanMs;
+            if (!e.contentKey.empty())
+                je["contentKey"] = e.contentKey;
             if (!e.hostTail.empty())
                 je["hostTail"] = e.hostTail;
             if (e.ok) {
@@ -693,6 +724,16 @@ void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
     std::vector<PluginInfo> results;
     int found = 0;
     int failedSoFar = 0; // crash/timeout/init failures THIS pass (live progress detail)
+    // contentKey -> the first path that yielded plugins this pass, and those plugins.
+    // Every later copy of the same binary is answered from here instead of being loaded:
+    // on a real machine (installers + capture folders + backups) a third of the library
+    // is duplicates, and each one used to cost a host spawn and a DLL init.
+    struct SeenBinary {
+        std::string canonicalPath;
+        std::vector<PluginInfo> plugins;
+    };
+    std::map<std::string, SeenBinary> seenByContent;
+    int dupSkipped = 0;
     bool warnedNoHost64 = false;
     bool warnedNoHost32 = false;
 
@@ -735,23 +776,83 @@ void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
             continue;
         }
 
+        // 2b. Content key (SPEC §8.3a): reuse the cached one when the file is unchanged,
+        // otherwise hash it now. Cheap next to a host spawn, and it is what lets step 2c
+        // answer a duplicate without loading anything.
+        std::string contentKey;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const auto it = cache_.find(normPath(task.path));
+            if (it != cache_.end() && it->second.size == size && it->second.mtimeMs == mtimeMs)
+                contentKey = it->second.contentKey;
+        }
+        if (contentKey.empty())
+            contentKey = contentKeyOf(widePath, size);
+
+        // 2c. Same binary already scanned this pass → clone its plugins for THIS path
+        // (each copy keeps its own path, so projects referencing either file still
+        // resolve) and mark it a duplicate of the first copy. No host spawn, no DLL load.
+        if (!contentKey.empty()) {
+            const auto seen = seenByContent.find(contentKey);
+            if (seen != seenByContent.end()) {
+                CacheEntry e;
+                e.path = task.path;
+                e.size = size;
+                e.mtimeMs = mtimeMs;
+                e.ok = true;
+                e.verdict = "ok";
+                e.contentKey = contentKey;
+                e.lastScanMs = nowMs();
+                for (PluginInfo p : seen->second.plugins) {
+                    p.path = task.path;
+                    p.contentKey = contentKey;
+                    p.duplicateOf = seen->second.canonicalPath;
+                    e.plugins.push_back(p);
+                    results.push_back(std::move(p));
+                    ++found;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    cache_[normPath(task.path)] = std::move(e);
+                }
+                ++dupSkipped;
+                continue;
+            }
+        }
+
         // 3. Cache hit (a full rescan ignores the cache but still re-populates it).
         // Failure verdicts NEVER hit: crash/timeout records are kept for history now
         // (v1 erased them), and the load-bearing "unblacklist must force a real rescan"
         // invariant lives exactly here — an unblacklisted crasher must re-spawn.
         if (!full) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            const auto it = cache_.find(normPath(task.path));
-            if (it != cache_.end() && it->second.size == size && it->second.mtimeMs == mtimeMs &&
-                !it->second.failureVerdict()) {
-                if (it->second.ok) {
-                    for (const PluginInfo& p : it->second.plugins) {
-                        results.push_back(p);
-                        ++found;
+            bool hit = false;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                const auto it = cache_.find(normPath(task.path));
+                if (it != cache_.end() && it->second.size == size &&
+                    it->second.mtimeMs == mtimeMs && !it->second.failureVerdict()) {
+                    hit = true;
+                    it->second.contentKey = contentKey; // backfill for pre-v3 records
+                    if (it->second.ok) {
+                        SeenBinary& sb = seenByContent[contentKey];
+                        sb.canonicalPath = task.path;
+                        for (PluginInfo& cached : it->second.plugins) {
+                            // Stamp the identity onto the CACHED copies too. Without
+                            // this the next launch — which restores the registry from
+                            // the cache without scanning — brought back rows whose
+                            // duplicates were still marked but whose canonical row had
+                            // no contentKey at all, so nothing could be grouped.
+                            cached.contentKey = contentKey;
+                            cached.duplicateOf.clear(); // this path IS the canonical copy
+                            sb.plugins.push_back(cached);
+                            results.push_back(cached);
+                            ++found;
+                        }
                     }
                 }
-                continue; // cached non-plugins are skipped silently
             }
+            if (hit)
+                continue; // cached non-plugins are skipped silently
         }
 
         // 4. Route by PE machine field.
@@ -860,6 +961,15 @@ void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
                     }
                 }
                 Log::info("PluginScanner: %s -> %zu plugin(s)", task.path.c_str(), plugins.size());
+                // First copy of this binary wins: later paths with the same content key
+                // clone these entries instead of spawning a host (SPEC §8.3a).
+                for (PluginInfo& p : plugins)
+                    p.contentKey = contentKey;
+                if (!contentKey.empty() && !plugins.empty()) {
+                    SeenBinary& sb = seenByContent[contentKey];
+                    sb.canonicalPath = task.path;
+                    sb.plugins = plugins;
+                }
                 for (const PluginInfo& p : plugins) {
                     results.push_back(p);
                     ++found;
@@ -870,6 +980,7 @@ void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
                 e.mtimeMs = mtimeMs;
                 e.ok = true;
                 e.verdict = "ok";
+                e.contentKey = contentKey;
                 e.lastScanMs = nowMs();
                 e.plugins = std::move(plugins);
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -989,8 +1100,12 @@ void PluginScanner::workerMain(bool full, std::vector<std::string> onlyPaths,
     const size_t numEntries = results.size();
     registry_.replaceAll(std::move(results));
     saveCache();
-    Log::info("PluginScanner: scan done — %d plugin(s) found, %zu registry entr%s",
-              found, numEntries, numEntries == 1 ? "y" : "ies");
+    Log::info("PluginScanner: scan done — %d plugin(s) found, %zu registry entr%s%s",
+              found, numEntries, numEntries == 1 ? "y" : "ies",
+              dupSkipped > 0
+                  ? (" (" + std::to_string(dupSkipped) + " duplicate file(s) answered from"
+                     " an identical binary, not loaded)").c_str()
+                  : "");
     if (done)
         done(false);
     running_.store(false, std::memory_order_release);

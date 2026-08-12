@@ -543,6 +543,59 @@ export const checks = [
   },
 
   {
+    id: "plugin-manager-columns-resize",
+    title: "Plugin Manager columns can be dragged wider (Folder especially) and the width sticks",
+    area: "plugin-manager",
+    guards: "2026-08-12 (Omer): full plugin paths are long and the Folder column truncated them, with no way to widen it. Columns are now <colgroup>-sized with a drag handle on each header edge, persisted in localStorage; a double-click resets one.",
+    run: async (s, tt) => {
+      const base = await s.eval(`location.origin + location.pathname`);
+      try {
+        await s.send("Page.navigate", { url: `${base}?page=plugins` });
+        await s.until("the manager page mounts", async () =>
+          (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
+        await s.untilEval("the table renders its headers", () =>
+          document.querySelectorAll(".pm-th").length > 6);
+
+        const folder = () => s.eval(`(() => {
+          const th = [...document.querySelectorAll(".pm-th")].find(t => t.textContent.trim().startsWith("Folder"));
+          if (!th) return null;
+          const r = th.getBoundingClientRect();
+          const h = th.querySelector(".pm-col-resize").getBoundingClientRect();
+          return JSON.stringify({ w: Math.round(r.width), hx: h.left + h.width / 2, hy: h.top + h.height / 2 });
+        })()`);
+        const before = JSON.parse(await folder());
+        tt.ok(before, "the Folder header carries a resize handle");
+
+        await s.drag([before.hx, before.hy], [before.hx + 160, before.hy], 12);
+        await s.until("the Folder column got wider", async () => {
+          const now = JSON.parse(await folder());
+          return now.w > before.w + 100;
+        });
+
+        // It must SURVIVE a reload — a width that resets every visit is not a setting.
+        await s.send("Page.navigate", { url: `${base}?page=plugins` });
+        await s.until("the manager page mounts again", async () =>
+          (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
+        await s.untilEval("headers render again", () => document.querySelectorAll(".pm-th").length > 6);
+        const afterReload = JSON.parse(await folder());
+        tt.ok(afterReload.w > before.w + 100,
+          `the widened Folder column persisted (${before.w} -> ${afterReload.w}px)`);
+
+        // Double-click the handle resets that one column to its default.
+        await s.click(afterReload.hx, afterReload.hy, { clicks: 2 });
+        await s.until("double-click resets the column", async () => {
+          const now = JSON.parse(await folder());
+          return Math.abs(now.w - before.w) < 4;
+        });
+      } finally {
+        await s.send("Page.navigate", { url: base });
+        await s.until("the DAW window comes back", async () =>
+          (await s.eval(`!!document.querySelector(".tl-headers")`)) === true, { timeout: 30000 });
+      }
+    },
+  },
+
+  {
     id: "plugin-manager-health-view",
     title: "the Plugin Manager's Health view classifies failures and opens a per-file detail",
     area: "plugin-manager",
@@ -2134,6 +2187,292 @@ export const checks = [
 
       await s.probe("cmd/clip.move", { clipIds: [clipId], deltaBeats: -expectBeat });
       tt.near((await findClip()).clip.startBeat, 0, 1e-9, "the clip is back where the fixture put it");
+    },
+  },
+
+  {
+    id: "take-lanes-and-comp-click",
+    title: "Show Lanes reveals take rows and a comp-tool click swaps which take plays",
+    area: "timeline-takes",
+    guards: "SPEC §8.7 rebuild (2026-08-11): the lanes VIEW must be a pure view (the 'L' toggle only reveals rows) and the comp tool's click-to-front must be one cmd/take.front — the engine already pins the mute semantics, this pins that the UI actually reaches them",
+    run: async (s, tt) => {
+      const ZOOM_X = 32; // px per beat, pinned so beat→x is arithmetic
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      // Own preconditions: a scratch MIDI track with two overlapping lane-0 clips.
+      // A [0,4) underlies B [1,3) — array order (sorted by start) makes B the front
+      // hit in the overlap, A the only hit before beat 1.
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "Takes Smoke" })).payload.track;
+      const a = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 0, lengthBeats: 4, name: "Take A", notes: [] })).payload.clip;
+      const b = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 1, lengthBeats: 2, name: "Take B", notes: [] })).payload.clip;
+      await s.reload();
+
+      // Expand via the header 'L' toggle (rows render only after hello arrives).
+      await s.untilEval("the scratch track header renders its controls", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Takes Smoke"));
+        return [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .some((btn) => btn.textContent.trim() === "L");
+      });
+      const lBtn = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Takes Smoke"));
+        const btn = [...(row?.querySelectorAll(".tlh-btn") ?? [])]
+          .find((x) => x.textContent.trim() === "L");
+        const rect = btn?.getBoundingClientRect();
+        return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+      });
+      tt.ok(lBtn, "the track header carries the Show Lanes toggle");
+      await s.click(lBtn.x, lBtn.y);
+      await s.untilEval("a take lane row appears, labelled Main", () => {
+        const lane = document.querySelector(".tlh-take .tlh-lane-label");
+        return !!lane && lane.textContent.trim() === "Main";
+      });
+      // Pure view: expanding must not have touched the engine's mute state.
+      const proj = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+      const clips = proj.tracks.find((t) => t.id === trk.id).clips;
+      tt.ok(clips.every((c) => !c.muted), "expanding the lanes muted nothing (view only)");
+
+      // Comp tool (trusted key "6"), then click beat 0.5 on the take row — only A is
+      // there, and A already being front-most must make it a no-op…
+      await s.key("6");
+      const geom = await s.eval(`(() => {
+        const lane = document.querySelector(".tlh-take");
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        const lb = lane.getBoundingClientRect();
+        return { y: lb.top + lb.height / 2, x05: cb.left + 0.5 * ${ZOOM_X}, x2: cb.left + 2 * ${ZOOM_X} };
+      })()`);
+      // …then click beat 2, where B is the front hit: B comes to front, A mutes.
+      await s.click(geom.x2, geom.y);
+      await s.until("comp click brings B to front and mutes A", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const cs = p.tracks.find((t) => t.id === trk.id).clips;
+        return cs.find((c) => c.id === a.id)?.muted === true &&
+          !cs.find((c) => c.id === b.id)?.muted;
+      });
+      // And the swap back: beat 0.5 hits only A.
+      await s.click(geom.x05, geom.y);
+      await s.until("comp click on A swaps it back to front", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const cs = p.tracks.find((t) => t.id === trk.id).clips;
+        return !cs.find((c) => c.id === a.id)?.muted &&
+          cs.find((c) => c.id === b.id)?.muted === true;
+      });
+
+      // Restore the rig: tool back to select, lanes collapsed, scratch track gone.
+      await s.key("1");
+      const collapse = await s.eval(() => {
+        const btn = document.querySelector('.tlh-take button[aria-label="Collapse take lanes"]');
+        const rect = btn?.getBoundingClientRect();
+        return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+      });
+      tt.ok(collapse, "the Main take row carries its own collapse control");
+      await s.click(collapse.x, collapse.y);
+      await s.untilEval("collapsing removes the take rows", () => !document.querySelector(".tlh-take"));
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+    },
+  },
+
+  {
+    id: "lane-row-behaves-like-a-track-row",
+    title: "on a take lane row: marquee selects, a vertical drag restacks, and the menu leads with the CLIP",
+    area: "timeline-takes",
+    guards: "2026-08-12 audit (Omer: 'this was obviously not thought properly'). Three gaps found by walking the lane surface: computeMarquee skipped every non-track row so rubber-band selection was dead inside lanes; a vertical drag between lane rows was silently ignored (no way to restack a take by hand); and the lane's own Delete sat ABOVE the clip's entries, so the plain Delete looked missing.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "Lane Rig" })).payload.track;
+      await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 0, lengthBeats: 4, name: "A", notes: [] });
+      const b = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 1, lengthBeats: 2, name: "B", notes: [] })).payload.clip;
+      await s.probe("cmd/clip.set", { clipId: b.id, patch: { lane: 1, muted: true } });
+      await s.reload();
+      await s.untilEval("the rig's header renders", () =>
+        [...document.querySelectorAll(".tlh-row")].some((r) => r.textContent.trim().startsWith("Lane Rig")));
+      const lBtn = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.trim().startsWith("Lane Rig"));
+        const btn = [...(row?.querySelectorAll(".tlh-btn") ?? [])].find((x) => x.textContent.trim() === "L");
+        const r = btn?.getBoundingClientRect();
+        return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      tt.ok(lBtn, "Show Lanes toggle present");
+      await s.click(lBtn.x, lBtn.y);
+      await s.untilEval("two lane rows appear", () => document.querySelectorAll(".tlh-take").length >= 2);
+      const g = JSON.parse(await s.eval(`(() => {
+        const tk = [...document.querySelectorAll(".tlh-take")];
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({
+          cbLeft: cb.left,
+          lane0Y: tk[0].getBoundingClientRect().top + tk[0].getBoundingClientRect().height / 2,
+          lane1Y: tk[1].getBoundingClientRect().top + tk[1].getBoundingClientRect().height / 2,
+        });
+      })()`));
+      const X = (beat) => g.cbLeft + beat * ZOOM_X;
+      const laneOf = async () =>
+        ((await s.probe("session/hello", { clientName: "smoke" })).payload.project.tracks
+          .find((t) => t.id === trk.id).clips.find((c) => c.id === b.id).lane ?? 0);
+
+      /* 1 — rubber band inside the lane row picks up that lane's take */
+      await s.click(X(11), g.lane1Y); // clear
+      await s.drag([X(0.5), g.lane1Y - 12], [X(3.5), g.lane1Y + 12], 12);
+      await s.untilEval("the marquee selected the lane's take", () =>
+        document.querySelectorAll('.tlh-take[data-selected="true"]').length === 1);
+
+      /* 2 — dragging the take onto the row above restacks it (one undo) */
+      await s.drag([X(1.5), g.lane1Y], [X(1.5), g.lane0Y], 14);
+      await s.until("the take moved down to the main lane", async () => (await laneOf()) === 0);
+      await s.key("Ctrl+z");
+      await s.until("and one undo puts it back on its lane", async () => (await laneOf()) === 1);
+
+      /* 3 — the clip menu leads with the CLIP; lane actions are a submenu at the end */
+      await s.click(X(1.5), g.lane1Y, { button: "right" });
+      await s.untilEval("the clip menu opened", () => document.querySelectorAll(".ctx-item").length > 3);
+      const labels = JSON.parse(await s.eval(
+        `(() => JSON.stringify([...document.querySelectorAll(".ctx-item")].map((e) => e.textContent.trim())))()`,
+      ));
+      await s.key("Escape");
+      const plainDelete = labels.findIndex((l) => l.startsWith("Delete") && !l.includes("Lane"));
+      const laneEntry = labels.findIndex((l) => l.startsWith("Take Lane"));
+      tt.ok(plainDelete >= 0, `the clip's own Delete is present (${labels.join(" | ")})`);
+      tt.ok(laneEntry >= 0, "the lane actions are reachable");
+      tt.ok(laneEntry > plainDelete, "and they come AFTER the clip's own entries, not before");
+      tt.eq(labels.filter((l) => l.startsWith("Delete")).length, 1,
+        "exactly one top-level Delete, so it cannot be mistaken for the lane's");
+
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.eval(() => {
+        const btn = document.querySelector('.tlh-take button[aria-label="Collapse take lanes"]');
+        if (btn) btn.click();
+        return true;
+      });
+    },
+  },
+
+  {
+    id: "lane-selection-and-clip-delete-scope",
+    title: "clicking a lane selects its takes, and Delete on a clip never offers the track",
+    area: "timeline-takes",
+    guards: "2026-08-12 (Omer): with a track selected, pressing Delete on one clip inside a lane offered to delete the WHOLE track — selecting a track also lists all its clips (trackSelection commitTrackSelection), so the canvas press saw the clip as 'already selected' and left scope 'tracks'. Also: clicking a lane row did nothing, when it should select that lane's takes so Delete removes the lane.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32; // px per beat, pinned so beat → x is arithmetic
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "Lane Sel" })).payload.track;
+      const a = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 0, lengthBeats: 4, name: "Base", notes: [] })).payload.clip;
+      // A second take stacked on lane 1, muted — the shape a Keep History pass leaves.
+      const b = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 1, lengthBeats: 2, name: "Take B", notes: [] })).payload.clip;
+      await s.probe("cmd/clip.set", { clipId: b.id, patch: { lane: 1, muted: true } });
+      await s.reload();
+
+      // Expand the lanes.
+      await s.untilEval("the scratch track header renders its controls", () => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Lane Sel"));
+        return [...(row?.querySelectorAll(".tlh-btn") ?? [])].some((x) => x.textContent.trim() === "L");
+      });
+      const lBtn = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")]
+          .find((r) => r.textContent.trim().startsWith("Lane Sel"));
+        const btn = [...(row?.querySelectorAll(".tlh-btn") ?? [])].find((x) => x.textContent.trim() === "L");
+        const r2 = btn?.getBoundingClientRect();
+        return r2 ? { x: r2.left + r2.width / 2, y: r2.top + r2.height / 2 } : null;
+      });
+      tt.ok(lBtn, "the Show Lanes toggle is there");
+      await s.click(lBtn.x, lBtn.y);
+      await s.untilEval("take lane rows appear", () => !!document.querySelector(".tlh-take"));
+
+      /* --- PART 1: select the TRACK, then press a clip: scope must become clips --- */
+      const geo = await s.eval(`(() => {
+        const rows = [...document.querySelectorAll(".tlh-row")];
+        const row = rows.find((r) => r.textContent.trim().startsWith("Lane Sel"));
+        const rb = row.getBoundingClientRect();
+        const takes = [...document.querySelectorAll(".tlh-take")];
+        const t0 = takes[0].getBoundingClientRect();   // lane 0 row ("Main", clip a)
+        const t1 = takes[1].getBoundingClientRect();   // lane 1 row (clip b, [1,3))
+        const cb = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({
+          trackHeaderX: rb.right - 14, trackHeaderY: rb.top + 8,
+          laneRowX: t0.left + 30, laneRowY: t0.top + t0.height / 2,
+          // clip b starts at beat 1; the ruler's beat 0 is the canvas left edge here.
+          clipY: t1.top + t1.height / 2, clipX: cb.left + 1.5 * ${ZOOM_X},
+          // empty space on the lane-1 row, well past both takes
+          emptyX: cb.left + 12 * ${ZOOM_X}, emptyY: t1.top + t1.height / 2,
+        });
+      })()`);
+      const g = JSON.parse(geo);
+      const clipsOf = async () =>
+        ((await s.probe("session/hello", { clientName: "smoke" })).payload.project.tracks
+          .find((x) => x.id === trk.id)?.clips ?? []);
+
+      await s.click(g.trackHeaderX, g.trackHeaderY);
+      await s.untilEval("the track is selected (scope tracks)", () =>
+        document.querySelectorAll('.tlh-row[data-selected="true"]').length === 1);
+
+      // REGRESSION 1 — with the track selected, an empty-space click leaves the track
+      // row marked (sticky selection, by design) but must NOT leave Delete armed on the
+      // track: the scope fell back to "tracks" whenever the clip list emptied, so the
+      // very next Delete offered to remove the track and every lane on it.
+      await s.click(g.emptyX, g.emptyY);
+      await s.key("Delete");
+      await new Promise((r) => setTimeout(r, 250));
+      tt.eq(await s.eval(() => document.querySelectorAll(".modal-overlay").length), 0,
+        "Delete after an empty click raised no track-delete dialog");
+      tt.eq((await clipsOf()).length, 2, "and destroyed nothing");
+
+      // REGRESSION 2 — a track selection also lists every clip on the track, so pressing
+      // ONE take used to count as "already selected" and drag the whole track with it.
+      await s.click(g.trackHeaderX, g.trackHeaderY);
+      await s.drag([g.clipX, g.clipY], [g.clipX + 2 * ZOOM_X, g.clipY], 10);
+      await s.until("dragging one take moves only that take", async () => {
+        const cs = await clipsOf();
+        const moved = cs.find((c) => c.id === b.id);
+        const other = cs.find((c) => c.id === a.id);
+        return !!moved && !!other && moved.startBeat > 2.5 && Math.abs(other.startBeat) < 1e-9;
+      });
+      await s.probe("cmd/clip.move", { clipIds: [b.id], deltaBeats: -2 });
+
+      // Pressing a take leaves a clip-scoped selection: Delete takes the take, not the track.
+      await s.click(g.clipX, g.clipY);
+      await s.untilEval("pressing the take marks its lane, and only its lane", () =>
+        document.querySelectorAll('.tlh-take[data-selected="true"]').length === 1);
+      await s.key("Delete");
+      await s.until("Delete removed that one take", async () => {
+        const cs = await clipsOf();
+        return cs.length === 1 && cs[0].id === a.id;
+      });
+      tt.eq(await s.eval(() => document.querySelectorAll(".modal-overlay").length), 0,
+        "no track-delete confirm dialog was raised — the track was never the target");
+
+      /* --- PART 2: clicking a lane row selects that lane's takes; Delete kills them - */
+      await s.click(g.laneRowX, g.laneRowY);
+      await s.untilEval("clicking the lane row marks it selected", () =>
+        document.querySelectorAll('.tlh-take[data-selected="true"]').length === 1);
+      await s.key("Delete");
+      await s.until("Delete on a selected lane removes that lane's takes", async () =>
+        (await clipsOf()).length === 0);
+      const survived = (await s.probe("session/hello", { clientName: "smoke" })).payload.project
+        .tracks.some((x) => x.id === trk.id);
+      tt.ok(survived, "the track itself survived both deletes");
+      tt.eq(await s.eval(() => document.querySelectorAll(".modal-overlay").length), 0,
+        "and still no confirm dialog");
+
+      // Restore the rig.
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.eval(() => {
+        const btn = document.querySelector('.tlh-take button[aria-label="Collapse take lanes"]');
+        if (btn) btn.click();
+        return true;
+      });
+      void a; // kept for readability of the fixture above
     },
   },
 

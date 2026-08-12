@@ -70,6 +70,19 @@ public:
     void setCountInBars(int bars);         // 0 | 1 | 2 (transport/setMetronome)
     void setMetronomeEnabled(bool enabled);
 
+    // Record take mode (SPEC §8.7): what recording over existing material does. A
+    // performer preference like the metronome — session state, never project data, and
+    // fully independent of any lanes VIEW state (that separation is the design lesson
+    // §8.7 records). The transport only STORES it; App forwards it inside the
+    // internal/recording.commit payload so the command layer stays transport-agnostic.
+    enum class RecordTakeMode { KeepHistory, Replace };
+    void setRecordTakeMode(RecordTakeMode m) {
+        recordTakeMode_.store(static_cast<int>(m), std::memory_order_release);
+    }
+    RecordTakeMode recordTakeMode() const {
+        return static_cast<RecordTakeMode>(recordTakeMode_.load(std::memory_order_acquire));
+    }
+
     // ----- arranger chain (TRACK_TYPES_PLAN §3.6) ---------------------------
     // One entry per chain position: play [start, end), then jump to `to` (the next
     // step's start; `to` < 0 on the LAST step = no jump, playback continues linearly).
@@ -201,6 +214,8 @@ private:
     // Default OFF (matching every imported/new project unless it says otherwise); state is
     // mirrored to the UI via the "metronome" object in transportJson()/session/hello.
     std::atomic<bool> metronome_{false};
+    // Default Keep History (Cubase default): recording over material stacks takes.
+    std::atomic<int> recordTakeMode_{static_cast<int>(RecordTakeMode::KeepHistory)};
     std::atomic<bool> automationWrite_{false};
     std::atomic<int64_t> countInRemaining_{0};
     std::atomic<int64_t> countInTotal_{0};

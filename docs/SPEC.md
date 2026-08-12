@@ -518,7 +518,13 @@ the entire drag.
   transport/stop, engine/panic and engine shutdown send sustain-off + all-sound-off +
   all-notes-off (ch 1–16) to every open device. A missing device logs once, resolves to
   no slot, and the track simply stays silent on hardware (never an error at play time).
-  Test: `scripts/midi-out-test.mjs` (gate "midi-out"; SKIPs only with zero devices).
+  **Null sink** (engine flag `--null-midi-out`, 2026-08-12): offers one synthetic output
+  named `Null Output (MyDAW)` that counts `sent` — including the note-hygiene flush — and
+  transmits nothing. The MIDI-out test previously targeted the first REAL port, which on
+  Windows is the GS Wavetable Synth, so every gate run played its notes out loud through the
+  user's speakers. It also removes the suite's dependency on the machine having any MIDI
+  hardware. Test: `scripts/midi-out-test.mjs` (gate "midi-out"), which now requires the sink
+  rather than skipping when no devices exist.
 - `media/import {paths:[...], trackId?, atBeat?}` → decodes (wav/mp3/flac via MF; .mid via
   SmfReader) into project, creates clips if trackId given. Reply `{assets:[Asset], clips:[Clip],
   tracks:[Track] }` (midi files may create tracks). SMF track names are sanitized (truncated at
@@ -918,6 +924,36 @@ can pop UI too; BELOW_NORMAL priority; fully out-of-process so safe during playb
 exclusive with scanning), `plugins/probeCancel`, events `event/probeProgress
 {current,total,path,uid,name,verdict}` / `event/probeDone {passed,failed,cancelled?}`. Verdicts
 land in the health store's `probe` section with the host output tail.
+### 8.3a Duplicate plugin files (2026-08-12)
+
+The same DLL routinely exists many times on one machine — installers, capture folders,
+backups. On the author's: **416 scanned files were 269 distinct binaries**, and
+`Orchestral.dll` appeared **12 times byte-identical plus twice as a different build**. Every
+copy used to be scanned (a host spawn and a real DLL load each) and listed as its own row.
+
+Identity is the file's CONTENT, never its name or uid: `contentKey = "<size>-<FNV-1a/64 of the
+whole file>"`, computed once per file and carried in the cache next to `{size,mtimeMs}`. Name
+matching would merge the two Orchestral builds; uid matching is worse still (VST2 *shell* uids
+are not unique — see §8.3). A non-cryptographic hash is enough because the size is part of the
+key and the question is only "same file on this disk?"; it also keeps the port dependency-free.
+
+- **Scan**: the first copy of a binary is loaded normally. Every later file with the same
+  contentKey is answered by CLONING that result — no host spawn, no DLL load — keeping its own
+  `path` (so a project referencing either file still resolves) and gaining
+  `duplicateOf = <first copy's path>`. Scan order follows the configured folder order, so the
+  earliest configured folder wins. The scan log reports how many files were skipped this way.
+- **Registry rows** carry `contentKey` and (on copies) `duplicateOf`. The cached PluginInfos are
+  stamped too, so a restart that restores the registry from cache without rescanning keeps the
+  same grouping — without that, duplicates stayed marked while canonicals lost their identity.
+- **UI**: `dedupePlugins` (store) gives every picker and the Browser ONE row per binary. A
+  blacklisted copy is never hidden behind a healthy one (grouping includes the blacklist flag),
+  and a copy whose canonical row is absent from a filtered list is kept rather than vanishing.
+  The **Plugin Manager keeps showing every file** — it is the page about what is on disk — with
+  a `Copies` column (count + the full path list in its tooltip) and a Duplicates filter chip.
+
+Plugin Manager columns are user-resizable (drag a header's right edge, double-click to reset,
+widths persisted): full plugin paths are long, and the Folder column had no way to show one.
+
 **Icons**: after each scan's `done`, embedded icons are harvested (`ExtractIconExW`; `.vst3`
 bundles also try `Contents/Resources/*.ico`) into `%APPDATA%/MyDAW/icons/<fnv1a64(path)>.png`,
 served at `GET /api/plugin-icon/<key>` (no-cache + content ETag, hex keys only). Registry rows
@@ -1064,22 +1100,124 @@ passes dry through).
   {patch:{sidechainSource}}` is **structural** (no RT param); the generic editor shows a source
   picker for `builtin:compressor`.
 
-### 8.7 Versions / take folders — REMOVED (2026-08-11)
+### 8.7 Record take modes (2026-08-11; replaces the removed versions/comping features)
 
-MyDAW has **no** take-folder, lane, comping or track-version feature. Both attempts were
-removed at Omer's request ("the experience is horrible… I'll start from scratch later"):
-the comp-segment take folders and the mute-model versions that replaced them, plus the older
-whole-track `cmd/version.*` playlists. Gone from the model, the graph, the protocol, the
-catalog, the UI and the tests — `TakeFolder`, `TakeLane`, `Track.takeFolders`,
-`Track.keepTakes`, `cmd/take.*`, `cmd/version.*`.
+The predecessor features are gone and stay gone: MyDAW has **no** take-folder container,
+comping tool or track-version playlists. Both 2026-08-11 attempts were removed at Omer's
+request ("the experience is horrible… I'll start from scratch later") — `TakeFolder`,
+`TakeLane`, `Track.takeFolders`, `Track.keepTakes`, `cmd/take.*`, `cmd/version.*` no longer
+exist. Backup of the last implementation: branch `backup/versions-feature-2026-08-11`. The
+design lesson that killed them: two features owned the word "Versions", and a mode switch
+was also a view switch.
 
-Recording therefore never folds: a pass over existing material simply overlaps it, and
-CYCLE recording stacks one plain clip per lap at the loop start (all audible). The recorder
-still SPLITS laps rather than merging them — `midi-lap-test` and `punch-test` pin that.
+What exists instead is one small, orthogonal pair:
 
-If versions are rebuilt, start from the design lesson rather than this code: the fatal
-confusion was two features owning the word "Versions", and a mode switch that was also a
-view switch. Backup of the last implementation: branch `backup/versions-feature-2026-08-11`.
+- **A per-clip `lane` number** (`AudioClip.lane` / `MidiClip.lane`, int ≥ 0, 0/absent =
+  main). Plain project data — persisted, undoable, serialized only when > 0. There is NO
+  container object and NO lane view state; a lane is just a number the recorder uses to
+  keep stacked takes distinguishable. `clip.split` keeps the lane; `clip.move` to another
+  track resets it to 0 (lane numbers are meaningless across tracks).
+- **A record take mode** on the transport (`transport/setRecordMode {mode}`,
+  `"keepHistory"` | `"replace"`, default keepHistory). Session state like the metronome —
+  NEVER written to project.json, mirrored to the UI via `recordTakeMode` in
+  `transportJson()`/`session/hello` and set from the record button's right-click menu.
+  The transport only STORES the mode; `App::stopRecordingAndCommit` forwards it as
+  `takeMode` inside the `internal/recording.commit` payload, so the command layer stays
+  transport-agnostic and tests can drive both modes by calling the command directly.
+
+`internal/recording.commit` places each recorded unit's laps per the mode (helper
+`placeRecordedUnit`, strict overlap — touching edges don't count):
+
+- **Keep History** (Cubase default): every existing clip the unit overlaps is muted
+  WHOLE — never split, its tail comes back by unmuting, not comping. Each lap lands on
+  its own fresh lane above the highest overlapped lane, named "Take N" (N = lane + 1)
+  when anything stacks; only the newest lap stays unmuted. A first recording on empty
+  ground is mode-invisible: one plain clip, lane 0, file-stem name.
+- **Replace**: only the final lap survives, on lane 0, unmuted. Existing material in the
+  unit's range is deleted (fully covered) or trimmed: audio keeps head/tail with
+  `srcOffsetSamples` re-anchored and the gain envelope resampled to the kept range
+  (fade toward the cut zeroed); MIDI keeps head/tail clips with notes/CC re-based, a
+  note crossing the punch-in is shortened to end there.
+
+Either way the whole pass is ONE undo entry (mutes included). Cycle recording still
+SPLITS laps rather than merging them — `midi-lap-test` and `punch-test` pin that;
+`takes-record-test` pins everything in this section.
+
+**Show Lanes (view)**: the "L" toggle on audio/midi/instrument track headers expands the
+track with one fixed-height sub-row per lane (0 = "Main", then "Lane N"), rendered by the
+same row model as automation lanes (`TakeRowL` in `layout.ts`; volatile `takesUi` store,
+never persisted, never engine state). Each sub-row draws and hit-tests only that lane's
+clips through the ordinary clip pipeline. Pure view: expanding lanes never changes what
+plays, and the record take mode never changes what is shown — the two switches sharing
+one control is precisely the design failure §8.7 replaced.
+
+**Comp tool** (toolbox slot 6, `layers` icon): click a take — on the main row or any
+lane row — to bring it to front via `cmd/take.front {clipId}`: the clip is unmuted and
+every clip on the same track that STRICTLY overlaps it (touching edges don't count) is
+muted, as one undo entry. Front-ness IS the mute state; there is no z-order and lane
+numbers never change. Clicking the already-front take is a no-op (no undo entry).
+Changing your mind is one click on another take.
+
+**Comp drag** (same tool, on a take lane row): click-drag horizontally to choose that
+lane for just the dragged range — `cmd/take.comp {trackId, lane, startBeat, endBeat}`
+splits every take crossing a range bound there (through the ordinary `clipSplit` path,
+lane preserved on both halves), then inside the range unmutes the chosen lane and mutes
+the others. Outside the range nothing changes — the boundaries are the point. One undo
+entry for splits and mutes together. The drag is deliberately UNSNAPPED (comp cuts land
+where the phrase is, not on the grid); the canvas previews the range as an accent wash
+on the lane plus boundary guides down the whole take stack. A stationary press-release
+on a lane row is the comp CLICK, not an empty drag. Comping a range where the chosen
+lane has no material is legal and yields silence (how a cough present on every take is
+removed). A press on the main row only ever click-comps.
+
+**Lane row menu**: right-clicking a take lane — its header row or its strip in the
+arrangement, same menu either side — offers `cmd/take.lane {trackId, lane, action}`:
+
+- `front` — make the lane active *wherever it has material*: unmute all its clips, mute
+  every clip on another lane that strictly overlaps one of them. Ranges the lane does not
+  cover keep their current comp, so fronting a lane holding one phrase does not wipe the
+  rest. Refused (`bad_request`) on an empty lane rather than silently doing nothing.
+- `delete` — remove the lane's clips, then close the gap (higher lanes shift DOWN one, so
+  lane rows never grow holes), then HEAL: any remaining clip that is muted and no longer
+  overlaps an audible one is unmuted, newest lane first. Without the heal, deleting the
+  front lane leaves silence over material plainly sitting right there. Confirm dialog in
+  the UI; one undo restores clips, lane numbers and mutes together.
+
+On the canvas the lane entries lead the ordinary menu (clip actions still follow when the
+right-click landed on a take), so nothing is lost inside the stack.
+
+**A lane row behaves like a track row.** Everything that works on the main row works on a
+lane row, over that lane's takes only: click/marquee selection, move and trim drags,
+double-click to open the editor, split/erase/mute tools, Ctrl+D, and the ordinary clip
+context menu — which leads with the CLIP's entries and carries the lane's own actions in a
+trailing `Take Lane · <name>` submenu (a lane-level Delete above the clip's made the plain
+Delete look missing). Dragging a take vertically onto another lane row of the same track
+RESTACKS it there — the lane rides in the same `cmd/clip.move` as the position, so it is
+one undo; the drag HUD names the destination lane. Dropping on a different TRACK still
+resets the lane to 0, since lane numbers mean nothing across tracks. Known wart: paste
+lands on lane 0 rather than the lane under the pointer.
+
+**Selecting a lane**: clicking a lane's header row selects every take on it (clip-scoped,
+Ctrl/Cmd adds), so Delete removes those takes — and with them the lane, since deleting
+clips settles the stack: lane numbers close up and any take left uncovered is unmuted,
+exactly as the lane menu's Delete does. `cmd/clip.set` accepts `lane` for completeness.
+
+Two selection rules this depends on, both load-bearing (2026-08-12):
+
+- Selecting a track also lists all its clips, so "already selected" only counts while the
+  selection is CLIP-scoped. Otherwise pressing one take on a selected track dragged the
+  whole track's clips with it.
+- Selection scope only becomes `tracks` when a gesture actually touched `trackIds`. Track
+  selection is sticky across canvas clicks (§8.7 note above), so the old "trackIds
+  non-empty ⇒ tracks" fallback re-armed Delete on the whole track after any empty-space
+  click — pressing Delete then offered to remove the track and every lane on it.
+
+**Not built yet** (the rest of the brief — see docs/NEXT.md "NOW" for the plan): dragging
+an existing comp boundary to move a cut, per-lane solo, Ctrl-click audition, Clean Up
+Lanes / Delete Overlaps / Bounce Selection, Alt+click split and Alt+Shift slip on the comp
+tool, and whole-track alternate timelines (the brief's "Track Versions" — which must NOT
+be named "Versions" in the UI). Lane rows currently accept the ordinary clip tools, and
+Show Lanes state is per-window and never persisted; both are open questions, not decisions.
 
 **Track selection is sticky** (same 2026-08-11 brief): clicking the arrangement — empty space
 or a clip — does NOT clear the selected track; only an empty click in the track LIST or Esc

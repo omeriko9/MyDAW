@@ -52,6 +52,18 @@ public:
     MidiOutput(const MidiOutput&) = delete;
     MidiOutput& operator=(const MidiOutput&) = delete;
 
+    // Name of the synthetic sink offered when null output is enabled (see below).
+    static constexpr const char* kNullDeviceName = "Null Output (MyDAW)";
+
+    // Adds a synthetic MIDI output that swallows everything while still counting `sent`
+    // (engine flag --null-midi-out). Without it the MIDI-out tests had to pick a REAL
+    // port — on Windows that is the GS Wavetable Synth, so running the gate played the
+    // test's notes out loud through the user's speakers. It also makes those tests
+    // deterministic on machines with no MIDI hardware at all.
+    void setNullDeviceEnabled(bool enabled) {
+        nullDevice_.store(enabled, std::memory_order_relaxed);
+    }
+
     // Launches the sender thread. Idempotent. Devices open lazily (ensureOpenByName).
     void start();
 
@@ -81,6 +93,9 @@ private:
         void* handle = nullptr;           // HMIDIOUT, guarded by mutex_ (sender reads via atomic below)
         std::atomic<void*> rtHandle{nullptr}; // sender-thread view of the handle
         std::atomic<uint64_t> sent{0};
+        // The null sink: no winmm handle exists, so the sender must COUNT the event and
+        // skip midiOutShortMsg instead of dereferencing rtHandle.
+        std::atomic<bool> isNull{false};
     };
     struct Msg {
         uint32_t packed = 0;
@@ -96,6 +111,7 @@ private:
     std::vector<std::string> failedNames_; // open failures logged once per name
     std::thread sender_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> nullDevice_{false};
     std::atomic<uint64_t> dropped_{0};
     MpscRing<Msg> ring_{4096};
 };

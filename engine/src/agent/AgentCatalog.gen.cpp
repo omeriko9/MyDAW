@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "63266538c892a1d560f1b4db796f185ef8c1a6f70d914c6464f50bc544d0e5b1";
+const char kAgentCatalogSha256[] = "7da49c66ff54a775ea8513c87b26015b6115614bad85494d2336e13c2eba6d20";
 const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -279,6 +279,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "number"
         },
         "id": {
+          "type": "number"
+        },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
           "type": "number"
         },
         "lengthSamples": {
@@ -1194,6 +1198,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "deltaBeats": {
           "type": "number"
         },
+        "lane": {
+          "description": "move the clips to this take lane (same track only, SPEC 8.7)",
+          "type": "number"
+        },
         "targetTrackId": {
           "type": "number"
         }
@@ -1230,6 +1238,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "number"
         },
         "gain": {
+          "type": "number"
+        },
+        "lane": {
+          "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
         },
         "muted": {
@@ -2313,6 +2325,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "id": {
           "type": "number"
         },
+        "lane": {
+          "description": "take lane index, 0/absent = main lane (SPEC §8.7)",
+          "type": "number"
+        },
         "lengthBeats": {
           "type": "number"
         },
@@ -2927,6 +2943,14 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "boolean"
         },
         "category": {
+          "type": "string"
+        },
+        "contentKey": {
+          "description": "identity of the plugin BINARY, \"<size>-<hash>\" — copies in several folders share it (SPEC 8.3a)",
+          "type": "string"
+        },
+        "duplicateOf": {
+          "description": "path of the first copy of this same binary; set only on redundant copies",
           "type": "string"
         },
         "format": {
@@ -7067,6 +7091,163 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "cmd/take.comp",
+      "category": "clips",
+      "description": "Comp a range from one take lane: split takes at the range bounds, unmute that lane inside the range and mute the other lanes, one undo (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "startBeat": {
+            "type": "number"
+          },
+          "endBeat": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "startBeat",
+          "endBeat"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "startBeat": 4,
+            "endBeat": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.front",
+      "category": "clips",
+      "description": "Bring a take to the front: unmute the clip and mute every clip on the same track that strictly overlaps it, as one undo entry (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable",
+        "idempotent"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "clip"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "clipId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "clipId"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "clipId": 21
+          }
+        }
+      ]
+    },
+    {
+      "name": "cmd/take.lane",
+      "category": "clips",
+      "description": "Whole take lane: front makes it active where it has material; delete removes its clips, closes the gap and unmutes what it covered (SPEC 8.7).",
+      "target": "command",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "undoable"
+      ],
+      "supports": [
+        "batch",
+        "dryRun"
+      ],
+      "requires": [
+        "project",
+        "track"
+      ],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "trackId": {
+            "type": "number"
+          },
+          "lane": {
+            "type": "number"
+          },
+          "action": {
+            "enum": [
+              "front",
+              "delete"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "trackId",
+          "lane",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/EmptyObject"
+      },
+      "examples": [
+        {
+          "input": {
+            "trackId": 3,
+            "lane": 2,
+            "action": "front"
+          }
+        }
+      ]
+    },
+    {
       "name": "cmd/tempo.set",
       "category": "arrangement",
       "description": "Set the project's base tempo.",
@@ -9839,6 +10020,46 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ]
     },
     {
+      "name": "transport/setRecordMode",
+      "category": "transport",
+      "description": "Set the record take mode: keepHistory stacks new takes in lanes over existing material; replace overwrites it (SPEC 8.7).",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "keepHistory",
+              "replace"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "$ref": "#/schemas/TransportReply"
+      },
+      "examples": [
+        {
+          "input": {
+            "mode": "keepHistory"
+          }
+        }
+      ]
+    },
+    {
       "name": "transport/stop",
       "category": "transport",
       "description": "Stop transport playback or recording.",
@@ -11249,6 +11470,9 @@ constexpr std::string_view kBatchableOperationNames[] = {
     "cmd/plugin.setParam",
     "cmd/plugin.setSample",
     "cmd/punch.set",
+    "cmd/take.comp",
+    "cmd/take.front",
+    "cmd/take.lane",
     "cmd/tempo.set",
     "cmd/tempoMap.set",
     "cmd/timeSigMap.set",

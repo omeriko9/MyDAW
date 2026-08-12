@@ -70,6 +70,8 @@ const SUITES = [
     note: "sample-exact record gate; leans on --null-input's position-recoverable ramp" },
   { id: "midi-lap", tier: "fast", script: "midi-lap-test.mjs", requires: needsEngine,
     note: "cycle-record lap splitting; needs midi/feedEvent to drive MIDI headlessly" },
+  { id: "takes-record", tier: "fast", script: "takes-record-test.mjs", requires: needsEngine,
+    note: "SPEC §8.7 record take modes: keepHistory lane stacking vs replace trim" },
   { id: "input-gain", tier: "fast", script: "input-gain-test.mjs", requires: needsEngine,
     note: "SPEC §5.5: pre-insert gain + input meter; the recorded FILE must stay raw" },
   { id: "vst-manage", tier: "fast", script: "vst-manage-test.mjs", requires: needsEngine,

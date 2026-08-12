@@ -83,6 +83,10 @@ struct AppOptions {
     // inputs at all (NullDriver::enumerate), which left every recording feature — punch,
     // loop-record takes, input metering — untestable by any automated layer.
     int nullInputChannels = 0;
+    // Test affordance: offer a synthetic MIDI output that counts events and sends
+    // nothing, so the MIDI-out suites stop playing their notes through whatever real
+    // synth Windows exposes (the GS Wavetable Synth is audible on the user's speakers).
+    bool nullMidiOut = false;
 };
 
 class App {

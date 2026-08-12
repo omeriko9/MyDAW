@@ -42,6 +42,7 @@ import type {
   NoteInput,
   NoteUpdate,
   PluginSetPatch,
+  RecordTakeMode,
   ReplyPayload,
   RequestPayload,
   RequestType,
@@ -141,8 +142,19 @@ export const addMidiClip = (trackId: number, startBeat: number, lengthBeats: num
 export const addAudioClip = (trackId: number, startBeat: number, assetId: number) =>
   ws.request("cmd/clip.addAudio", { trackId, startBeat, assetId });
 
-export const moveClips = (clipIds: number[], deltaBeats: number, targetTrackId?: number) =>
-  ws.request("cmd/clip.move", { clipIds, deltaBeats, ...(targetTrackId !== undefined ? { targetTrackId } : {}) });
+export const moveClips = (
+  clipIds: number[],
+  deltaBeats: number,
+  targetTrackId?: number,
+  /** take lane to land on (same track only) — position + lane in ONE undo entry. */
+  lane?: number,
+) =>
+  ws.request("cmd/clip.move", {
+    clipIds,
+    deltaBeats,
+    ...(targetTrackId !== undefined ? { targetTrackId } : {}),
+    ...(lane !== undefined ? { lane } : {}),
+  });
 
 export const resizeClip = (
   clipId: number,
@@ -243,6 +255,20 @@ export const duplicateClips = (clipIds: number[], atSource?: boolean) =>
 
 export const setClip = (clipId: number, patch: ClipPatch, transient?: boolean) =>
   ws.request("cmd/clip.set", { clipId, patch }, transient);
+
+/** SPEC §8.7 comp tool: unmute this take, mute every strictly-overlapping clip on its
+ *  track — one undo entry. Front-ness IS the mute state; lane numbers never change. */
+export const takeFront = (clipId: number) => ws.request("cmd/take.front", { clipId });
+
+/** SPEC §8.7 comp drag: split takes at the range bounds, choose `lane` inside — one
+ *  undo entry. Deliberately unsnapped: comp cuts land where the phrase is, not the grid. */
+export const takeComp = (trackId: number, lane: number, startBeat: number, endBeat: number) =>
+  ws.request("cmd/take.comp", { trackId, lane, startBeat, endBeat });
+
+/** SPEC §8.7 lane row menu: "front" makes the lane active wherever it has material;
+ *  "delete" removes it, closes the lane gap and unmutes whatever it was covering. */
+export const takeLane = (trackId: number, lane: number, action: "front" | "delete") =>
+  ws.request("cmd/take.lane", { trackId, lane, action });
 
 /** One undo entry for the whole batch (SPEC §5.3); the optional `cc` block rides in
  *  the same entry so mixed note+controller functions revert together. */
@@ -381,6 +407,10 @@ export const setMetronome = (
 
 export const setAutomationWrite = (enabled: boolean) =>
   ws.request("transport/setAutomationWrite", { enabled });
+
+/** Record take mode (SPEC §8.7): keepHistory stacks takes in lanes; replace overwrites. */
+export const setRecordTakeMode = (mode: RecordTakeMode) =>
+  ws.request("transport/setRecordMode", { mode });
 
 export const getDevices = () => ws.request("engine/getDevices", {});
 

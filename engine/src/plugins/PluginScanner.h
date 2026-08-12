@@ -66,6 +66,9 @@ public:
         // "scan_timeout" (empty only transiently for pre-v2 entries; loadCache migrates).
         std::string verdict;
         std::string error;
+        // "<size>-<64-bit content hash>" (SPEC §8.3a). Identifies the BINARY, so copies
+        // of one DLL across folders share it; empty for pre-v3 records until re-hashed.
+        std::string contentKey;
         int64_t lastScanMs = 0;  // wall clock of the last real spawn (0 = unknown/v1)
         std::string hostTail;    // condensed host output, failure verdicts only (<=4 KB)
         std::vector<PluginInfo> plugins;
