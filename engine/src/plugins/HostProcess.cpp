@@ -455,8 +455,26 @@ void HostProcessManager::destroyAll() {
         for (const auto& [id, inst] : instances_)
             ids.push_back(id);
     }
-    for (const uint64_t id : ids)
+    if (ids.empty())
+        return;
+    // Closing a project used to go quiet for seconds with nothing to point at (6.5 s on
+    // the 2026-08-12 report). Teardown is per-process and serial, so the cost is the SUM
+    // of the hosts — log it, and log the slow ones, so "why is Close slow" is answerable
+    // from the log rather than from a stopwatch.
+    const auto t0 = std::chrono::steady_clock::now();
+    for (const uint64_t id : ids) {
+        const auto t1 = std::chrono::steady_clock::now();
         destroy(id);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t1).count();
+        if (ms >= 250)
+            Log::info("plugin %llu: teardown took %lld ms", static_cast<unsigned long long>(id),
+                      static_cast<long long>(ms));
+    }
+    const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0).count();
+    Log::info("plugin hosts: tore down %zu instance(s) in %lld ms", ids.size(),
+              static_cast<long long>(total));
 }
 
 // ===========================================================================
