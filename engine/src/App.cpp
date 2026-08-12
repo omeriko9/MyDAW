@@ -811,17 +811,12 @@ void App::wireHostCallbacks() {
 }
 
 void App::onHostTransportKey(const std::string& key) {
-    // Space / '.' forwarded from a focused VST editor window. Semantics must
-    // mirror ui/src/lib/keyboard.ts exactly: space toggles play/stop, '.' is
-    // the main-row twin of Numpad . — jump to project start.
-    if (key == "space") {
-        if (transport.state() == TransportState::Stopped) {
+    // Numpad Enter / '.' forwarded from a focused VST editor window, Cubase
+    // semantics: Enter STARTS playback (no toggle — Space stays with the
+    // plugin), '.' jumps to project start.
+    if (key == "enter") {
+        if (transport.state() == TransportState::Stopped)
             transport.play();
-        } else {
-            if (isRecordingSession())
-                stopRecordingAndCommit();
-            transport.stop();
-        }
     } else if (key == "period") {
         transport.locate(0.0);
     } else {

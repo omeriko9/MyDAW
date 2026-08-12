@@ -979,13 +979,14 @@ valueText); `setParam {id,value}` (non-RT fallback; RT path preferred); `getStat
 top-level window + message pump, plugin view attached); `suspend`/`resume`; `quit`.
 Host→engine push: `paramEdited {id, value, valueText}` (from native editor, throttled),
 `latencyChanged {samples}`, `resized`, `log {level,msg}`,
-`transportKey {key: "space"|"period"}` (see below).
+`transportKey {key: "enter"|"period"}` (see below).
 
-**Transport keys from a focused VST editor (2026-08-13, Cubase-style).** Space and `.` (main row
-or numpad) pressed while a plugin editor window has focus are forwarded to the DAW transport and
-swallowed before the plugin sees them (matching keyup swallowed too). Engine side mirrors the UI
-bindings exactly: `space` toggles play/stop (stop commits an active recording), `period` locates
-to beat 0; both broadcast `event/transport`. Host side is a thread-scoped `WH_GETMESSAGE` hook
+**Transport keys from a focused VST editor (2026-08-13, Cubase-style).** Numpad Enter and `.`
+(main row or numpad) pressed while a plugin editor window has focus are forwarded to the DAW
+transport and swallowed before the plugin sees them (matching keyup swallowed too). Main-row
+Enter is NOT forwarded (confirm/commit in plugin dialogs), nor is Space (sample preview in
+Kontakt etc.). Engine side mirrors the UI bindings: `enter` starts playback (no toggle),
+`period` locates to beat 0; both broadcast `event/transport`. Host side is a thread-scoped `WH_GETMESSAGE` hook
 (not `WH_KEYBOARD` — that one never sees posted key messages, which the verification rig and
 accessibility tools rely on; not a per-window subclass — the hook also covers every child window
 the plugin creates and its modal loops). The key passes through UNTOUCHED — typing wins — when:

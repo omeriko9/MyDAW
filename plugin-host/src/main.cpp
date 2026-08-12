@@ -394,9 +394,9 @@ HWND createPumpWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// Transport-key forwarding (2026-08-13, Cubase-style): Space and '.' pressed
-// while a plugin editor window has focus go to the DAW transport, not the
-// plugin — the '.'-then-Space muscle memory must survive a focused VST. A
+// Transport-key forwarding (2026-08-13, Cubase-style): numpad Enter and '.'
+// pressed while a plugin editor window has focus go to the DAW transport, not
+// the plugin — the '.'-then-Enter muscle memory must survive a focused VST. A
 // THREAD hook (not a per-window subclass) fires for every window the plugin
 // creates on this GUI thread, including inside its own modal loops. Two
 // guards keep typing safe — the key passes through untouched when:
@@ -433,13 +433,15 @@ LRESULT CALLBACK transportKeyProc(int code, WPARAM wParam, LPARAM lParam) {
   MSG* m = reinterpret_cast<MSG*>(lParam);
   if (code == HC_ACTION && wParam == PM_REMOVE && m &&
       (m->message == WM_KEYDOWN || m->message == WM_KEYUP)) {
-    // Space/'.'/'Numpad .' only; no modifier chords (Ctrl+Space etc. remain
-    // plugin shortcuts); no autorepeat (a held Space must not machine-gun
-    // play/stop). A swallowed keydown swallows its matching keyup too, so the
-    // plugin never sees a stray up-transition.
-    static bool s_swallowedDown[2] = {false, false}; // [0]=space, [1]=period
+    // NUMPAD Enter (start playback) and '.'/'Numpad .' (jump to start) only —
+    // Cubase's transport keys. Main-row Enter stays with the plugin (it is
+    // confirm/commit in plugin dialogs), and so does Space (sample preview in
+    // Kontakt etc.). Numpad Enter is VK_RETURN with the extended-key bit. No
+    // modifier chords; no autorepeat. A swallowed keydown swallows its
+    // matching keyup too, so the plugin never sees a stray up-transition.
+    static bool s_swallowedDown[2] = {false, false}; // [0]=enter, [1]=period
     int slot = -1;
-    if (m->wParam == VK_SPACE) slot = 0;
+    if (m->wParam == VK_RETURN && (m->lParam & 0x01000000)) slot = 0;
     else if (m->wParam == VK_OEM_PERIOD || m->wParam == VK_DECIMAL) slot = 1;
     if (slot >= 0) {
       if (m->message == WM_KEYUP) {
@@ -454,7 +456,7 @@ LRESULT CALLBACK transportKeyProc(int code, WPARAM wParam, LPARAM lParam) {
         ServeState* s = g_pumpState;
         if (s && s->rpc) {
           s->rpc->push("transportKey",
-                       json{{"key", slot == 0 ? "space" : "period"}});
+                       json{{"key", slot == 0 ? "enter" : "period"}});
           s_swallowedDown[slot] = true;
           m->message = WM_NULL; // swallow: the plugin must not also act on it
         }
