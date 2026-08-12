@@ -123,8 +123,20 @@ public:
     // have published a RenderPlan that no longer references node(instanceId).
     void destroy(uint64_t instanceId);
 
-    // destroy() for every live instance (engine shutdown / project close).
+    // destroy() for every live instance (engine shutdown). BLOCKS: with plugins loaded
+    // this is seconds (see destroyAllAsync).
     void destroyAll();
+
+    // Same, but off the calling thread: the instances are detached from the manager
+    // immediately (create/state/pump stop seeing them) and torn down on a reaper thread.
+    // Returns at once, so a project close no longer waits out every host process exiting
+    // — 6.5 s on the 2026-08-12 report, ~77% of it the hosts' own exit time.
+    //
+    // Safe because prepareForModelReplace() has already published a RenderPlan with no
+    // references to these nodes, and because IPC objects are named per spawn slot, so a
+    // new project's instances cannot collide with one still being reaped.
+    // The destructor drains the reaper, so no host outlives the engine.
+    void destroyAllAsync();
 
     // Current runtime state; Failed for unknown ids.
     PluginRuntimeState state(uint64_t instanceId) const;
@@ -201,6 +213,8 @@ private:
     void workerLoop();
 
     uint32_t enginePid_ = 0;
+    // Monotonic IPC-name slot; see the shmName assignment in create().
+    std::atomic<uint64_t> nextIpcSlot_{1};
 
     mutable std::mutex mapMutex_;
     std::unordered_map<uint64_t, std::shared_ptr<Instance>> instances_;
@@ -226,6 +240,16 @@ private:
     std::condition_variable jobCv_;
     std::deque<std::function<void()>> jobs_;
     bool stopWorker_ = false; // guarded by jobMutex_
+
+    // Reaper: background teardown of detached instances (destroyAllAsync). Separate from
+    // worker_ on purpose — a multi-second reap must not delay crash restarts, and the
+    // destructor joins it after the worker so nothing is left running.
+    void reaperLoop();
+    std::thread reaper_;
+    std::mutex reapMutex_;
+    std::condition_variable reapCv_;
+    std::deque<std::shared_ptr<Instance>> reapQueue_; // guarded by reapMutex_
+    bool stopReaper_ = false;                         // guarded by reapMutex_
 };
 
 } // namespace mydaw

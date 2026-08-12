@@ -244,6 +244,7 @@ struct HostProcessManager::Instance {
 HostProcessManager::HostProcessManager() {
     enginePid_ = static_cast<uint32_t>(GetCurrentProcessId());
     worker_ = std::thread(&HostProcessManager::workerLoop, this);
+    reaper_ = std::thread(&HostProcessManager::reaperLoop, this);
 }
 
 HostProcessManager::~HostProcessManager() {
@@ -256,6 +257,15 @@ HostProcessManager::~HostProcessManager() {
     jobCv_.notify_all();
     if (worker_.joinable())
         worker_.join();
+    // Drain the reaper before the final sweep: instances handed to it are no longer in
+    // instances_, so destroyAll() below cannot see them — leaving host processes behind.
+    {
+        std::lock_guard<std::mutex> lk(reapMutex_);
+        stopReaper_ = true;
+    }
+    reapCv_.notify_all();
+    if (reaper_.joinable())
+        reaper_.join();
     destroyAll();
 }
 
@@ -399,7 +409,11 @@ bool HostProcessManager::create(const PluginInstance& instance, int sampleRate, 
     inst->maxBlock = (maxBlock > 0 && maxBlock <= static_cast<int>(kMaxBlock))
                          ? maxBlock
                          : static_cast<int>(kMaxBlock);
-    inst->shmName = ipcBaseName(enginePid_, inst->id);
+    // IPC objects are named per SPAWN SLOT, not per model instance id. Model ids restart
+    // at 1 with every new project, so a background-reaped host (see destroyAllAsync)
+    // could still own "mydaw_<pid>_7" when the next project created its own instance 7 —
+    // a silent shm/pipe name collision. A monotonic slot makes that impossible.
+    inst->shmName = ipcBaseName(enginePid_, nextIpcSlot_.fetch_add(1, std::memory_order_relaxed));
     inst->node = std::make_unique<PluginProxyNode>(*this, inst->id);
     inst->node->setBypass(instance.bypass);
     inst->node->setWetDry(static_cast<float>(instance.wetDry));
@@ -445,6 +459,59 @@ void HostProcessManager::destroy(uint64_t instanceId) {
     teardownIpc(*inst, kQuitGraceMs);
     // The Instance (and its node) dies when the last shared_ptr drops — here, unless a
     // queued job still holds a lookup copy momentarily (it will see destroyed=true).
+}
+
+void HostProcessManager::destroyAllAsync() {
+    std::vector<std::shared_ptr<Instance>> detached;
+    {
+        std::lock_guard<std::mutex> lk(mapMutex_);
+        detached.reserve(instances_.size());
+        for (auto& [id, inst] : instances_)
+            detached.push_back(inst);
+        instances_.clear();
+    }
+    if (detached.empty())
+        return;
+    // Disable every RT node HERE, on the caller's thread, before returning. The graph no
+    // longer references them, but this makes it explicit that nothing will enter
+    // processRt() again — the reaper then only has to wait for the processes to die.
+    for (const auto& inst : detached)
+        if (inst->node)
+            (void)inst->node->disableRt();
+    {
+        std::lock_guard<std::mutex> lk(reapMutex_);
+        for (auto& inst : detached)
+            reapQueue_.push_back(std::move(inst));
+    }
+    reapCv_.notify_all();
+    Log::info("plugin hosts: %zu instance(s) handed to the reaper", detached.size());
+}
+
+void HostProcessManager::reaperLoop() {
+    for (;;) {
+        std::shared_ptr<Instance> inst;
+        {
+            std::unique_lock<std::mutex> lk(reapMutex_);
+            reapCv_.wait(lk, [this] { return stopReaper_ || !reapQueue_.empty(); });
+            if (reapQueue_.empty()) {
+                if (stopReaper_)
+                    return;
+                continue; // spurious
+            }
+            inst = std::move(reapQueue_.front());
+            reapQueue_.pop_front();
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        {
+            std::lock_guard<std::mutex> lk(inst->lifeMutex);
+            inst->destroyed.store(true, std::memory_order_release);
+            teardownIpc(*inst, kQuitGraceMs);
+        }
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t0).count();
+        Log::info("plugin %llu: reaped in %lld ms", static_cast<unsigned long long>(inst->id),
+                  static_cast<long long>(ms));
+    }
 }
 
 void HostProcessManager::destroyAll() {
@@ -754,10 +821,27 @@ bool HostProcessManager::spawnAndInit(Instance& inst, std::string& err) {
 void HostProcessManager::teardownIpc(Instance& inst, uint32_t processGraceMs) {
     inst.expectingExit.store(true, std::memory_order_release);
 
-    // 1. Disable the RT node and wait out any in-flight processRt() (see kRtDrainMs).
-    const bool wasEnabled = inst.node && inst.node->disableRt();
-    if (wasEnabled)
-        Sleep(inst.node->offlineMode() ? kOfflineDrainMs : kRtDrainMs);
+    // 1. Disable the RT node, then WAIT OUT any in-flight processRt() — by asking the
+    //    node, not by sleeping a fixed budget. The old code slept 150 ms (2200 ms
+    //    offline) per instance unconditionally, which was 1.5 s of the 6.5 s it took to
+    //    close a 10-plugin project; a block actually takes microseconds to tens of ms.
+    //    The timeout keeps the old budget as a CEILING, so a wedged RT thread degrades
+    //    to the previous behaviour instead of hanging teardown forever.
+    // NB: wait on rtBusy() regardless of whether WE were the ones to disable the node —
+    // destroyAllAsync() disables every node up front, so keying the wait on "was enabled"
+    // would skip the drain entirely and unmap shared memory under a live processRt().
+    if (inst.node)
+        (void)inst.node->disableRt();
+    if (inst.node) {
+        const uint32_t budgetMs = inst.node->offlineMode() ? kOfflineDrainMs : kRtDrainMs;
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(budgetMs);
+        while (inst.node->rtBusy() && std::chrono::steady_clock::now() < deadline)
+            Sleep(1);
+        if (inst.node->rtBusy())
+            Log::warn("plugin %llu: RT block still in flight after %u ms — proceeding",
+                      static_cast<unsigned long long>(inst.id), budgetMs);
+    }
 
     // 2. Stop crash detection BEFORE killing the process (blocking unregister so the
     //    callback can't fire after the ctx is freed). Never called while holding

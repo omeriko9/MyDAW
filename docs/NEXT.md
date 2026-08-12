@@ -265,7 +265,15 @@ big terms are per-process and INDEPENDENT, i.e. parallelizable. Options, best fi
 5. **Pool/reuse host processes across project loads** — helps open as well as close, but
    it is an architectural change (identity, state reset, leak risk). Not now.
 
-Recommendation: (1) + (3) first, then (2) if the machine still feels busy after a close.
+**(1) and (3) are DONE** (2026-08-12). Measured after, on the same project: the `project/new`
+reply went **6534 ms → 4 ms**, and the per-instance drain **150 ms → 0 ms**; the hosts finish
+dying in the background ~5 s later. Verified by hand with load → close → immediate reopen ×3
+(all 10 instances recreated each time, no errors, engine clean) — the gate has no real VSTs,
+so there is no automated coverage of this path.
+
+Still open: **(2) parallel reaping** — the reaper is serial, so the MACHINE is only free ~5 s
+after a close. Worth doing if that shows up as sluggishness when reopening straight away.
+(4) and (5) remain judgement calls, unchanged.
 
 ---
 

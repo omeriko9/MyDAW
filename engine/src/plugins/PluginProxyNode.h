@@ -101,6 +101,10 @@ private:
     void clearIpcRt();
     void enableRt();
     bool disableRt(); // returns the previous enabled state (false = already disabled)
+    /** True while an RT (or offline-render) thread is INSIDE processRt(). Teardown waits
+     *  on this instead of sleeping a fixed drain: a block is microseconds-to-tens-of-ms,
+     *  not the 150 ms the old sleep budgeted for every instance (SPEC §8, 2026-08-12). */
+    bool rtBusy() const noexcept { return rtInFlight_.load(std::memory_order_acquire) != 0; }
     void setLatencyFromHost(int samples);
     void setIsInstrument(bool isInstrument);
 
@@ -110,6 +114,10 @@ private:
 
     HostProcessManager& mgr_;
     const uint64_t instanceId_;
+
+    // Non-zero while processRt() is executing. Incremented/decremented ONLY by the RT
+    // (or offline) thread; read by teardown. Not a lock — it never makes RT wait.
+    std::atomic<int> rtInFlight_{0};
 
     // IPC plumbing. Plain members: written by the manager ONLY while rtEnabled_ is
     // false (publication via the release-store of rtEnabled_ / acquire-load in

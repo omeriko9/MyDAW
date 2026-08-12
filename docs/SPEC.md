@@ -875,6 +875,24 @@ kill, respawn, setState(lastChunk), restore params; max 2 auto-restarts, then st
 until user reloads). This blocking wait on the RT thread is the standard bridge tradeoff —
 documented in ARCHITECTURE.md.
 
+**Teardown** (2026-08-12): destroying a hosted instance costs whatever the plugin's own exit
+costs — measured 97–1568 ms each, median ~350 — and `destroyAll` is serial, so closing a
+10-plugin project blocked `project/new` for 6.5 s with a frozen UI. Two changes:
+- **The drain is a handshake, not a sleep.** `PluginProxyNode::rtBusy()` counts threads inside
+  `processRt()`; teardown waits for it to clear (old fixed budget kept only as a ceiling, with
+  a warning if it is hit). Was 150 ms × every instance (2200 ms offline); now 0 ms in practice.
+- **Project close reaps in the background.** `destroyAllAsync()` detaches every instance from
+  the manager, disables its RT node on the calling thread, and hands it to a reaper thread;
+  `prepareForModelReplace` uses it, so the reply no longer waits (6534 ms → 4 ms measured on
+  the reporting project). Engine SHUTDOWN still tears down synchronously, and the manager's
+  destructor drains the reaper before its final sweep, so no host outlives the engine.
+  Load-bearing detail: IPC objects are named per monotonic **spawn slot**, not per model
+  instance id — ids restart at 1 with each new project, so a reaped host could otherwise still
+  own `mydaw_<pid>_7` when the next project creates its own instance 7.
+No harness coverage: the gate has no real VSTs to load, so this path was verified by hand
+against a 10-plugin project (load → close → immediately reopen, ×3: all instances recreated,
+no errors, engine clean).
+
 ### 8.2 Control pipe (non-RT)
 Length-prefixed (uint32 LE) JSON messages, request/reply with `id`, both directions can push.
 Engine→host: `init {sampleRate,maxBlock}` → `{ok, info:{name, numParams, latency, isInstrument,

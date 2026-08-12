@@ -1028,7 +1028,10 @@ void App::prepareForModelReplace() {
     // (HostProcessManager::destroy + AssetStore::clear contracts).
     model.project = Model::defaultProject();
     graph->rebuild(model);
-    host->destroyAll();
+    // The plan published above references none of the old plugin nodes, so the hosts can
+    // die on their own time: tearing 10 of them down took 6.5 s with the UI frozen on
+    // the reply (2026-08-12). Builtins are in-process and instant — no reaper needed.
+    host->destroyAllAsync();
     builtin->destroyAll();
     assetStore.clear();
     meters.clear();

@@ -98,6 +98,16 @@ void PluginProxyNode::fallbackRt(float* const* io, int numCh, int frames) noexce
 
 void PluginProxyNode::processRt(const ProcessContext& ctx, float* const* io, int numCh,
                                 const MidiBuffer& midiIn) noexcept {
+    // Mark the whole call: teardown waits for this to clear instead of sleeping a fixed
+    // drain (see rtBusy()). RAII so every early return below still releases it.
+    struct InFlight {
+        std::atomic<int>& c;
+        explicit InFlight(std::atomic<int>& counter) noexcept : c(counter) {
+            c.fetch_add(1, std::memory_order_acq_rel);
+        }
+        ~InFlight() { c.fetch_sub(1, std::memory_order_release); }
+    } inFlight(rtInFlight_);
+
     if (!io || numCh <= 0)
         return;
     int frames = ctx.frames;
