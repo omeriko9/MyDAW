@@ -203,9 +203,17 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
   const assignedVca = (project.vcas ?? []).find((v) => v.id === track.vcaId) ?? null;
   const midiOutOptions: SelectOption[] = [
     { value: "0", label: "None (this track)" },
+    // Rack-owned instances first (SPEC §5.9): the standard home for shared instruments.
+    // Omitting them made a rack-routed track's Inspector read "#N (missing)" — a working
+    // routing rendered as a broken control (Omer, 2026-08-13).
+    ...(project.rack ?? []).map((r) => ({
+      value: String(r.id),
+      label: `${r.name} · ${r.plugin.name}`,
+      group: "Rack",
+    })),
     ...project.tracks
       .filter((t) => t.kind === "instrument")
-      .map((t) => ({ value: String(t.id), label: `${t.name} (#${t.id})`, group: "Instruments" })),
+      .map((t) => ({ value: String(t.id), label: `${t.name} (#${t.id})`, group: "Instrument Tracks" })),
   ];
   // Stale target (instrument track deleted) — synthetic option so the true value shows
   // and the user can clear it (same idea as the time-sig fallback in the TransportBar).
@@ -403,13 +411,15 @@ export function TrackSection({ track, project }: { track: Track; project: Projec
 
       {(isMidi || isInstrument) && (
         <div className="insp-row">
-          <span className="insp-label">Channel</span>
+          {/* "MIDI Channel", not "Channel": audio tracks have a "Channel" row too (input
+              mono/stereo), and the shared word made this one unfindable. */}
+          <span className="insp-label">MIDI Channel</span>
           <Select
             className="grow"
             value={String(track.midiOutChannel ?? 0)}
             options={midiChannelOptions}
             onChange={(v) => void setTrack(id, { midiOutChannel: Number(v) })}
-            title="MIDI output channel — force this track's notes onto one channel of a multitimbral instrument"
+            title="MIDI output channel — force this track's notes onto one channel of a multitimbral instrument; Any keeps each note's own channel"
           />
         </div>
       )}
