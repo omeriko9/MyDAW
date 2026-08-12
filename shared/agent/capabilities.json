@@ -9142,6 +9142,56 @@
       ]
     },
     {
+      "name": "plugins/cleanCache",
+      "category": "plugins",
+      "description": "Drop plugin-cache records that can never be used again: files outside every configured folder, and files that no longer exist. dryRun reports without deleting.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "kept": {
+            "type": "number"
+          },
+          "removedMissingFiles": {
+            "type": "number"
+          },
+          "removedOutsideFolders": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "removedOutsideFolders",
+          "removedMissingFiles",
+          "kept"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "dryRun": true
+          }
+        }
+      ]
+    },
+    {
       "name": "plugins/getBlacklist",
       "category": "plugins",
       "description": "The raw persistent blacklist with reasons and timestamps — includes path-only crash entries the registry never shows.",

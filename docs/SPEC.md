@@ -907,6 +907,17 @@ the condensed scan-host output. v1 entries are migrated on load by classifying t
 Crash/timeout entries are KEPT (v1 erased them); the "unblacklist must force a real rescan"
 invariant lives in the cache-hit rule instead: failure verdicts never count as a hit. SEH-caught
 scan crashes blacklist exactly like hard crashes (they used to be silently cached as non-plugins).
+**Cache hygiene** — `plugins/cleanCache {dryRun?}` → `{removedOutsideFolders, removedMissingFiles,
+kept}` drops records that can never be used again: files under no currently-configured folder,
+and files gone from disk. A scan only walks the configured folders, so such a record is never a
+cache hit — it merely keeps history from long-removed folders alive in the Health view, which
+shows the cache raw ("where is this `C:\Temp` plugin coming from?", 2026-08-12; 475 of 3089
+records on the author's machine). Derived data only: a rescan rebuilds anything still present.
+The BLACKLIST is deliberately untouched — it holds decisions, not findings — so a blacklisted
+path stays listed in Health (via the blacklist∪cache union) and remains un-blacklistable.
+Refused while a scan is running. UI: "Clean up cache" in the Health view, which previews with
+`dryRun` and confirms before deleting. Test: `plugin-cache-clean-test.mjs` (gate "cache-clean").
+
 **Health records** (`%APPDATA%/MyDAW/plugin-health.json`, SPEC §5.6): durable per-plugin
 `load`/`probe` outcomes keyed `format|uid|bitness|path`, written from the pluginState callback
 (terminal states only) and the prober; debounced saves; NEVER auto-blacklists — the user decides.

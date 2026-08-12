@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "7da49c66ff54a775ea8513c87b26015b6115614bad85494d2336e13c2eba6d20";
+export const AGENT_CATALOG_SHA256 = "f72f7b1d3be741b0d6b61a387f8323fe18b157fe012d56d558c12e483b598cf5";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -9170,6 +9170,56 @@ export const AGENT_CATALOG: AgentCatalog = {
       ]
     },
     {
+      "name": "plugins/cleanCache",
+      "category": "plugins",
+      "description": "Drop plugin-cache records that can never be used again: files outside every configured folder, and files that no longer exist. dryRun reports without deleting.",
+      "target": "engine",
+      "mode": "write",
+      "traits": [
+        "mutating",
+        "idempotent"
+      ],
+      "supports": [],
+      "requires": [],
+      "produces": [],
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "kept": {
+            "type": "number"
+          },
+          "removedMissingFiles": {
+            "type": "number"
+          },
+          "removedOutsideFolders": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "removedOutsideFolders",
+          "removedMissingFiles",
+          "kept"
+        ],
+        "type": "object"
+      },
+      "examples": [
+        {
+          "input": {
+            "dryRun": true
+          }
+        }
+      ]
+    },
+    {
       "name": "plugins/getBlacklist",
       "category": "plugins",
       "description": "The raw persistent blacklist with reasons and timestamps — includes path-only crash entries the registry never shows.",
@@ -11413,6 +11463,7 @@ export const ENGINE_OPERATION_NAMES = [
   "plugin/openEditor",
   "plugin/savePreset",
   "plugins/blacklist",
+  "plugins/cleanCache",
   "plugins/getBlacklist",
   "plugins/getDefaultFolders",
   "plugins/getFolders",
@@ -11990,6 +12041,10 @@ export const REQUEST_COVERAGE = {
   "plugins/unblacklist": {
     "kind": "operation",
     "operation": "plugins/unblacklist"
+  },
+  "plugins/cleanCache": {
+    "kind": "operation",
+    "operation": "plugins/cleanCache"
   },
   "plugins/blacklist": {
     "kind": "operation",
@@ -12867,6 +12922,11 @@ export const ENGINE_OPERATION_EXAMPLES = {
       "path": "C:/VST/OldSynth.dll",
       "uid": "vst2:1234567890",
       "reason": "disabled by user"
+    }
+  ],
+  "plugins/cleanCache": [
+    {
+      "dryRun": true
     }
   ],
   "plugins/getBlacklist": [

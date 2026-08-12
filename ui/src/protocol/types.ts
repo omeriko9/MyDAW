@@ -2254,6 +2254,11 @@ export interface RequestMap {
   "plugins/getFolders": { req: EmptyObject; reply: PluginsFolders };
   "plugins/getDefaultFolders": { req: EmptyObject; reply: PluginsFolders };
   "plugins/unblacklist": { req: PluginsUnblacklistRequest; reply: PluginsUnblacklistReply };
+  /** Prune cache records that can never be used again (SPEC §8.3). */
+  "plugins/cleanCache": {
+    req: { dryRun?: boolean };
+    reply: { removedOutsideFolders: number; removedMissingFiles: number; kept: number };
+  };
   "plugins/blacklist": { req: PluginsBlacklistRequest; reply: { added: boolean } };
   "plugins/getBlacklist": { req: EmptyObject; reply: PluginsGetBlacklistReply };
   "plugins/getHealth": { req: PluginsGetHealthRequest; reply: PluginsGetHealthReply };
@@ -2485,6 +2490,7 @@ export const PluginsMsg = {
   getFolders: "plugins/getFolders",
   getDefaultFolders: "plugins/getDefaultFolders",
   unblacklist: "plugins/unblacklist",
+  cleanCache: "plugins/cleanCache",
   blacklist: "plugins/blacklist",
   getBlacklist: "plugins/getBlacklist",
   getHealth: "plugins/getHealth",

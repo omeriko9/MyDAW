@@ -19,6 +19,7 @@ import {
   addTrack,
   blacklistPlugin,
   cancelPluginProbe,
+  cleanPluginCache,
   getPluginHealth,
   openPluginEditor,
   probePlugins,
@@ -28,6 +29,7 @@ import {
   unblacklistPlugins,
 } from "../../store/actions";
 import { ws } from "../../protocol/ws";
+import { confirmDialog } from "../Dialogs/confirm";
 
 function fileOf(path: string): string {
   const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -227,6 +229,42 @@ export default function HealthPanel({ connected }: { connected: boolean }) {
           })}
         >
           Run automated pass
+        </button>
+        {/* This list is the raw scan cache, so it keeps every file MyDAW has ever tried —
+            including folders removed from the settings long ago ("where is this C:\Temp
+            plugin coming from?"). Those records can never be used again: a scan only
+            walks the configured folders. Dropping them is safe — the cache is derived
+            data, rebuilt by the next scan — and the blacklist is left alone. */}
+        <button
+          type="button"
+          className="pm-btn"
+          disabled={!actionable}
+          title="Forget cache records for files outside your configured plugin folders, and for files that no longer exist. Nothing on disk is touched, and your blacklist is kept."
+          onClick={() => act(async () => {
+            const preview = await cleanPluginCache(true);
+            const doomed = preview.removedOutsideFolders + preview.removedMissingFiles;
+            if (doomed === 0) {
+              setNotice("Nothing to clean — every cached file is in a configured folder.");
+              return;
+            }
+            const ok = await confirmDialog({
+              title: "Clean up scan cache",
+              message:
+                `Forget ${doomed} cache record(s)? ` +
+                `${preview.removedOutsideFolders} are outside your configured plugin folders and ` +
+                `${preview.removedMissingFiles} no longer exist on disk; ${preview.kept} are kept. ` +
+                `Nothing on disk is deleted and your blacklist is untouched — a rescan rebuilds anything still present.`,
+              confirmLabel: "Clean up",
+            });
+            if (!ok) return;
+            const r = await cleanPluginCache();
+            setNotice(
+              `Cleaned — forgot ${r.removedOutsideFolders + r.removedMissingFiles} record(s), kept ${r.kept}.`,
+            );
+            refresh();
+          })}
+        >
+          Clean up cache
         </button>
       </div>
 

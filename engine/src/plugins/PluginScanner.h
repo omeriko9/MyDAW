@@ -101,6 +101,20 @@ public:
     // after the registry has been replaced and the cache saved — cancelled or not.
     void scanAsync(bool full, std::vector<std::string> onlyPaths, ProgressFn progress,
                    DoneFn done);
+
+    // plugins/cleanCache — drop cache records that can never be used again: files under
+    // no currently-configured folder, and files that no longer exist on disk. Both are
+    // pure dead weight, because a scan only ever walks the configured folders: such a
+    // record is never consulted as a cache hit, it just inflates the Health view (which
+    // shows the raw cache by design) with history from folders removed long ago. The
+    // cache is derived data — anything pruned by mistake comes back on the next scan.
+    // The BLACKLIST is deliberately untouched: that one holds decisions, not findings.
+    struct PruneResult {
+        size_t removedOutsideFolders = 0;
+        size_t removedMissingFiles = 0;
+        size_t kept = 0;
+    };
+    PruneResult pruneCache(bool dryRun);
     void scanAsync(bool full, ProgressFn progress, DoneFn done) {
         scanAsync(full, {}, std::move(progress), std::move(done));
     }
@@ -140,6 +154,9 @@ private:
     void loadCache();
     void saveCache();
     void populateRegistryFromCache();
+    // "/"-normalized prefixes of every currently-configured VST2/VST3 folder.
+    std::vector<std::string> configuredRoots() const;
+    static bool underRoots(const std::vector<std::string>& roots, const std::string& path);
     void workerMain(bool full, std::vector<std::string> onlyPaths, ProgressFn progress,
                     DoneFn done);
     std::vector<FileTask> collectFiles() const;

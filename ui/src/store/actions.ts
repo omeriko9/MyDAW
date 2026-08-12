@@ -517,6 +517,11 @@ export const unblacklistPlugins = (
   req: { uids?: string[]; paths?: string[]; all?: boolean; rescan?: boolean },
 ) => ws.request("plugins/unblacklist", req);
 
+/** Prune plugin-cache records that can never be used again (SPEC §8.3): files outside
+ *  every configured folder, and files that no longer exist. `dryRun` counts only. */
+export const cleanPluginCache = (dryRun?: boolean) =>
+  ws.request("plugins/cleanCache", dryRun ? { dryRun } : {});
+
 /** The raw persistent blacklist — includes path-only crash entries the registry never shows. */
 export const getPluginBlacklist = () => ws.request("plugins/getBlacklist", {});
 

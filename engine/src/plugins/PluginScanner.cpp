@@ -506,11 +506,7 @@ void PluginScanner::refreshFromCache() {
     populateRegistryFromCache();
 }
 
-void PluginScanner::populateRegistryFromCache() {
-    // The cache is a durable record of every file ever scanned — including folders the user
-    // has since REMOVED from the settings. Restoring it wholesale resurrected those plugins on
-    // every startup (the reported bug: "it loads the default folders even though I deleted
-    // them"). Only surface cache entries that live under a folder that is configured RIGHT NOW.
+std::vector<std::string> PluginScanner::configuredRoots() const {
     const auto [vst2Folders, vst3Folders] = registry_.folders();
     // normPath() lowercases and uses FORWARD slashes — build the prefixes in the same shape.
     std::vector<std::string> roots;
@@ -526,12 +522,57 @@ void PluginScanner::populateRegistryFromCache() {
         addRoot(f);
     for (const std::string& f : vst3Folders)
         addRoot(f);
+    return roots;
+}
+
+bool PluginScanner::underRoots(const std::vector<std::string>& roots, const std::string& path) {
+    const std::string p = normPath(path);
+    for (const std::string& prefix : roots)
+        if (p.size() > prefix.size() && p.compare(0, prefix.size(), prefix) == 0)
+            return true;
+    return false;
+}
+
+PluginScanner::PruneResult PluginScanner::pruneCache(bool dryRun) {
+    const std::vector<std::string> roots = configuredRoots();
+    PruneResult r;
+    std::vector<std::string> doomed;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& [key, e] : cache_) {
+            const bool outside = !underRoots(roots, e.path);
+            const bool missing = !outside && !fileExists(e.path);
+            if (outside)
+                ++r.removedOutsideFolders;
+            else if (missing)
+                ++r.removedMissingFiles;
+            else {
+                ++r.kept;
+                continue;
+            }
+            doomed.push_back(key);
+        }
+        if (!dryRun)
+            for (const std::string& key : doomed)
+                cache_.erase(key);
+    }
+    if (!dryRun && !doomed.empty()) {
+        saveCache();
+        Log::info("PluginScanner: cache cleaned — dropped %zu file(s) outside the configured "
+                  "folders and %zu missing file(s); %zu kept",
+                  r.removedOutsideFolders, r.removedMissingFiles, r.kept);
+    }
+    return r;
+}
+
+void PluginScanner::populateRegistryFromCache() {
+    // The cache is a durable record of every file ever scanned — including folders the user
+    // has since REMOVED from the settings. Restoring it wholesale resurrected those plugins on
+    // every startup (the reported bug: "it loads the default folders even though I deleted
+    // them"). Only surface cache entries that live under a folder that is configured RIGHT NOW.
+    const std::vector<std::string> roots = configuredRoots();
     const auto underConfiguredFolder = [&roots](const std::string& path) {
-        const std::string p = normPath(path);
-        for (const std::string& prefix : roots)
-            if (p.size() > prefix.size() && p.compare(0, prefix.size(), prefix) == 0)
-                return true;
-        return false;
+        return underRoots(roots, path);
     };
 
     std::vector<PluginInfo> initial;

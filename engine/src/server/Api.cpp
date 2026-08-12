@@ -1340,6 +1340,24 @@ json Api::handlePlugins(const std::string& type, const json& p, std::string& ec,
         return json{{"vst2", PluginRegistry::defaultVst2Folders()},
                     {"vst3", PluginRegistry::defaultVst3Folders()}};
     }
+    if (type == "plugins/cleanCache") {
+        // SPEC §8.3: the cache is a durable log of every file ever scanned, and the
+        // Health view shows it raw — so records from folders removed long ago linger
+        // there forever ("where is this C:\Temp plugin coming from?"). They are dead
+        // weight: a scan only walks the CONFIGURED folders, so such a record can never
+        // be consulted again. Drop them, plus records whose file is gone. Derived data
+        // only — a rescan rebuilds anything pruned. The blacklist is NOT touched.
+        if (app_.scanner.scanning()) {
+            ec = "busy_scanning";
+            em = "a plugin scan is running — clean the cache when it finishes";
+            return json();
+        }
+        const PluginScanner::PruneResult r =
+            app_.scanner.pruneCache(getOr<bool>(p, "dryRun", false));
+        return json{{"removedOutsideFolders", r.removedOutsideFolders},
+                    {"removedMissingFiles", r.removedMissingFiles},
+                    {"kept", r.kept}};
+    }
     if (type == "plugins/getHealth") {
         // The manager page's data source (SPEC §5.6): every known file with its scan
         // verdict, blacklist state and per-plugin runtime/probe outcomes, plus summary
