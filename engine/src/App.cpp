@@ -811,12 +811,19 @@ void App::wireHostCallbacks() {
 }
 
 void App::onHostTransportKey(const std::string& key) {
-    // Numpad Enter / '.' forwarded from a focused VST editor window, Cubase
-    // semantics: Enter STARTS playback (no toggle — Space stays with the
-    // plugin), '.' jumps to project start.
+    // Numpad Enter / '.' / Space forwarded from a focused VST editor window,
+    // Cubase semantics: Enter STARTS playback, Space STOPS it (the host only
+    // forwards Space while playing — stopped, it stays a plugin key), '.'
+    // jumps to project start.
     if (key == "enter") {
         if (transport.state() == TransportState::Stopped)
             transport.play();
+    } else if (key == "space") {
+        if (transport.state() != TransportState::Stopped) {
+            if (isRecordingSession())
+                stopRecordingAndCommit();
+            transport.stop();
+        }
     } else if (key == "period") {
         transport.locate(0.0);
     } else {
@@ -1234,6 +1241,11 @@ json App::transportJson() const {
 }
 
 void App::broadcastTransportEvent() {
+    // Every transport transition funnels through here (change-detector + the
+    // ~20 Hz playback streamer), so this is where the hosts' playing-gated
+    // Space forwarding learns the run-state. Deduped inside.
+    if (host)
+        host->setTransportPlaying(transport.isPlaying());
     broadcastEvent("event/transport", transportJson());
 }
 

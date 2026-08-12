@@ -394,9 +394,10 @@ HWND createPumpWindow() {
 }
 
 // ---------------------------------------------------------------------------
-// Transport-key forwarding (2026-08-13, Cubase-style): numpad Enter and '.'
-// pressed while a plugin editor window has focus go to the DAW transport, not
-// the plugin — the '.'-then-Enter muscle memory must survive a focused VST. A
+// Transport-key forwarding (2026-08-13, Cubase-style): numpad Enter (play),
+// Space (stop; playing-gated) and '.' (jump to start) pressed while a plugin
+// editor window has focus go to the DAW transport, not the plugin — the
+// '.'-then-Enter muscle memory must survive a focused VST. A
 // THREAD hook (not a per-window subclass) fires for every window the plugin
 // creates on this GUI thread, including inside its own modal loops. Two
 // guards keep typing safe — the key passes through untouched when:
@@ -406,6 +407,10 @@ HWND createPumpWindow() {
 //      active even though their classname says nothing.
 // ---------------------------------------------------------------------------
 HHOOK g_transportKeyHook = nullptr;
+// Engine-pushed transport run-state ("transportState {playing}"): Space is
+// forwarded (as stop) ONLY while the DAW is playing — stopped, Space stays a
+// plugin key (Kontakt's sample preview). Written on the pipe reader thread.
+std::atomic<bool> g_transportPlaying{false};
 
 bool focusIsTextEntry() {
   if (HWND f = GetFocus()) {
@@ -433,16 +438,24 @@ LRESULT CALLBACK transportKeyProc(int code, WPARAM wParam, LPARAM lParam) {
   MSG* m = reinterpret_cast<MSG*>(lParam);
   if (code == HC_ACTION && wParam == PM_REMOVE && m &&
       (m->message == WM_KEYDOWN || m->message == WM_KEYUP)) {
-    // NUMPAD Enter (start playback) and '.'/'Numpad .' (jump to start) only —
-    // Cubase's transport keys. Main-row Enter stays with the plugin (it is
-    // confirm/commit in plugin dialogs), and so does Space (sample preview in
-    // Kontakt etc.). Numpad Enter is VK_RETURN with the extended-key bit. No
+    // NUMPAD Enter (start), Space (stop; only while playing) and '.'/'Numpad
+    // .' (jump to start) — Cubase's transport keys. Main-row Enter stays with
+    // the plugin (confirm/commit in plugin dialogs); Space stays with the
+    // plugin while the DAW is stopped (sample preview in Kontakt etc.).
+    // Numpad Enter is VK_RETURN with the extended-key bit. No
     // modifier chords; no autorepeat. A swallowed keydown swallows its
     // matching keyup too, so the plugin never sees a stray up-transition.
-    static bool s_swallowedDown[2] = {false, false}; // [0]=enter, [1]=period
+    static bool s_swallowedDown[3] = {false, false, false}; // enter/period/space
     int slot = -1;
     if (m->wParam == VK_RETURN && (m->lParam & 0x01000000)) slot = 0;
     else if (m->wParam == VK_OEM_PERIOD || m->wParam == VK_DECIMAL) slot = 1;
+    // Space = stop, forwarded ONLY while the DAW is playing (run-state pushed
+    // by the engine); stopped, it stays a plugin key. The keyup pairing below
+    // still fires when playback stopped between down and up.
+    else if (m->wParam == VK_SPACE &&
+             (m->message == WM_KEYUP ||
+              g_transportPlaying.load(std::memory_order_acquire)))
+      slot = 2;
     if (slot >= 0) {
       if (m->message == WM_KEYUP) {
         if (s_swallowedDown[slot]) {
@@ -455,8 +468,8 @@ LRESULT CALLBACK transportKeyProc(int code, WPARAM wParam, LPARAM lParam) {
                  !(GetKeyState(VK_SHIFT) & 0x8000) && !focusIsTextEntry()) {
         ServeState* s = g_pumpState;
         if (s && s->rpc) {
-          s->rpc->push("transportKey",
-                       json{{"key", slot == 0 ? "enter" : "period"}});
+          static const char* kKeyNames[3] = {"enter", "period", "space"};
+          s->rpc->push("transportKey", json{{"key", kKeyNames[slot]}});
           s_swallowedDown[slot] = true;
           m->message = WM_NULL; // swallow: the plugin must not also act on it
         }
@@ -573,6 +586,13 @@ int runServe(const std::wstring& pluginPath, const std::string& format,
   s.rpc->setHandler([&ctlq, rpcRaw, mainThreadId, pumpWnd](const std::string& type,
                                                            const json& payload,
                                                            int64_t requestId) {
+    if (requestId < 0 && type == "transportState") {
+      // Run-state for the playing-gated Space forwarding; a plain atomic
+      // store, so no reason to round-trip through the GUI control queue.
+      g_transportPlaying.store(payload.value("playing", false),
+                               std::memory_order_release);
+      return;
+    }
     ControlOp op;
     op.type = &type;
     op.payload = &payload;

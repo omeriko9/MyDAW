@@ -88,8 +88,9 @@ public:
     using ParamEditedCallback = std::function<void(uint64_t instanceId, uint32_t paramId,
                                                    double value, const std::string& valueText)>;
     using LatencyCallback = std::function<void(uint64_t instanceId, int samples)>;
-    // Transport keys forwarded from a focused VST editor window ("space"/"period");
-    // the host swallows them, so the engine is the only party that acts on them.
+    // Transport keys forwarded from a focused VST editor window
+    // ("enter"/"space"/"period"); the host swallows them, so the engine is the
+    // only party that acts on them.
     using TransportKeyCallback = std::function<void(const std::string& key)>;
 
     HostProcessManager();
@@ -113,6 +114,12 @@ public:
     void setParamEditedCallback(ParamEditedCallback cb);
     void setLatencyCallback(LatencyCallback cb);
     void setTransportKeyCallback(TransportKeyCallback cb);
+
+    // Mirrors the transport run-state to every live host (fire-and-forget
+    // "transportState {playing}" push, deduped): the hosts' Space forwarding
+    // is playing-gated so Space stays a plugin key (sample preview) while the
+    // DAW is stopped. Fresh/restarted hosts get the current state after init.
+    void setTransportPlaying(bool playing);
 
     // Spawns + initializes the host process for `instance` (instance.paramValues seeds
     // the restore cache and is applied after init; bypass/wetDry seed the node; the
@@ -228,6 +235,7 @@ private:
     ParamEditedCallback paramEditedCb_;
     LatencyCallback latencyCb_;
     TransportKeyCallback transportKeyCb_;
+    std::atomic<bool> transportPlaying_{false};
 
     mutable std::mutex pathMutex_;
     std::string host64Path_;

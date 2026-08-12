@@ -299,6 +299,23 @@ void HostProcessManager::setTransportKeyCallback(TransportKeyCallback cb) {
     transportKeyCb_ = std::move(cb);
 }
 
+void HostProcessManager::setTransportPlaying(bool playing) {
+    if (transportPlaying_.exchange(playing, std::memory_order_acq_rel) == playing)
+        return; // deduped: broadcastTransportEvent streams at ~20 Hz while playing
+    std::vector<std::shared_ptr<Instance>> snapshot;
+    {
+        std::lock_guard<std::mutex> lk(mapMutex_);
+        snapshot.reserve(instances_.size());
+        for (const auto& [id, inst] : instances_)
+            snapshot.push_back(inst);
+    }
+    for (const auto& inst : snapshot) {
+        const auto link = inst->getLink();
+        if (link && link->rpc)
+            link->rpc->push("transportState", json{{"playing", playing}});
+    }
+}
+
 // ===========================================================================
 // Lookup helpers
 // ===========================================================================
@@ -816,6 +833,14 @@ bool HostProcessManager::spawnAndInit(Instance& inst, std::string& err) {
         inst.lastChunkCapture = std::chrono::steady_clock::now();
     }
     queueJob([this, id] { captureChunkJob(id); });
+
+    // A host spawned (or restarted) mid-playback must know the run-state now —
+    // the deduped setTransportPlaying broadcast won't repeat it for us.
+    if (transportPlaying_.load(std::memory_order_acquire)) {
+        const auto link = inst.getLink();
+        if (link && link->rpc)
+            link->rpc->push("transportState", json{{"playing", true}});
+    }
     return true;
 }
 
