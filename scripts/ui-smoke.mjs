@@ -2770,6 +2770,50 @@ export const checks = [
   },
 
   {
+    id: "menu-strip-click-keeps-the-flyout",
+    title: "clicking the menu icon you are already hovering keeps its menu open",
+    area: "menus",
+    guards: "2026-08-13 (Omer): hover File → the flyout opens → click File (muscle memory) → it vanished. The open flyout covers the screen with .ctx-overlay, so the press never reached the button; the overlay just closed the menu. The strip now takes the press in the capture phase: first click after a hover-open KEEPS the menu (claiming it), a second click closes, and a click on a different icon switches without closing.",
+    run: async (s, tt) => {
+      const geo = JSON.parse(await s.eval(`(() => {
+        const items = [...document.querySelectorAll(".menu-strip .ms-item")];
+        const a = items[0].getBoundingClientRect(), b = items[1].getBoundingClientRect();
+        return JSON.stringify({
+          a: { x: a.left + a.width / 2, y: a.top + a.height / 2 },
+          b: { x: b.left + b.width / 2, y: b.top + b.height / 2 },
+        });
+      })()`));
+      const open = async () =>
+        (await s.eval(`(() => String(document.querySelectorAll("#mydaw-ctx-root .ctx-menu").length > 0))()`)) === "true";
+      const hover = async (p) => {
+        await s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
+        await new Promise((r) => setTimeout(r, 500));
+      };
+
+      await hover(geo.a);
+      tt.ok(await open(), "hovering the icon opens its menu");
+      await s.click(geo.a.x, geo.a.y);
+      await new Promise((r) => setTimeout(r, 350));
+      tt.ok(await open(), "clicking the icon you are hovering KEEPS it open");
+      await s.click(geo.a.x, geo.a.y);
+      await new Promise((r) => setTimeout(r, 350));
+      tt.ok(!(await open()), "a second click closes it");
+      await hover(geo.a);
+      await s.click(geo.b.x, geo.b.y);
+      await new Promise((r) => setTimeout(r, 350));
+      tt.ok(await open(), "clicking a DIFFERENT icon switches menus and stays open");
+
+      // Restore the rig: an open flyout covers the screen for every later check.
+      await s.eval(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        return true;
+      });
+      await s.untilEval("the flyout is gone", () =>
+        document.querySelectorAll("#mydaw-ctx-root .ctx-menu").length === 0);
+    },
+  },
+
+  {
     id: "clip-cc-shows-in-automation-lanes",
     title: "the A toggle reveals controller data that lives inside the clips",
     area: "timeline",

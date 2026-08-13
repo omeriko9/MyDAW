@@ -791,6 +791,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         let fadeInSec: number | undefined;
         let fadeOutSec: number | undefined;
         let srcOffsetOverride: number | undefined;
+        let noteTrimOverride: number | undefined;
         let repeatGhosts = 0;
         if (d && d.kind === "resize" && d.clipId === clip.id && d.moved) {
           if (d.dup && d.edge === "r") {
@@ -806,6 +807,11 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
                 0,
                 clip.srcOffsetSamples + (d.start - clip.startBeat) * d.samplesPerBeat,
               );
+            // ...and MIDI notes stay put the same way: they are stored clip-relative, so
+            // without rebasing the preview the whole part slid with the edge and snapped
+            // back on release (the commit never moved them).
+            if (d.edge === "l" && clip.type === "midi")
+              noteTrimOverride = d.start - clip.startBeat;
           }
         }
         if (d && d.kind === "fade" && d.clipId === clip.id) {
@@ -835,6 +841,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           fadeInSec,
           fadeOutSec,
           srcOffsetSamples: srcOffsetOverride,
+          noteTrimBeats: noteTrimOverride,
           showFadeHandles: clip.type === "audio" && tl === "select" && (selected || hovered),
           project: proj,
           zoomX: v.zoomX,

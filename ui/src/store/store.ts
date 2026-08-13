@@ -875,6 +875,39 @@ ws.on("event/recentProjects", (ev) => {
   useStore.setState({ recentProjects: ev.recentProjects });
 });
 
+/**
+ * Clip ids present when RECORDING started, so the clips the take produced can be
+ * identified the moment it stops. The engine reports the project change, not "here is
+ * what you just recorded", and what the user wants selected after a take is the take —
+ * pressing Delete then removes THAT, with no track-delete confirm in the way
+ * (Omer, asked twice).
+ */
+let clipsBeforeRecord: Set<number> | null = null;
+
+function allClipIds(): Set<number> {
+  const p = useStore.getState().project;
+  const out = new Set<number>();
+  for (const t of p?.tracks ?? []) for (const c of t.clips) out.add(c.id);
+  return out;
+}
+
+function selectRecordedClips(): void {
+  const before = clipsBeforeRecord;
+  clipsBeforeRecord = null;
+  if (!before) return;
+  const s = useStore.getState();
+  const fresh: number[] = [];
+  const trackIds: number[] = [];
+  for (const t of s.project?.tracks ?? [])
+    for (const c of t.clips)
+      if (!before.has(c.id)) {
+        fresh.push(c.id);
+        if (!trackIds.includes(t.id)) trackIds.push(t.id);
+      }
+  if (fresh.length === 0) return;
+  s.setSelection({ clipIds: fresh, trackIds, noteIds: [], scope: "clips" });
+}
+
 ws.on("event/transport", (ev) => {
   transportBus.emit(ev);
   // Reconcile the metronome mirror when the event carries it (no-op when unchanged).
@@ -890,6 +923,13 @@ ws.on("event/transport", (ev) => {
     t.loop.endBeat !== ev.loop.endBeat
   ) {
     useStore.setState({ transport: ev });
+    if (ev.state === "recording") {
+      clipsBeforeRecord = allClipIds();
+    } else if (t.state === "recording") {
+      // The take's clips land with the projectChanged that follows this transition, so
+      // pick them up on the next tick rather than racing it.
+      setTimeout(selectRecordedClips, 0);
+    }
   }
 });
 

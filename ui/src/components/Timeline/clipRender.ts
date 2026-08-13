@@ -137,6 +137,11 @@ export interface ClipDrawOpts {
   fadeOutSec?: number;
   /** left-trim preview override (audio): sample peaks from here instead of the clip's */
   srcOffsetSamples?: number;
+  /** left-trim preview override (MIDI): notes are clip-RELATIVE, so a preview that moves
+   *  the clip's left edge without rebasing them drags the whole part along — the notes
+   *  appear to slide and then snap back on release, because the commit keeps them at
+   *  their absolute positions (Omer, 2026-08-13). Beats trimmed off the front. */
+  noteTrimBeats?: number;
   showFadeHandles?: boolean;
   project: Project;
   zoomX: number;
@@ -359,7 +364,7 @@ function drawMidiContent(
     ctx.fillRect(cx0, yTop, cx1 - cx0, Math.max(rowH, yBot - yTop));
   } else {
     for (const nt of clip.notes) {
-      const nx = o.x + nt.startBeat * o.zoomX;
+      const nx = o.x + (nt.startBeat - (o.noteTrimBeats ?? 0)) * o.zoomX;
       const nw = Math.max(1.5, nt.lengthBeats * o.zoomX - 0.5);
       if (nx + nw < cx0 || nx > cx1) continue;
       const t = (nt.pitch - pmin) / (range + 1);

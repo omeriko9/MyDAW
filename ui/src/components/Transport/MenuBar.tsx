@@ -724,6 +724,10 @@ export default function MenuBar() {
     });
   const openIdxRef = useRef<number | null>(openIdx);
   openIdxRef.current = openIdx;
+  /** This flyout was opened by HOVER and has not been claimed by a click yet. Clicking
+   *  the icon you are already hovering must keep the menu — the muscle memory is
+   *  hover-then-click, and punishing it by closing is the bug (Omer, 2026-08-13). */
+  const hoverOpenedRef = useRef(false);
   const openTimer = useRef(0);
   const closeTimer = useRef(0);
 
@@ -735,9 +739,10 @@ export default function MenuBar() {
     }
   };
 
-  const openMenu = (i: number): void => {
+  const openMenu = (i: number, viaHover = false): void => {
     clearOpenTimer();
     clearCloseTimer();
+    hoverOpenedRef.current = viaHover;
     fetchImportFormatsTipOnce();
     const el = refs.current[i];
     if (!el) return;
@@ -760,7 +765,7 @@ export default function MenuBar() {
     clearCloseTimer();
     if (openIdxRef.current !== null) return;
     clearOpenTimer();
-    openTimer.current = window.setTimeout(() => openMenu(i), OPEN_INTENT_MS);
+    openTimer.current = window.setTimeout(() => openMenu(i, true), OPEN_INTENT_MS);
   };
 
   const pointInRect = (x: number, y: number, r: DOMRect): boolean =>
@@ -805,10 +810,30 @@ export default function MenuBar() {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") close();
     };
+    // The open flyout covers the screen with .ctx-overlay, so a press on the strip icon
+    // never reaches the button — the overlay just closed the menu. Handle it here, first.
+    const onDown = (e: PointerEvent): void => {
+      for (let i = 0; i < MENUS.length; i++) {
+        const el = refs.current[i];
+        if (!el || !pointInRect(e.clientX, e.clientY, el.getBoundingClientRect())) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        if (i !== openIdxRef.current) {
+          openMenu(i); // a different icon: switch to it, click-owned
+        } else if (hoverOpenedRef.current) {
+          hoverOpenedRef.current = false; // first click after hover: KEEP it open
+        } else {
+          close(); // second click on the same icon closes
+        }
+        return;
+      }
+    };
     window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerdown", onDown, true);
       window.removeEventListener("keydown", onKey, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
