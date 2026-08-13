@@ -120,6 +120,64 @@ try {
   report("soloing a feeder keeps its rack instrument audible",
     soloFeeder !== null && soloFeeder > 500, `peak=${soloFeeder}`);
   await req("cmd/track.set", { trackId: t1.id, patch: { solo: false } });
+
+  /* ---- shared MIDI SOURCES: solo must isolate ONE of them (Omer, 2026-08-13) -------
+     Solo decides which AUDIO NODES run, but several MIDI sources share one instrument
+     node — two feeders on a rack VSTi, or a host track's own parts plus a feeder. The
+     shared node kept playing every part, so soloing one of N tracks on one VST changed
+     nothing at all. Peaks alone cannot see this (equal velocities give equal peaks), so
+     the parts are put in DISJOINT time windows and each window is rendered on its own. */
+  const winRender = async (startBeat, endBeat) => {
+    const out = path.join(TMP, `w${seq++}.wav`);
+    await req("export/render", { path: out, startBeat, endBeat, format: { type: "wav", bitDepth: 16 } }, 120000);
+    return peakOf(out);
+  };
+  const sA = (await req("cmd/track.add", { kind: "midi", name: "SrcA" })).track;
+  const sB = (await req("cmd/track.add", { kind: "midi", name: "SrcB" })).track;
+  for (const [trk, startBeat, pitch] of [[sA, 8, 60], [sB, 12, 72]]) {
+    await req("cmd/track.set", { trackId: trk.id, patch: { midiTarget: rk.id } });
+    await req("cmd/clip.addMidi", {
+      trackId: trk.id, startBeat, lengthBeats: 2, name: `src${pitch}`,
+      notes: [{ pitch, velocity: 110, startBeat: 0, lengthBeats: 1.8 }],
+    });
+  }
+  const winA = [8, 10], winB = [12, 14];
+  report("both shared sources sound with no solo",
+    (await winRender(...winA)) > 500 && (await winRender(...winB)) > 500);
+  await req("cmd/track.set", { trackId: sA.id, patch: { solo: true } });
+  const aOnA = await winRender(...winA), aOnB = await winRender(...winB);
+  report("soloing one feeder keeps ITS part audible", aOnA > 500, `peak=${aOnA}`);
+  report("soloing one feeder SILENCES the other feeder on the same instance",
+    aOnB < 50, `other feeder's window peak=${aOnB}`);
+  await req("cmd/track.set", { trackId: sA.id, patch: { solo: false } });
+
+  // Same law for a host instrument track that carries parts of its OWN plus a feeder —
+  // exactly the shape in Omer's project (CHA 3 hosting PS01 with CHA 4 routed into it).
+  const host = (await req("cmd/track.add", { kind: "instrument", name: "Host" })).track;
+  await req("cmd/plugin.add", { trackId: host.id, uid: "builtin:synth" });
+  await req("cmd/clip.addMidi", {
+    trackId: host.id, startBeat: 16, lengthBeats: 2, name: "hostPart",
+    notes: [{ pitch: 55, velocity: 110, startBeat: 0, lengthBeats: 1.8 }],
+  });
+  const hFeed = (await req("cmd/track.add", { kind: "midi", name: "HostFeeder" })).track;
+  await req("cmd/track.set", { trackId: hFeed.id, patch: { midiTarget: host.id } });
+  await req("cmd/clip.addMidi", {
+    trackId: hFeed.id, startBeat: 20, lengthBeats: 2, name: "feederPart",
+    notes: [{ pitch: 79, velocity: 110, startBeat: 0, lengthBeats: 1.8 }],
+  });
+  const winH = [16, 18], winF = [20, 22];
+  await req("cmd/track.set", { trackId: host.id, patch: { solo: true } });
+  const hOnH = await winRender(...winH), hOnF = await winRender(...winF);
+  report("soloing the HOST keeps its own parts and drops the feeder into it",
+    hOnH > 500 && hOnF < 50, `host=${hOnH} feeder=${hOnF}`);
+  await req("cmd/track.set", { trackId: host.id, patch: { solo: false } });
+  await req("cmd/track.set", { trackId: hFeed.id, patch: { solo: true } });
+  const fOnH = await winRender(...winH), fOnF = await winRender(...winF);
+  report("soloing the FEEDER keeps its part and drops the host's own parts",
+    fOnF > 500 && fOnH < 50, `host=${fOnH} feeder=${fOnF}`);
+  await req("cmd/track.set", { trackId: hFeed.id, patch: { solo: false } });
+  for (const id of [hFeed.id, host.id, sA.id, sB.id]) await req("cmd/track.remove", { trackId: id });
+
   const aud = (await req("cmd/track.add", { kind: "audio", name: "Other" })).track;
   await req("cmd/track.set", { trackId: aud.id, patch: { solo: true } });
   const soloOther = await render();

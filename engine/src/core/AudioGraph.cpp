@@ -478,6 +478,14 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                               t.name.c_str());
                 }
             } else {
+                // Solo among MIDI SOURCES: several tracks can play through one shared
+                // instrument node (a feeder plus the host's own parts, two feeders on one
+                // rack VSTi). The node stays audible to carry the soloed part; the other
+                // sources must contribute no EVENTS, or soloing one changes nothing
+                // (2026-08-13). Deliberately MIDI-only: a carrier's own audio clips are
+                // its own audio, governed by the node mute — soloing a feeder must not
+                // silence them (smoke's render-closure check pins exactly that).
+                const bool sourceAudible = soloSourceAudible(solo, t.id);
                 for (const Clip& c : t.clips) {
                     // "Loop clip forever": how many end-to-end copies this clip
                     // contributes to the plan. 1 = the clip itself (the normal case).
@@ -525,7 +533,7 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                 static_cast<float>(p.value));
                         cfg.audioClips.push_back(rc);
                     } else if (const MidiClip* mc = asMidi(&c)) {
-                        if (mc->muted)
+                        if (mc->muted || !sourceAudible)
                             continue;
                         const double clipStart = mc->startBeat + repOffsetBeats;
                         const double clipEnd = clipStart + mc->lengthBeats;

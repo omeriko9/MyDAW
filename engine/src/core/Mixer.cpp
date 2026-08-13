@@ -140,11 +140,23 @@ SoloState computeSoloClosure(const Project& p, const std::vector<uint64_t>& solo
                         addUnique(set, cand.id);
             }
         } else if (t->kind == TrackKind::Instrument) {
-            for (const Track& cand : p.tracks)
-                if (cand.kind == TrackKind::Midi && cand.midiTarget == r)
-                    addUnique(set, cand.id);
+            // A soloed instrument track that carries NO parts of its own is a pure host
+            // (the rack pattern): without its feeders it would be silent, so they come
+            // along. One that DOES have parts is a musical track like any other — solo
+            // means "hear this part", so its feeders stay out (Omer, 2026-08-13: soloing
+            // one of several MIDI tracks sharing a VST left all the others sounding).
+            if (t->clips.empty())
+                for (const Track& cand : p.tracks)
+                    if (cand.kind == TrackKind::Midi && cand.midiTarget == r)
+                        addUnique(set, cand.id);
         }
     }
+
+    // Snapshot BEFORE the downstream walk: these are the tracks audible for their own
+    // sake, i.e. the ones whose own clips may still play. Everything the walk adds below
+    // is a CARRIER (an instrument node that must run to sound a soloed feeder, a bus, the
+    // master) — carriers keep their audio, not their parts.
+    std::vector<uint64_t> sources = set;
 
     // Downstream closure: outputTarget chain + enabled send destinations, transitively.
     std::vector<uint64_t> work = set;
@@ -196,6 +208,9 @@ SoloState computeSoloClosure(const Project& p, const std::vector<uint64_t>& solo
     std::sort(set.begin(), set.end());
     set.erase(std::unique(set.begin(), set.end()), set.end());
     st.audible = std::move(set);
+    std::sort(sources.begin(), sources.end());
+    sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+    st.sources = std::move(sources);
     return st;
 }
 
@@ -215,6 +230,12 @@ bool soloAudible(const SoloState& s, uint64_t trackId) {
     if (!s.anySolo)
         return true;
     return std::binary_search(s.audible.begin(), s.audible.end(), trackId);
+}
+
+bool soloSourceAudible(const SoloState& s, uint64_t trackId) {
+    if (!s.anySolo)
+        return true;
+    return std::binary_search(s.sources.begin(), s.sources.end(), trackId);
 }
 
 } // namespace mydaw

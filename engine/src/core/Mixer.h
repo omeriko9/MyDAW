@@ -101,6 +101,12 @@ private:
 struct SoloState {
     bool anySolo = false;          // false => everything audible, `audible` unused
     std::vector<uint64_t> audible; // sorted track ids (valid when anySolo)
+    // MIDI SOURCE audibility — which tracks may still emit their OWN clips (2026-08-13).
+    // Several MIDI sources can share one instrument node (a feeder plus the host track's
+    // own parts, or two feeders on one rack VSTi), so "the node is audible" cannot decide
+    // what plays: soloing one of them left every other part sounding through the shared
+    // plugin. `audible` keeps the node alive; `sources` says whose notes go into it.
+    std::vector<uint64_t> sources;
 };
 
 // Closure from explicit solo roots (used by AudioGraph::renderOffline's soloTrackId).
@@ -111,5 +117,9 @@ SoloState computeSoloAudibleSet(const Project& p);
 
 // Binary search into SoloState::audible. True when !anySolo.
 bool soloAudible(const SoloState& s, uint64_t trackId);
+
+// May this track's OWN clips still play? True when !anySolo. A track can be audible
+// (its node must run to carry a soloed feeder) while its own parts are silent.
+bool soloSourceAudible(const SoloState& s, uint64_t trackId);
 
 } // namespace mydaw

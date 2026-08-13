@@ -922,8 +922,17 @@ flagged `missing`.
   delays transport start by N bars while emitting clicks (record mode).
 - **Solo**: solo-in-place — audible set = soloed tracks + ancestors of their routing + send
   destinations; everything else implicit-muted. midiTarget edges participate: soloing a feeder
-  keeps its target instrument (and the instrument's downstream chain) audible; soloing an
-  instrument track pulls in its feeders so it keeps sounding.
+  keeps its target instrument (and the instrument's downstream chain) audible.
+  **Two audibility questions, not one (2026-08-13).** Several MIDI SOURCES can share one
+  instrument node — a feeder plus the host track's own parts, or N feeders on one rack VSTi —
+  so "the node is audible" cannot decide what plays. `SoloState` therefore carries `audible`
+  (which nodes run) and `sources` (whose own clips may still emit MIDI). A node pulled in
+  merely to CARRY a soloed feeder keeps its audio but contributes no events of its own, so
+  soloing one of several tracks sharing a VST isolates it instead of changing nothing. The
+  gate is MIDI-only: a carrier's own audio clips still play (its node mute governs them).
+  A soloed instrument track pulls in its feeders only when it has **no parts of its own**
+  (the pure-host / rack pattern, where it would otherwise be silent); one that carries parts
+  is a musical track like any other, so solo means "hear this part".
 - **Offline render**: clone graph in offline mode, pull blocks, write WAV; plugins processed via
   same IPC (non-RT waits OK); transient suppress of driver. Bounce/freeze uses same path for a
   single track solo'd internally.
