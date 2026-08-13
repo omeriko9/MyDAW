@@ -1518,15 +1518,20 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       }
       const pendingToggle = e.shiftKey;
       // A TRACK selection also lists every clip on the track (trackSelection.ts commits
-      // them together), so "already selected" is only meaningful while the selection is
-      // clip-scoped. Without that guard, pressing one clip on a selected track kept the
-      // whole track selected AND left scope "tracks" — and Delete then offered to remove
-      // the track with all its lanes instead of the clip under the pointer.
-      const wasSelected =
-        st.selection.scope === "clips" && st.selection.clipIds.includes(clip.id);
+      // them together) and those clips DRAW as selected — so dragging one of them has to
+      // move the whole set, exactly like a marquee selection does (Omer, 2026-08-13).
+      // Selected is selected; where the selection came from is not the user's problem.
+      const wasSelected = st.selection.clipIds.includes(clip.id);
       const ids = wasSelected ? st.selection.clipIds : [clip.id];
       // With a deferred toggle we must not disturb the selection on press.
-      if (!wasSelected && !pendingToggle) selectClips(ids, [hit.row.track.id]);
+      if (!pendingToggle) {
+        // Pressing a clip always makes the selection CLIP-scoped, keeping the same set.
+        // That is what stops Delete from offering to remove the whole track with its
+        // lanes (the 2026-08-12 bug) — the earlier fix got there by shrinking the drag
+        // to the pressed clip, which cost the group move. Narrow the scope, keep the set.
+        if (!wasSelected) selectClips(ids, [hit.row.track.id]);
+        else if (st.selection.scope !== "clips") selectClips(ids);
+      }
 
       const origins = new Map<number, MoveOrigin>();
       let minStart = Number.POSITIVE_INFINITY;

@@ -2595,17 +2595,29 @@ export const checks = [
         "Delete after an empty click raised no track-delete dialog");
       tt.eq((await clipsOf()).length, 2, "and destroyed nothing");
 
-      // REGRESSION 2 — a track selection also lists every clip on the track, so pressing
-      // ONE take used to count as "already selected" and drag the whole track with it.
+      // REGRESSION 2 — selecting a track selects EVERY clip on it, and those clips draw
+      // as selected, so dragging one must move them all (Omer, 2026-08-13). The first fix
+      // for the Delete-scope bug above bought its correctness by shrinking the drag to the
+      // pressed clip, which silently broke the group move; scope and drag-set are separate
+      // concerns and this pins both at once.
       await s.click(g.trackHeaderX, g.trackHeaderY);
       await s.drag([g.clipX, g.clipY], [g.clipX + 2 * ZOOM_X, g.clipY], 10);
-      await s.until("dragging one take moves only that take", async () => {
+      await s.until("dragging one take moves the whole track selection with it", async () => {
         const cs = await clipsOf();
-        const moved = cs.find((c) => c.id === b.id);
+        const dragged = cs.find((c) => c.id === b.id);
         const other = cs.find((c) => c.id === a.id);
-        return !!moved && !!other && moved.startBeat > 2.5 && Math.abs(other.startBeat) < 1e-9;
+        return !!dragged && !!other && dragged.startBeat > 2.5 && other.startBeat > 1.5;
       });
-      await s.probe("cmd/clip.move", { clipIds: [b.id], deltaBeats: -2 });
+      // ...and the press still narrowed the scope to CLIPS: Delete right after the group
+      // drag must take the clips, never the track. Both halves of the fix, one gesture.
+      await s.key("Delete");
+      await s.until("Delete after the group drag removed the clips", async () =>
+        (await clipsOf()).length === 0);
+      tt.eq(await s.eval(() => document.querySelectorAll(".modal-overlay").length), 0,
+        "and raised no track-delete dialog");
+      await s.probe("edit/undo", {});
+      await s.until("undo brought both takes back", async () => (await clipsOf()).length === 2);
+      await s.probe("cmd/clip.move", { clipIds: [a.id, b.id], deltaBeats: -2 });
 
       // Pressing a take leaves a clip-scoped selection: Delete takes the take, not the track.
       await s.click(g.clipX, g.clipY);
