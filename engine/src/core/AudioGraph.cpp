@@ -41,6 +41,10 @@ namespace {
 constexpr int kMaxSends = 16;    // per-track send taps the RT pass binds
 constexpr int kMaxCapture = 32;  // capture channels forwarded to nodes/recorder
 constexpr float kClipGuard = 4.0f;
+// "Loop clip forever" bounds: repeats never run past this many beats (a floor far past
+// any jam — ~17 min at 120bpm 4/4) and never exceed this many copies of one clip.
+constexpr double kLoopFloorBeats = 2048.0;
+constexpr int kLoopMaxRepeats = 4096;
 
 inline void enableFtzDaz() {
 #if defined(MYDAW_HAVE_SSE_CSR)
@@ -309,6 +313,31 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                       t.name.c_str(), static_cast<unsigned long long>(t.midiTarget));
     }
 
+    // --- "loop clip forever" horizon (SPEC §6) -------------------------------------
+    // A looped clip is expanded end-to-end at BUILD time (the same synthesise-in-the-
+    // builder trick the rack uses): the model keeps one clip, so saves, exports and the
+    // undo stack never see the repeats, and switching the loop off leaves nothing behind.
+    // "Forever" is bounded by the arrangement — the furthest real content, the loop
+    // region, and a floor that is far past any jam — with a hard repeat cap so a
+    // one-beat clip cannot mint millions of events.
+    double loopHorizonBeats = 0.0;
+    for (const Track& t : p.tracks)
+        for (const Clip& c : t.clips) {
+            if (const AudioClip* a = asAudio(&c)) {
+                if (a->loop)
+                    continue; // a looping clip must not extend its own horizon
+                const double endBeat =
+                    map.samplesToBeats(map.beatsToSamples(a->startBeat) + a->lengthSamples);
+                loopHorizonBeats = std::max(loopHorizonBeats, endBeat);
+            } else if (const MidiClip* m = asMidi(&c)) {
+                if (!m->loop)
+                    loopHorizonBeats = std::max(loopHorizonBeats, m->startBeat + m->lengthBeats);
+            }
+        }
+    if (p.loop.enabled)
+        loopHorizonBeats = std::max(loopHorizonBeats, p.loop.endBeat);
+    loopHorizonBeats = std::max(loopHorizonBeats, kLoopFloorBeats);
+
     // --- flattened render order: clip tracks -> buses (topo) -> master -------------
     // Feeders must process BEFORE their target instrument node. The RT pass (runPass)
     // executes entries strictly sequentially, and only Midi tracks feed while only
@@ -450,6 +479,26 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                 }
             } else {
                 for (const Clip& c : t.clips) {
+                    // "Loop clip forever": how many end-to-end copies this clip
+                    // contributes to the plan. 1 = the clip itself (the normal case).
+                    const double clipLenBeats =
+                        asAudio(&c) ? map.samplesToBeats(map.beatsToSamples(asAudio(&c)->startBeat) +
+                                                         asAudio(&c)->lengthSamples) -
+                                          asAudio(&c)->startBeat
+                                    : (asMidi(&c) ? asMidi(&c)->lengthBeats : 0.0);
+                    const bool wantsLoop =
+                        (asAudio(&c) ? asAudio(&c)->loop : asMidi(&c) && asMidi(&c)->loop) &&
+                        clipLenBeats > 1e-9;
+                    const double clipStartBeat =
+                        asAudio(&c) ? asAudio(&c)->startBeat : (asMidi(&c) ? asMidi(&c)->startBeat : 0.0);
+                    const int repeats =
+                        wantsLoop
+                            ? std::clamp(static_cast<int>(std::ceil(
+                                             (loopHorizonBeats - clipStartBeat) / clipLenBeats)),
+                                         1, kLoopMaxRepeats)
+                            : 1;
+                    for (int rep = 0; rep < repeats; ++rep) {
+                    const double repOffsetBeats = rep * clipLenBeats;
                     if (const AudioClip* a = asAudio(&c)) {
                         if (a->muted || a->assetId == 0 || a->lengthSamples <= 0)
                             continue;
@@ -458,7 +507,7 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                             continue; // still loading/missing; rebuild fires again (E9)
                         TrackNode::ResolvedAudioClip rc;
                         rc.pcm = pcm;
-                        rc.startSample = map.beatsToSamples(a->startBeat);
+                        rc.startSample = map.beatsToSamples(a->startBeat + repOffsetBeats);
                         rc.srcOffsetSamples = a->srcOffsetSamples;
                         rc.lengthSamples = a->lengthSamples;
                         rc.gain = static_cast<float>(a->gain);
@@ -478,11 +527,12 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                     } else if (const MidiClip* mc = asMidi(&c)) {
                         if (mc->muted)
                             continue;
-                        const double clipEnd = mc->startBeat + mc->lengthBeats;
+                        const double clipStart = mc->startBeat + repOffsetBeats;
+                        const double clipEnd = clipStart + mc->lengthBeats;
                         for (const Note& note : mc->notes) {
                             if (note.startBeat < 0.0 || note.startBeat >= mc->lengthBeats)
                                 continue;
-                            const double onB = mc->startBeat + note.startBeat;
+                            const double onB = clipStart + note.startBeat;
                             const double offB =
                                 std::min(onB + note.lengthBeats, clipEnd);
                             if (offB <= onB)
@@ -515,7 +565,7 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                                 continue;
                             const double v = std::clamp(pt.value, 0.0, 1.0);
                             TrackNode::CcEvent ce;
-                            ce.sample = map.beatsToSamples(mc->startBeat + pt.beat);
+                            ce.sample = map.beatsToSamples(clipStart + pt.beat);
                             ce.controller = static_cast<uint8_t>(pt.controller);
                             if (pt.controller == 128) { // pitch bend (0.5 = center)
                                 const int raw =
@@ -537,6 +587,7 @@ std::shared_ptr<GraphPlan> AudioGraph::Impl::buildPlan(
                             cfg.ccEvents.push_back(ce);
                         }
                     }
+                    } // rep — "loop clip forever" expansion
                 }
 
                 std::sort(cfg.noteEvents.begin(), cfg.noteEvents.end(),

@@ -2770,6 +2770,137 @@ export const checks = [
   },
 
   {
+    id: "clip-cc-shows-in-automation-lanes",
+    title: "the A toggle reveals controller data that lives inside the clips",
+    area: "timeline",
+    guards: "2026-08-13 (Omer): an imported .mid carries its CC74/modulation INSIDE the parts (clip.cc), while the A toggle only ever showed track.automation — so a project full of controller data expanded to a blank volume lane, and the only way to find the CC was hunting for it in the piano roll. Clip-borne controllers now get their own read-only lanes, with Extract MIDI Automation to make them editable.",
+    run: async (s, tt) => {
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "CCLane" })).payload.track;
+      const clip = (await s.probe("cmd/clip.addMidi", {
+        trackId: trk.id, startBeat: 0, lengthBeats: 4, name: "WithCC",
+        notes: [{ pitch: 60, startBeat: 0, lengthBeats: 1, velocity: 100 }],
+      })).payload.clip;
+      // CC74 inside the clip — exactly what a .mid import produces.
+      await s.probe("cmd/cc.edit", {
+        clipId: clip.id,
+        add: [
+          { controller: 74, beat: 0, value: 0.2 },
+          { controller: 74, beat: 2, value: 0.9 },
+        ],
+      });
+      await s.reload();
+      await s.untilEval("the scratch track renders", () =>
+        [...document.querySelectorAll(".tlh-row")].some((r) => r.textContent.trim().startsWith("CCLane")));
+      const btn = await s.eval(() => {
+        const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.trim().startsWith("CCLane"));
+        const b = [...row.querySelectorAll(".tlh-btn")].find((x) => x.textContent.trim() === "A");
+        const r = b && b.getBoundingClientRect();
+        return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      tt.ok(btn, "the A toggle is there");
+      await s.click(btn.x, btn.y);
+      await s.untilEval("a CC74 lane appears (not a blank volume lane)", () =>
+        [...document.querySelectorAll(".tlh-lane")].some((e) => e.textContent.includes("CC74")));
+      const labels = JSON.parse(await s.eval(`(() => JSON.stringify([...document.querySelectorAll(".tlh-lane")].map((e) => e.textContent.trim())))()`));
+      tt.ok(!labels.some((l) => l.startsWith("Volume")),
+        `expansion showed the real data, not a placeholder (${labels.join(" | ")})`);
+
+      // ...and the promotion works: after Extract it is a REAL, editable track lane.
+      const laneBtn = await s.eval(() => {
+        const lane = [...document.querySelectorAll(".tlh-lane")].find((e) => e.textContent.includes("CC74"));
+        const b = lane.querySelector('[aria-label^="Extract MIDI automation"]');
+        const r = b && b.getBoundingClientRect();
+        return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      });
+      tt.ok(laneBtn, "the clip-borne lane offers Extract, not a meaningless Remove");
+      await s.click(laneBtn.x, laneBtn.y);
+      await s.until("the CC moved onto a track automation lane", async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const t = p.tracks.find((x) => x.id === trk.id);
+        const lane = (t?.automation ?? []).find((l) => l.paramRef === "cc:74");
+        const clipCc = (t?.clips?.[0]?.cc ?? []).length;
+        return !!lane && lane.points.length === 2 && clipCc === 0;
+      });
+
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.reload();
+    },
+  },
+
+  {
+    id: "loop-clip-forever",
+    title: "Loop Clip Forever repeats a clip in the graph, draws its ghosts, and leaves no content behind",
+    area: "timeline",
+    guards: "2026-08-13 (Omer): the jam tool — repeat a two-bar drum part instead of recording the whole roll, then switch it off and record for real. PLAY-TIME only: one clip in the model, no content minted, toggling off leaves no trace. The pie (middle-click) carries it too, because the point is a mouse-only workflow.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "LoopTrk" })).payload.track;
+      const clip = (await s.probe("cmd/clip.addMidi", {
+        trackId: trk.id, startBeat: 0, lengthBeats: 4, name: "Beat",
+        notes: [{ pitch: 60, startBeat: 0, lengthBeats: 1, velocity: 100 }],
+      })).payload.clip;
+      await s.reload();
+      const g = JSON.parse(await s.eval(`(() => {
+        const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.trim().startsWith("LoopTrk"));
+        const rb = row.getBoundingClientRect();
+        const cv = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({ y: rb.top + rb.height / 2, left: cv.left });
+      })()`));
+      const clipsOf = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        return p.tracks.find((x) => x.id === trk.id).clips;
+      };
+
+      await s.click(g.left + 2 * ZOOM_X, g.y, { button: "right" });
+      await s.untilEval("the clip menu offers the loop", () =>
+        [...document.querySelectorAll(".ctx-item")].some((e) => /Loop Clip Forever/i.test(e.textContent)));
+      await s.eval(() => {
+        [...document.querySelectorAll(".ctx-item")].find((e) => /Loop Clip Forever/i.test(e.textContent)).click();
+        return true;
+      });
+      await s.until("the clip is flagged looping", async () => (await clipsOf())[0].loop === true);
+      tt.eq((await clipsOf()).length, 1, "no content was minted — still ONE clip");
+
+      // The repeats are DRAWN: beat 6 sits inside repeat #2, where only a ghost can be.
+      const painted = JSON.parse(await s.eval(`(() => {
+        const cv = document.querySelector("canvas.tl-clipcanvas");
+        const r = cv.getBoundingClientRect();
+        const ctx = cv.getContext("2d");
+        const dpr = cv.width / r.width;
+        const y = Math.round((${g.y} - r.top) * dpr);
+        const at = (beat) => [...ctx.getImageData(Math.round(beat * ${ZOOM_X} * dpr), y, 1, 1).data];
+        return JSON.stringify({ ghost: at(6), empty: at(60) });
+      })()`));
+      tt.ok(painted.ghost.join(",") !== painted.empty.join(","),
+        `a ghost repeat is painted past the clip (${painted.ghost.slice(0, 3)} vs bare row ${painted.empty.slice(0, 3)})`);
+
+      // The pie menu carries it too (mouse-only workflow).
+      await s.send("Input.dispatchMouseEvent", { type: "mousePressed", x: g.left + 2 * ZOOM_X, y: g.y, button: "middle", buttons: 4, clickCount: 1 });
+      await s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: g.left + 2 * ZOOM_X, y: g.y, button: "middle", buttons: 0, clickCount: 1 });
+      await s.untilEval("the pie menu carries the clip loop", () =>
+        [...document.querySelectorAll(".pie-item")].some((e) => /Loop clip forever/i.test(e.title)));
+      await s.eval(() => {
+        document.querySelector(".pie-overlay")?.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+        return true;
+      });
+      await s.untilEval("the pie closes again", () => !document.querySelector(".pie-overlay"));
+
+      // Switching it off leaves nothing behind.
+      await s.probe("cmd/clip.set", { clipId: clip.id, patch: { loop: false } });
+      const off = await clipsOf();
+      tt.ok(!off[0].loop && off.length === 1, "toggling off leaves one plain clip");
+
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.reload();
+    },
+  },
+
+  {
     id: "track-selection-survives-canvas-clicks",
     title: "a selected track stays selected when you click the arrangement, and the track list clears it",
     area: "timeline-selection",

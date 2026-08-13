@@ -3,7 +3,7 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "45019dc5561016878705aebd5ca7362c3842cdc54cfc8872466f2ed51ba53b80";
+const char kAgentCatalogSha256[] = "ce3f32afd400e2999186e6545cf990e6f25a3d2d263e6b63a80a3dfb2063a094";
 const char kAgentPromptsSha256[] = "9460914d2e3b3e7ecb3c5f8ba461d4ec080acffd29b72193636a6c3d6e26ae08";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
@@ -1243,6 +1243,10 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
         "lane": {
           "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
+        },
+        "loop": {
+          "description": "\"Loop clip forever\" (SPEC §6): while true the graph repeats this clip end-to-end for the whole arrangement. Play-time only — no content is created, exports stay bounded by real clips, and clearing it leaves no trace.",
+          "type": "boolean"
         },
         "muted": {
           "type": "boolean"

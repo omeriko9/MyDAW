@@ -30,6 +30,7 @@ import {
   takeLane,
   unfreezeTrack,
 } from "../../store/actions";
+import { extractMidiAutomationMany } from "../../store/actions";
 import { groupPluginVariants } from "../../lib/pluginVariants";
 import { isPluginFavorite, loadPluginFavorites, pluginKey } from "../../lib/ids";
 import {
@@ -68,6 +69,7 @@ import {
   MAX_TRACK_H,
   RULER_H,
   clamp,
+  clipControllerLanes,
   isDescendantOf,
   laneCurrentValue,
   paramSpecFor,
@@ -583,8 +585,16 @@ export default function TrackHeaders({
   const toggleLanes = (t: Track): void => {
     const ui = useAutomationUi.getState();
     const on = ui.expanded.has(t.id);
-    // expansion must never be a no-op: with no automation at all, show a volume lane
-    if (!on && t.automation.length === 0 && (ui.extraLanes.get(t.id) ?? []).length === 0) {
+    // expansion must never be a no-op: with no automation at all, show a volume lane.
+    // Clip-borne controller lanes count as automation here — an imported .mid keeps its
+    // CC inside the parts, and offering a blank volume lane on a track full of CC74 is
+    // exactly the "where is my automation?" the toggle is supposed to answer.
+    if (
+      !on &&
+      t.automation.length === 0 &&
+      (ui.extraLanes.get(t.id) ?? []).length === 0 &&
+      clipControllerLanes(t).size === 0
+    ) {
       ui.addExtraLane(t.id, "volume");
     }
     ui.setExpanded(t.id, !on);
@@ -630,6 +640,21 @@ export default function TrackHeaders({
       });
       openContextMenu(x, y, items);
     });
+  };
+
+  /** Promote a clip-borne controller lane to a real, editable automation lane. */
+  const extractLaneFromClips = async (row: LaneRowL): Promise<void> => {
+    const controller = row.paramRef.startsWith("cc:") ? Number(row.paramRef.slice(3)) : -1;
+    const clipIds = row.track.clips
+      .filter((c) => c.type === "midi" && (c.cc ?? []).some((e) => e.controller === controller))
+      .map((c) => c.id);
+    if (clipIds.length === 0) return;
+    try {
+      await extractMidiAutomationMany(clipIds);
+      showToast(`Extracted ${paramSpecFor(row.paramRef, row.track).label} from ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`);
+    } catch (e) {
+      showToast(e instanceof Error && e.message ? e.message : "Extract failed", "error");
+    }
   };
 
   const removeLane = (row: LaneRowL): void => {
@@ -1232,10 +1257,23 @@ export default function TrackHeaders({
         className="tlh-lane"
         style={{ top: row.top, height: row.height, paddingLeft: 10 + row.depth * 14 }}
       >
-        <span className="tlh-lane-label" title={spec.label}>
+        <span
+          className="tlh-lane-label"
+          title={
+            row.fromClips
+              ? `${spec.label} — controller data inside this track's CLIPS (read-only here). Right-click the lane ▸ Extract MIDI Automation to make it editable.`
+              : spec.label
+          }
+        >
           {spec.label}
         </span>
-        <span className="tlh-lane-value">{spec.fmt(laneCurrentValue(t, row.paramRef))}</span>
+        {row.fromClips ? (
+          <span className="tlh-lane-value dim" title="lives in the clips">
+            clip
+          </span>
+        ) : (
+          <span className="tlh-lane-value">{spec.fmt(laneCurrentValue(t, row.paramRef))}</span>
+        )}
         {/* Lane rows are a fixed height, so this is the only collapse affordance that
             survives a short track row (which hides the "A" toggle with the controls). */}
         <IconButton
@@ -1250,12 +1288,23 @@ export default function TrackHeaders({
           tooltip="Add automation lane"
           onClick={(e) => openLanePicker(t, e.clientX, e.clientY)}
         />
-        <IconButton
-          icon="x"
-          size={18}
-          tooltip={row.points.length > 0 ? "Remove lane (deletes its points)" : "Remove lane"}
-          onClick={() => removeLane(row)}
-        />
+        {/* A clip-borne lane owns no engine lane to remove — its data lives in the parts.
+            The honest action there is the promotion, not a delete. */}
+        {row.fromClips ? (
+          <IconButton
+            icon="sliders"
+            size={18}
+            tooltip="Extract MIDI automation — move this controller out of the clips onto an editable lane"
+            onClick={() => void extractLaneFromClips(row)}
+          />
+        ) : (
+          <IconButton
+            icon="x"
+            size={18}
+            tooltip={row.points.length > 0 ? "Remove lane (deletes its points)" : "Remove lane"}
+            onClick={() => removeLane(row)}
+          />
+        )}
       </div>
     );
   };

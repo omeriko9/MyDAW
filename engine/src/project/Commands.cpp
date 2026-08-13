@@ -4352,6 +4352,17 @@ json CommandProcessor::clipSet(const json& p, CmdResult& r) {
         setClipLane(*ref.clip, getOr<int>(patch, "lane", clipLane(*ref.clip)));
         any = true;
     }
+    if (hasKey(patch, "loop")) {
+        // "Loop clip forever" (SPEC §6): a play-time repeat the GRAPH expands. Nothing
+        // else in the model changes, so it needs a rebuild but no content edit.
+        const bool on = getOr<bool>(patch, "loop", false);
+        if (AudioClip* a = asAudio(ref.clip))
+            a->loop = on;
+        else if (MidiClip* m = asMidi(ref.clip))
+            m->loop = on;
+        any = true;
+        audible = true;
+    }
     if (AudioClip* a = asAudio(ref.clip)) {
         if (hasKey(patch, "gain")) {
             a->gain = clampd(getOr<double>(patch, "gain", a->gain), 0.0, 8.0);

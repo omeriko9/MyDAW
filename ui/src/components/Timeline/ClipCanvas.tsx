@@ -49,7 +49,9 @@ import {
   addArrangerSection,
   setArrangerChain,
   setArrangerSection,
+  extractMidiAutomationMany,
   setAutomation,
+  setClipsLoop,
   setChord,
   setClip,
   takeComp,
@@ -839,6 +841,21 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           colors,
           onPeaksArrive: schedule,
         });
+        // "Loop clip forever" (SPEC §6): the repeats the GRAPH will play, drawn as
+        // ghosts to the right edge of the view. They are not clips — nothing here is
+        // selectable or draggable — which is exactly what the translucency says.
+        if (clip.loop === true && lenBeats > 1e-9 && !hideOriginals?.has(clip.id)) {
+          for (let i = 1; ; i++) {
+            const gx = beatToPx(startBeat + i * lenBeats, v);
+            if (gx > w + 2) break;
+            if (gx + cw >= -2)
+              drawClip(ctx, {
+                clip, x: gx, y: ry, w: cw, h: row.height, canvasW: w,
+                color: clip.color ?? track.color, selected: false, ghost: 0.45,
+                project: proj, zoomX: v.zoomX, colors, onPeaksArrive: schedule,
+              });
+          }
+        }
         // Alt+right-edge repeat preview: translucent whole-clip ghosts end-to-end.
         for (let i = 1; i <= repeatGhosts; i++) {
           const gx = beatToPx(startBeat + i * lenBeats, v);
@@ -1207,6 +1224,17 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     return { vx: clientX - r.left, cy: clientY - r.top + stateRef.current.scrollY };
   };
 
+  /** Promote clip-borne CC to real automation lanes, then say what happened. */
+  const extractClipAutomation = async (track: Track, clipIds: number[]): Promise<void> => {
+    if (clipIds.length === 0) return;
+    try {
+      await extractMidiAutomationMany(clipIds);
+      showToast(`Extracted MIDI automation from ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : "Extract failed", "error");
+    }
+  };
+
   const hitTest = (vx: number, cy: number): ClipHit | null => {
     const { project: proj, rows: rws, vp: v, tool: tl, selection: sel } = stateRef.current;
     if (!proj) return null;
@@ -1332,6 +1360,26 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       { icon: "redo", label: "Redo (Ctrl+Y)", onClick: () => void redo().catch(() => {}) },
       { icon: "undo", label: "Undo (Ctrl+Z)", onClick: () => void undo().catch(() => {}) },
       { icon: "loop", label: "Loop on/off (L)", onClick: () => toggleLoop() },
+      {
+        // Clip loop (SPEC §6) — the pie is the mouse-only path Omer asked for. Acts on
+        // the clip selection; absent one it has nothing to loop and says so.
+        icon: "refresh",
+        label: "Loop clip forever",
+        onClick: () => {
+          const sel = useStore.getState();
+          const ids = sel.selection.clipIds;
+          if (ids.length === 0) {
+            showToast("Select a clip first — this loops the selected clip(s)");
+            return;
+          }
+          const proj = sel.project;
+          const anyOff = ids.some((id) => {
+            const f = proj ? findClipById(proj, id) : null;
+            return f ? f.clip.loop !== true : false;
+          });
+          fire(setClipsLoop(ids, anyOff));
+        },
+      },
     ];
   };
 
@@ -1380,6 +1428,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
     // automation lane rows — point move / erase / curve bend / draw-tool add
     if (row && row.kind === "lane") {
+      // A clip-borne controller lane is a VIEW of data that lives inside the parts at
+      // clip-relative beats; editing it here would have to rewrite clips behind the
+      // user's back. Say so, and point at the command that makes it editable.
+      if (row.fromClips) {
+        showToast("This CC lives inside the clips — right-click ▸ Extract MIDI Automation to edit it here");
+        return;
+      }
       const pt = laneHitPoint(row, vx, cy, st.vp);
       if (pt) {
         if (st.tool === "erase") {
@@ -2641,6 +2696,32 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       return;
     }
     if (row && row.kind === "lane") {
+      // Clip-borne CC (an imported .mid): the only sensible action is to promote it to a
+      // real lane — cmd/midi.extractAutomation per clip, in ONE undo step.
+      if (row.fromClips) {
+        const controller = row.paramRef.startsWith("cc:") ? Number(row.paramRef.slice(3)) : -1;
+        const clipIds = row.track.clips
+          .filter((c) => c.type === "midi" && (c.cc ?? []).some((e) => e.controller === controller))
+          .map((c) => c.id);
+        openContextMenu(e.clientX, e.clientY, [
+          {
+            label: `Extract MIDI Automation — ${paramSpecFor(row.paramRef, row.track).label}`,
+            icon: "sliders",
+            title: `Move this controller out of ${clipIds.length} clip${clipIds.length === 1 ? "" : "s"} onto a real, editable automation lane`,
+            onClick: () => void extractClipAutomation(row.track, clipIds),
+          },
+          {
+            label: "Extract ALL controllers on this track",
+            icon: "layers",
+            onClick: () =>
+              void extractClipAutomation(
+                row.track,
+                row.track.clips.filter((c) => c.type === "midi" && (c.cc ?? []).length > 0).map((c) => c.id),
+              ),
+          },
+        ]);
+        return;
+      }
       const pt = laneHitPoint(row, vx, cy, st.vp);
       const clearLane: MenuEntry = {
         label: "Clear Lane",
@@ -2778,6 +2859,9 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
       selectClips(ids, [hit.row.track.id]);
     }
     const muteTarget = !(clip.muted === true);
+    // Loop reads off the clip under the pointer; the toggle then applies to the whole
+    // selection, like Mute and Delete already do.
+    const loopedNow = clip.loop === true;
     const items: MenuEntry[] = [
       {
         label: "Cut",
@@ -3091,6 +3175,17 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
             },
           ] as MenuEntry[])
         : []),
+      {
+        // "Loop clip forever" (SPEC §6) — the jam tool: repeat this part end-to-end
+        // instead of recording the whole roll, then switch it off and record for real.
+        label: loopedNow ? "Stop Looping Clip" : "Loop Clip Forever",
+        icon: "loop",
+        title: loopedNow
+          ? "Play this clip once again — nothing was ever written to the project"
+          : "Repeat this clip end-to-end for the whole arrangement (playback only)",
+        onClick: () => fire(setClipsLoop(ids, !loopedNow)),
+      },
+      "separator",
       {
         label: "Rename…",
         icon: "pencil",

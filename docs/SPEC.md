@@ -844,10 +844,28 @@ PluginInstance = {instanceId, uid, format, path, bitness, name, version?: string
   stateFile?: string /*plugin-states/<instanceId>.bin*/, paramValues?: {[paramId]: number}}
 AudioClip = {id, type:"audio", name, startBeat, assetId, srcOffsetSamples, lengthSamples,
   gain: number /*linear*/, fadeInSec, fadeOutSec, fadeInCurve?, fadeOutCurve?,
-  env?: [{pos,value}], muted?, color?}
-MidiClip  = {id, type:"midi", name, startBeat, lengthBeats, muted?, color?,
+  env?: [{pos,value}], muted?, color?, loop?: boolean}
+MidiClip  = {id, type:"midi", name, startBeat, lengthBeats, muted?, color?, loop?: boolean,
   notes: [{id, pitch: 0..127, velocity: 1..127, startBeat /*rel to clip*/, lengthBeats, channel?:0}]}
 ```
+
+**`clip.loop` — "Loop Clip Forever" (2026-08-13).** A PLAY-TIME repeat for jamming: instead of
+recording a whole drum roll, loop a two-bar part, try ideas, switch it off and record for real.
+`buildPlan` expands a looped clip end-to-end (the same synthesise-in-the-builder trick §5.9 uses
+for rack instruments), so the model keeps exactly ONE clip — the project's length and therefore
+the default export range are unchanged, and clearing the flag leaves no trace. Any range you do
+render hears the repeats inside it, because the render uses the same plan as playback. Bounds:
+repeats stop at the furthest non-looping content / loop-region end / a 2048-beat floor, whichever
+is greatest, capped at 4096 copies of one clip. The arrangement draws the repeats as ghosts —
+they are not clips and cannot be selected or dragged. Toggle: clip context menu, the middle-click
+pie, or `cmd/clip.set {patch:{loop}}`.
+
+**Clip-borne controller lanes.** MIDI CC lives inside clips (`MidiClip.cc`, clip-relative beats),
+but "Show automation lanes" only ever listed `track.automation` — so an imported `.mid` full of
+CC74 expanded to a blank Volume lane. The arrangement now derives a read-only lane per controller
+present in a track's clips (absolute beats, `cc:<n>` refs), marked as clip-borne; **Extract MIDI
+Automation** (`cmd/midi.extractAutomation`, one undo entry for the whole track) promotes it to a
+real editable lane.
 
 Save = atomic write (tmp+rename). Autosave every `autosaveMinutes` (default 2) to
 `autosave/project-<n>.json` (keep 5, round-robin) — only when dirty. Crash recovery: engine writes

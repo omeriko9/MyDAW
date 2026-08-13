@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "45019dc5561016878705aebd5ca7362c3842cdc54cfc8872466f2ed51ba53b80";
+export const AGENT_CATALOG_SHA256 = "ce3f32afd400e2999186e6545cf990e6f25a3d2d263e6b63a80a3dfb2063a094";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -1263,6 +1263,10 @@ export const AGENT_CATALOG: AgentCatalog = {
         "lane": {
           "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
+        },
+        "loop": {
+          "description": "\"Loop clip forever\" (SPEC §6): while true the graph repeats this clip end-to-end for the whole arrangement. Play-time only — no content is created, exports stay bounded by real clips, and clearing it leaves no trace.",
+          "type": "boolean"
         },
         "muted": {
           "type": "boolean"

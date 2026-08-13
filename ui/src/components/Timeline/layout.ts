@@ -107,6 +107,14 @@ export interface LaneRowL {
   top: number;
   height: number;
   depth: number;
+  /**
+   * The lane's points come from the CLIPS' own controller data, not from
+   * `track.automation` (Omer, 2026-08-13: an imported .mid carries its CC inside the
+   * parts, so "Show automation lanes" showed a project full of CC74 exactly nothing).
+   * Read-only here — the points live inside clips at clip-relative beats; "Extract MIDI
+   * automation" promotes them to a real, editable lane.
+   */
+  fromClips?: boolean;
 }
 
 /** Take lane sub-row (SPEC §8.7): shows only the track's clips with `clip.lane === lane`.
@@ -216,9 +224,51 @@ export function computeRows(project: Project | null, o: RowsOptions): Row[] {
         rows.push({ kind: "lane", track: t, paramRef: ref, points: lane ? lane.points : [], top, height: LANE_H, depth });
         top += LANE_H;
       }
+      // Controller data that lives INSIDE the parts (every imported .mid) gets a lane
+      // too, so expanding a track reveals what the track actually carries.
+      for (const [ref, points] of clipControllerLanes(t)) {
+        if (seen.has(ref)) continue;
+        seen.add(ref);
+        rows.push({
+          kind: "lane", track: t, paramRef: ref, points, top, height: LANE_H, depth,
+          fromClips: true,
+        });
+        top += LANE_H;
+      }
     }
   });
   return rows;
+}
+
+/**
+ * Controller lanes derived from a track's MIDI clips: one entry per controller that
+ * actually carries data, points in ABSOLUTE beats (clip.startBeat + cc.beat) so they
+ * line up with the ruler like any automation lane. Values are already 0..1 in the model.
+ *
+ * Ordered by controller number for stability, and capped: a dense import can hold tens
+ * of thousands of events, and a lane only needs what a screen can show. The cap keeps
+ * the row build O(points) with a hard ceiling instead of scaling with the file.
+ */
+const MAX_CLIP_LANE_POINTS = 4000;
+
+export function clipControllerLanes(track: Track): Map<string, AutomationPoint[]> {
+  const byController = new Map<number, AutomationPoint[]>();
+  for (const clip of track.clips) {
+    if (clip.type !== "midi") continue;
+    for (const ev of clip.cc ?? []) {
+      let list = byController.get(ev.controller);
+      if (!list) byController.set(ev.controller, (list = []));
+      if (list.length >= MAX_CLIP_LANE_POINTS) continue;
+      list.push({ id: ev.id, beat: clip.startBeat + ev.beat, value: ev.value });
+    }
+  }
+  const out = new Map<string, AutomationPoint[]>();
+  for (const controller of [...byController.keys()].sort((a, b) => a - b)) {
+    const pts = byController.get(controller)!;
+    pts.sort((a, b) => a.beat - b.beat);
+    out.set(`cc:${controller}`, pts);
+  }
+  return out;
 }
 
 export function rowsBottom(rows: Row[]): number {

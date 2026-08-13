@@ -257,6 +257,47 @@ export const deleteClips = (clipIds: number[]) => ws.request("cmd/clip.delete", 
 export const duplicateClips = (clipIds: number[], atSource?: boolean) =>
   ws.request("cmd/clip.duplicate", { clipIds, ...(atSource ? { atSource } : {}) });
 
+/**
+ * The same thing over MANY clips as ONE undo step.
+ *
+ * The engine command is per-clip, and an imported track routinely has dozens of parts —
+ * firing them one by one would bury the undo stack N deep for a single user action.
+ * `agent/batch` is the engine's atomic group primitive (<=64 ops, full rollback, one undo
+ * entry); chunking keeps a 134-clip track to three entries instead of 134.
+ */
+export async function extractMidiAutomationMany(clipIds: number[]): Promise<number> {
+  const CHUNK = 64;
+  for (let i = 0; i < clipIds.length; i += CHUNK) {
+    const slice = clipIds.slice(i, i + CHUNK);
+    await ws.requestRaw("agent/batch", {
+      label: "Extract MIDI automation",
+      operations: slice.map((clipId) => ({ type: "cmd/midi.extractAutomation", payload: { clipId } })),
+    });
+  }
+  return clipIds.length;
+}
+
+/**
+ * "Loop clip forever" (SPEC §6) over a selection, as ONE undo entry — the toggle is a
+ * single user action however many clips it covers.
+ */
+export async function setClipsLoop(clipIds: number[], on: boolean): Promise<void> {
+  if (clipIds.length === 1) {
+    await ws.request("cmd/clip.set", { clipId: clipIds[0], patch: { loop: on } });
+    return;
+  }
+  const CHUNK = 64;
+  for (let i = 0; i < clipIds.length; i += CHUNK) {
+    await ws.requestRaw("agent/batch", {
+      label: on ? "Loop clips" : "Stop looping clips",
+      operations: clipIds.slice(i, i + CHUNK).map((clipId) => ({
+        type: "cmd/clip.set",
+        payload: { clipId, patch: { loop: on } },
+      })),
+    });
+  }
+}
+
 export const setClip = (clipId: number, patch: ClipPatch, transient?: boolean) =>
   ws.request("cmd/clip.set", { clipId, patch }, transient);
 

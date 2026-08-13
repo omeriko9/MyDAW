@@ -228,6 +228,8 @@ export interface AudioClip {
   color?: string;
   /** take lane, 0/absent = main (SPEC §8.7) */
   lane?: number;
+  /** "Loop clip forever" (SPEC §6): the graph repeats this clip while it plays. */
+  loop?: boolean;
 }
 
 export interface MidiClip {
@@ -243,6 +245,8 @@ export interface MidiClip {
   cc?: MidiCc[];
   /** take lane, 0/absent = main (SPEC §8.7) */
   lane?: number;
+  /** "Loop clip forever" (SPEC §6): the graph repeats this clip while it plays. */
+  loop?: boolean;
 }
 
 /** Discriminated union on `type`. */
@@ -1034,6 +1038,8 @@ export interface ClipPatch {
   muted?: boolean;
   /** take lane, 0 = main (SPEC §8.7) */
   lane?: number;
+  /** "Loop clip forever" (SPEC §6): play-time repeat, no content created. */
+  loop?: boolean;
 }
 
 /** Exactly two audio clips on one track; they must overlap on the timeline. */

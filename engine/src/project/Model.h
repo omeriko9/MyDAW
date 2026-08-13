@@ -340,6 +340,12 @@ struct AudioClip {
     bool muted = false;  // optional in JSON
     std::string color;   // optional, "" = inherit track color
     int lane = 0;        // take lane, 0 = main (optional in JSON, SPEC §8.7)
+    // "Loop clip forever" (SPEC §6, 2026-08-13): a PLAY-TIME repeat, not content. The
+    // graph expands the clip end-to-end to a horizon; the model keeps ONE clip, so the
+    // project's own length (and therefore the default export range) is unchanged and
+    // toggling the loop off leaves no trace. A render of any range still HEARS the
+    // repeats inside it — the plan is the same one playback uses.
+    bool loop = false;   // optional in JSON
 };
 
 struct MidiClip {
@@ -353,6 +359,7 @@ struct MidiClip {
     std::vector<Note> notes; // kept sorted by startBeat (helpers don't enforce; E3 does)
     std::vector<MidiCc> cc;  // kept sorted by (controller, beat)
     int lane = 0;            // take lane, 0 = main (optional in JSON, SPEC §8.7)
+    bool loop = false;       // "loop clip forever" — see AudioClip::loop
 };
 
 // Track.clips element: ordered (AudioClip|MidiClip)[] per SPEC §6.

@@ -1236,6 +1236,10 @@
           "description": "take lane index, 0 = main (SPEC 8.7)",
           "type": "number"
         },
+        "loop": {
+          "description": "\"Loop clip forever\" (SPEC §6): while true the graph repeats this clip end-to-end for the whole arrangement. Play-time only — no content is created, exports stay bounded by real clips, and clearing it leaves no trace.",
+          "type": "boolean"
+        },
         "muted": {
           "type": "boolean"
         },
