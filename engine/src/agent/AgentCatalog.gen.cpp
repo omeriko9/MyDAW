@@ -3,8 +3,8 @@
 
 namespace mydaw::agent {
 
-const char kAgentCatalogSha256[] = "8db87ad0c147e77472f6ee865abeb5850e139270d5c9360fef8978d355921856";
-const char kAgentPromptsSha256[] = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
+const char kAgentCatalogSha256[] = "45019dc5561016878705aebd5ca7362c3842cdc54cfc8872466f2ed51ba53b80";
+const char kAgentPromptsSha256[] = "9460914d2e3b3e7ecb3c5f8ba461d4ec080acffd29b72193636a6c3d6e26ae08";
 namespace {
 const char kAgentCatalogJson[] = R"MYDAW_AGENT({
   "$schema": "./capabilities.schema.json",
@@ -3820,6 +3820,54 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       },
       "type": "object"
     },
+    "RackInstrument": {
+      "description": "A rack-owned VST instrument (SPEC §5.9): a plugin instance owned by the project rack rather than by any track. MIDI tracks feed it by setting their midiTarget to this id; its audio returns to outputTarget.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "rack instrument id — shares the id space with track ids, so Track.midiTarget can address either."
+        },
+        "name": {
+          "type": "string",
+          "description": "user label; defaults to the plugin name."
+        },
+        "outputTarget": {
+          "type": "number",
+          "description": "audio return: 0 = master, else a bus track id."
+        },
+        "plugin": {
+          "type": "object",
+          "description": "the hosted plugin instance (instanceId, uid, format, name, …) — same shape as a track insert; use its instanceId with plugin/openEditor, plugin/getParams, cmd/plugin.setParam."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "outputTarget",
+        "plugin"
+      ]
+    },
+    "RackPatch": {
+      "description": "Partial rack-instrument patch; absent fields keep their values (SPEC §5.9).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "user label shown in the rack."
+        },
+        "outputTarget": {
+          "type": "number",
+          "description": "audio return: 0 = master, else a bus track id."
+        },
+        "uid": {
+          "type": "string",
+          "description": "swap the hosted plugin (registry uid). The rack id is KEPT, so every MIDI track routed here stays routed; plugin state does not carry across a swap."
+        }
+      }
+    },
     "RecentProject": {
       "additionalProperties": false,
       "properties": {
@@ -4233,7 +4281,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "string"
         },
         "midiTarget": {
-          "description": "MIDI routing (kind \"midi\" only): id of an Instrument-kind track that receives this track's MIDI — one shared plugin instance for N midi tracks. Absent/0 = none, the track plays through its own inserts (SPEC §6).",
+          "description": "MIDI routing (kind \"midi\" only): id of the sound source that receives this track's MIDI — either an Instrument-kind TRACK or a RACK instrument (one shared id space, SPEC §5.9). Absent/0 = the track makes no sound of its own.",
           "type": "number"
         },
         "monitor": {
@@ -4545,7 +4593,7 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "type": "string"
         },
         "midiTarget": {
-          "description": "kind \"midi\" only — Instrument-track id to route this track's MIDI into; 0 clears.",
+          "description": "kind \"midi\" only — id of the sound source to route this track's MIDI into: an Instrument-TRACK id or a RACK instrument id (query view \"rack\"); 0 clears.",
           "type": "number"
         },
         "monitor": {
@@ -7109,31 +7157,33 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "uid": {
-            "type": "string"
+            "type": "string",
+            "description": "registry uid of an INSTRUMENT plugin (query view \"plugin_registry\", where {isInstrument:true}); effects are refused."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "optional label; defaults to the plugin name."
           }
         },
         "required": [
           "uid"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rack": {
-            "type": "object"
+            "$ref": "#/schemas/RackInstrument"
           }
         },
         "required": [
           "rack"
-        ],
-        "type": "object"
+        ]
       },
       "examples": [
         {
@@ -7163,16 +7213,17 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rackId": {
-            "type": "number"
+            "type": "number",
+            "description": "rack instrument id (query view \"rack\")."
           }
         },
         "required": [
           "rackId"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
@@ -7204,20 +7255,21 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rackId": {
-            "type": "number"
+            "type": "number",
+            "description": "rack instrument id (query view \"rack\")."
           },
           "patch": {
-            "type": "object"
+            "$ref": "#/schemas/RackPatch"
           }
         },
         "required": [
           "rackId",
           "patch"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
@@ -7227,7 +7279,8 @@ const char kAgentCatalogJson[] = R"MYDAW_AGENT({
           "input": {
             "rackId": 7,
             "patch": {
-              "uid": "1213288274"
+              "name": "Strings",
+              "outputTarget": 0
             }
           }
         }
@@ -11705,6 +11758,29 @@ const char kAgentPromptsJson[] = R"MYDAW_AGENT({
         "mix",
         "export",
         "read-only"
+      ]
+    },
+    {
+      "id": "route-midi-to-rack-vst",
+      "title": "Route MIDI tracks to a rack VST instrument",
+      "category": "plugins",
+      "prompt": "Load the instrument I name into the project RACK (cmd/rack.add, not onto a track), then route the MIDI tracks I list into it by setting each track's midiTarget to the rack instrument id. If the instrument is multitimbral, give each track its own midiOutChannel 1..16; otherwise leave the channel as played. Show me the routing you ended up with (track → target, channel).\n\nInstrument / MIDI tracks to route: ",
+      "tags": [
+        "plugins",
+        "rack",
+        "routing",
+        "midi"
+      ]
+    },
+    {
+      "id": "channel-roles-audit",
+      "title": "Explain what every channel does",
+      "category": "diagnose",
+      "prompt": "Walk the whole project and tell me, per channel: its kind, what makes its sound (own instrument plugin, a rack instrument by name, hardware MIDI out, or nothing), its MIDI channel if forced, where its audio goes, and whether it is muted/soloed/frozen. Call out anything broken — MIDI tracks with no target, dangling routings, instrument tracks with no instrument, rack instruments nothing feeds. Do not change anything.",
+      "tags": [
+        "diagnose",
+        "routing",
+        "structure"
       ]
     }
   ]

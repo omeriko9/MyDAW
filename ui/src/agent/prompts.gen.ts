@@ -8,7 +8,7 @@ export interface PreparedScript {
   readonly tags?: readonly string[];
 }
 
-export const AGENT_PROMPTS_SHA256 = "ea5090d50367c60e6ff47b0bf154a59aa3d71fed4db70c22f08823f6c4555393";
+export const AGENT_PROMPTS_SHA256 = "9460914d2e3b3e7ecb3c5f8ba461d4ec080acffd29b72193636a6c3d6e26ae08";
 export const AGENT_PROMPTS: readonly PreparedScript[] = [
   {
     "id": "instrument-idea",
@@ -142,6 +142,29 @@ export const AGENT_PROMPTS: readonly PreparedScript[] = [
       "mix",
       "export",
       "read-only"
+    ]
+  },
+  {
+    "id": "route-midi-to-rack-vst",
+    "title": "Route MIDI tracks to a rack VST instrument",
+    "category": "plugins",
+    "prompt": "Load the instrument I name into the project RACK (cmd/rack.add, not onto a track), then route the MIDI tracks I list into it by setting each track's midiTarget to the rack instrument id. If the instrument is multitimbral, give each track its own midiOutChannel 1..16; otherwise leave the channel as played. Show me the routing you ended up with (track → target, channel).\n\nInstrument / MIDI tracks to route: ",
+    "tags": [
+      "plugins",
+      "rack",
+      "routing",
+      "midi"
+    ]
+  },
+  {
+    "id": "channel-roles-audit",
+    "title": "Explain what every channel does",
+    "category": "diagnose",
+    "prompt": "Walk the whole project and tell me, per channel: its kind, what makes its sound (own instrument plugin, a rack instrument by name, hardware MIDI out, or nothing), its MIDI channel if forced, where its audio goes, and whether it is muted/soloed/frozen. Call out anything broken — MIDI tracks with no target, dangling routings, instrument tracks with no instrument, rack instruments nothing feeds. Do not change anything.",
+    "tags": [
+      "diagnose",
+      "routing",
+      "structure"
     ]
   }
 ];

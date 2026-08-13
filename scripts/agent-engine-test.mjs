@@ -585,6 +585,113 @@ async function main() {
     assert.deepEqual(await projectSnapshot(), baseProject);
   });
 
+  // SPEC §5.9 — the agent's view of rack-owned instruments. Every one of these
+  // read paths was blind to the rack before 2026-08-13: an agent asked "what VSTs
+  // are loaded" or "where does this MIDI track go" answered wrong on any project
+  // using the standard MIDI-track → shared-VST model.
+  await test("rack instruments are visible and routable through the agent surface", async () => {
+    const midiTrackId = (await request("cmd/track.add", { kind: "midi", name: "Feeder" })).track.id;
+    const rack = (await request("cmd/rack.add", {
+      uid: "builtin:synth",
+      name: "Shared Synth",
+    })).rack;
+    assert(rack && typeof rack.id === "number", "cmd/rack.add did not return the rack instrument");
+    assert(rack.plugin && typeof rack.plugin.instanceId === "number", "rack reply lacks plugin.instanceId");
+
+    // view "rack": id + hosted plugin + (initially empty) feeder list.
+    const listed = await query({ view: "rack", fields: ["id", "name", "uid", "instanceId", "feederCount"] });
+    assert.deepEqual(listed.items, [{
+      id: rack.id,
+      name: "Shared Synth",
+      uid: "builtin:synth",
+      instanceId: rack.plugin.instanceId,
+      feederCount: 0,
+    }]);
+
+    // plugin_instances must include it, tagged owner:"rack" (no trackId).
+    const instances = await query({
+      view: "plugin_instances",
+      where: { instanceId: rack.plugin.instanceId },
+      fields: ["instanceId", "uid", "owner", "rackId", "rackName"],
+    });
+    assert.deepEqual(instances.items, [{
+      instanceId: rack.plugin.instanceId,
+      uid: "builtin:synth",
+      owner: "rack",
+      rackId: rack.id,
+      rackName: "Shared Synth",
+    }]);
+    const summary = await query({ view: "project_summary", fields: ["rackInstrumentCount", "pluginInstanceCount"] });
+    assert.deepEqual(summary.items, [{ rackInstrumentCount: 1, pluginInstanceCount: 1 }]);
+
+    // A MIDI track routes at the RACK id — the whole point of the shared id space.
+    await request("cmd/track.set", {
+      trackId: midiTrackId,
+      patch: { midiTarget: rack.id, midiOutChannel: 3 },
+    });
+    const track = await query({
+      view: "track",
+      where: { trackId: midiTrackId },
+      fields: ["midiTarget", "midiTargetKind", "midiTargetName", "midiOutChannel"],
+    });
+    assert.deepEqual(track.items, [{
+      midiTarget: rack.id,
+      midiTargetKind: "rack",
+      midiTargetName: "Shared Synth",
+      midiOutChannel: 3,
+    }]);
+    const routing = await query({
+      view: "routing",
+      where: { trackId: midiTrackId, type: "midi" },
+      fields: ["trackId", "target", "targetKind", "targetName", "midiOutChannel"],
+    });
+    assert.deepEqual(routing.items, [{
+      trackId: midiTrackId,
+      target: rack.id,
+      targetKind: "rack",
+      targetName: "Shared Synth",
+      midiOutChannel: 3,
+    }]);
+    const fed = await query({ view: "rack", where: { rackId: rack.id }, fields: ["feederCount", "feeders"] });
+    assert.deepEqual(fed.items, [{
+      feederCount: 1,
+      feeders: [{ trackId: midiTrackId, trackName: "Feeder", midiOutChannel: 3 }],
+    }]);
+
+    // where.trackId means "on this track" — it must not sweep the rack in.
+    const onTrack = await query({
+      view: "plugin_instances",
+      where: { trackId: midiTrackId },
+      fields: ["instanceId"],
+    });
+    assert.deepEqual(onTrack.items, []);
+
+    await request("cmd/rack.remove", { rackId: rack.id });
+    const cleared = await query({
+      view: "track",
+      where: { trackId: midiTrackId },
+      fields: ["midiTarget", "midiTargetKind"],
+    });
+    assert.deepEqual(cleared.items, [{}], "rack.remove must clear the feeder's midiTarget");
+
+    await request("edit/undo", {}); // rack.remove
+    await request("edit/undo", {}); // track.set
+    await request("edit/undo", {}); // rack.add
+    await request("edit/undo", {}); // track.add
+    assert.deepEqual(await projectSnapshot(), baseProject);
+  });
+
+  await test("the query view list names every implemented view and no removed one", async () => {
+    const error = await expectProtocolError("agent/query", { view: "definitely-not-a-view" }, "unknown_view");
+    const listed = String(error.message ?? "");
+    for (const view of ["rack", "routing", "plugin_instances", "tracks"])
+      assert(listed.includes(view), `unknown_view hint omits "${view}"`);
+    // take_folders/takes went out with the versions feature; advertising them sent
+    // agents straight into another unknown_view.
+    for (const gone of ["take_folders", "takes,"])
+      assert(!listed.includes(gone), `unknown_view hint still advertises removed view "${gone}"`);
+  });
+
   await test("the existing WebSocket remains healthy after expected failures", async () => {
     const status = await request("engine/getStatus", {});
     assert.equal(status.running, true);

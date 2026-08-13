@@ -70,7 +70,8 @@ export const AGENT_TOOL_DEFS: ToolDef[] = [
       name: "mydaw_query",
       description:
         "Read filtered, paginated project/runtime data by view (tracks, clips, notes, " +
-        "plugin_instances, transport, markers, arranger, chord_events, transpose_events, …). " +
+        "routing, rack, plugin_instances, transport, markers, arranger, chord_events, " +
+        "transpose_events, …). " +
         "An unknown view errors with the full view list. Every response carries the engine revision.",
       parameters: obj(
         {

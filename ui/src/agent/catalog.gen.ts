@@ -25,7 +25,7 @@ export interface AgentCatalog {
   readonly requestExclusions: readonly Readonly<{ request: string; reason: string; use: string }>[];
 }
 
-export const AGENT_CATALOG_SHA256 = "8db87ad0c147e77472f6ee865abeb5850e139270d5c9360fef8978d355921856";
+export const AGENT_CATALOG_SHA256 = "45019dc5561016878705aebd5ca7362c3842cdc54cfc8872466f2ed51ba53b80";
 export const AGENT_CATALOG: AgentCatalog = {
   "$schema": "./capabilities.schema.json",
   "formatVersion": 1,
@@ -3840,6 +3840,54 @@ export const AGENT_CATALOG: AgentCatalog = {
       },
       "type": "object"
     },
+    "RackInstrument": {
+      "description": "A rack-owned VST instrument (SPEC §5.9): a plugin instance owned by the project rack rather than by any track. MIDI tracks feed it by setting their midiTarget to this id; its audio returns to outputTarget.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "rack instrument id — shares the id space with track ids, so Track.midiTarget can address either."
+        },
+        "name": {
+          "type": "string",
+          "description": "user label; defaults to the plugin name."
+        },
+        "outputTarget": {
+          "type": "number",
+          "description": "audio return: 0 = master, else a bus track id."
+        },
+        "plugin": {
+          "type": "object",
+          "description": "the hosted plugin instance (instanceId, uid, format, name, …) — same shape as a track insert; use its instanceId with plugin/openEditor, plugin/getParams, cmd/plugin.setParam."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "outputTarget",
+        "plugin"
+      ]
+    },
+    "RackPatch": {
+      "description": "Partial rack-instrument patch; absent fields keep their values (SPEC §5.9).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "user label shown in the rack."
+        },
+        "outputTarget": {
+          "type": "number",
+          "description": "audio return: 0 = master, else a bus track id."
+        },
+        "uid": {
+          "type": "string",
+          "description": "swap the hosted plugin (registry uid). The rack id is KEPT, so every MIDI track routed here stays routed; plugin state does not carry across a swap."
+        }
+      }
+    },
     "RecentProject": {
       "additionalProperties": false,
       "properties": {
@@ -4253,7 +4301,7 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "string"
         },
         "midiTarget": {
-          "description": "MIDI routing (kind \"midi\" only): id of an Instrument-kind track that receives this track's MIDI — one shared plugin instance for N midi tracks. Absent/0 = none, the track plays through its own inserts (SPEC §6).",
+          "description": "MIDI routing (kind \"midi\" only): id of the sound source that receives this track's MIDI — either an Instrument-kind TRACK or a RACK instrument (one shared id space, SPEC §5.9). Absent/0 = the track makes no sound of its own.",
           "type": "number"
         },
         "monitor": {
@@ -4565,7 +4613,7 @@ export const AGENT_CATALOG: AgentCatalog = {
           "type": "string"
         },
         "midiTarget": {
-          "description": "kind \"midi\" only — Instrument-track id to route this track's MIDI into; 0 clears.",
+          "description": "kind \"midi\" only — id of the sound source to route this track's MIDI into: an Instrument-TRACK id or a RACK instrument id (query view \"rack\"); 0 clears.",
           "type": "number"
         },
         "monitor": {
@@ -7129,31 +7177,33 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "uid": {
-            "type": "string"
+            "type": "string",
+            "description": "registry uid of an INSTRUMENT plugin (query view \"plugin_registry\", where {isInstrument:true}); effects are refused."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "optional label; defaults to the plugin name."
           }
         },
         "required": [
           "uid"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rack": {
-            "type": "object"
+            "$ref": "#/schemas/RackInstrument"
           }
         },
         "required": [
           "rack"
-        ],
-        "type": "object"
+        ]
       },
       "examples": [
         {
@@ -7183,16 +7233,17 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rackId": {
-            "type": "number"
+            "type": "number",
+            "description": "rack instrument id (query view \"rack\")."
           }
         },
         "required": [
           "rackId"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
@@ -7224,20 +7275,21 @@ export const AGENT_CATALOG: AgentCatalog = {
       ],
       "produces": [],
       "input": {
+        "type": "object",
         "additionalProperties": false,
         "properties": {
           "rackId": {
-            "type": "number"
+            "type": "number",
+            "description": "rack instrument id (query view \"rack\")."
           },
           "patch": {
-            "type": "object"
+            "$ref": "#/schemas/RackPatch"
           }
         },
         "required": [
           "rackId",
           "patch"
-        ],
-        "type": "object"
+        ]
       },
       "output": {
         "$ref": "#/schemas/EmptyObject"
@@ -7247,7 +7299,8 @@ export const AGENT_CATALOG: AgentCatalog = {
           "input": {
             "rackId": 7,
             "patch": {
-              "uid": "1213288274"
+              "name": "Strings",
+              "outputTarget": 0
             }
           }
         }
@@ -12849,7 +12902,8 @@ export const ENGINE_OPERATION_EXAMPLES = {
     {
       "rackId": 7,
       "patch": {
-        "uid": "1213288274"
+        "name": "Strings",
+        "outputTarget": 0
       }
     }
   ],

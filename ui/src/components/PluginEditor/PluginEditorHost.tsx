@@ -101,16 +101,23 @@ function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+// track is null for a RACK-owned instrument (SPEC §5.9) — it has no owning track, so
+// the track-scoped affordances (automation lane, sidechain source, instrument panel)
+// switch off rather than aim at the wrong channel. Missing the rack arm here made the
+// in-app editor close itself the instant it opened for any rack instrument.
 function findInstance(
   project: Project | null,
   instanceId: number,
-): { track: Track; instance: PluginInstance } | null {
+): { track: Track | null; instance: PluginInstance } | null {
   if (!project) return null;
   const all = [...project.tracks, project.masterTrack];
   for (const track of all) {
     for (const instance of track.inserts) {
       if (instance.instanceId === instanceId) return { track, instance };
     }
+  }
+  for (const entry of project.rack ?? []) {
+    if (entry.plugin.instanceId === instanceId) return { track: null, instance: entry.plugin };
   }
   return null;
 }
@@ -205,7 +212,7 @@ function EditorWindow({ instanceId, stackIndex }: { instanceId: number; stackInd
   const sidechainSource = found?.instance.sidechainSource ?? 0;
   // Tracks eligible as a sidechain key: anything but the compressor's own owner track.
   const scOptions = useMemo(() => {
-    const ownerId = found?.track.id;
+    const ownerId = found?.track?.id;
     const opts = [{ value: "0", label: "Sidechain: none" }];
     for (const t of project?.tracks ?? [])
       if (t.id !== ownerId) opts.push({ value: String(t.id), label: `SC: ${t.name}` });
@@ -415,9 +422,9 @@ function EditorWindow({ instanceId, stackIndex }: { instanceId: number; stackInd
         {
           label: "Add automation lane",
           icon: "sliders",
-          disabled: owner === null,
+          disabled: owner === null || owner.track === null, // rack instruments have no lane owner
           onClick: () => {
-            if (!owner) return;
+            if (!owner?.track) return;
             setAutomation(owner.track.id, ParamRef.plugin(instanceId, p.id), {})
               .then(() => showNote(`Automation lane added for "${p.name}".`))
               .catch((err) => showNote(`Add automation failed: ${errText(err)}`));
@@ -737,7 +744,7 @@ function EditorWindow({ instanceId, stackIndex }: { instanceId: number; stackInd
               <span>This plugin exposes no parameters.</span>
             )}
           </div>
-        ) : customActive && found !== null ? (
+        ) : customActive && found !== null && found.track !== null ? (
           <InstrumentEditor
             uid={found.instance.uid}
             params={params}

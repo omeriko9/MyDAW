@@ -1557,6 +1557,16 @@ The approved agent/MCP design is `llm_feature.md`; its implementation journey is
   reads carrying the engine revision; `agent/batch` — an atomic group of ≤64 catalog-approved
   `cmd/*` operations with `expectedRevision`, full rollback, one coalesced broadcast, and one
   undo entry. Routed in `Api::dispatch`; `agent/batch` is busy-guarded like `cmd/*`.
+- **Rack instruments are part of the agent's world (2026-08-13).** Anything that enumerates
+  plugin instances or resolves a `midiTarget` must walk `project.rack` too (SPEC §5.9), or the
+  agent reports a rack project wrong. Concretely: `agent/query` view `rack` (id, hosted plugin,
+  `outputTarget`, and the `feeders` that play through it); `plugin_instances` carries
+  `owner:"track"|"rack"` and includes rack-owned instances (`where.trackId` still means
+  on-that-track, so it excludes them); `tracks`/`routing` resolve a MIDI routing to
+  `midiTargetKind`/`targetKind` `"track"|"rack"|"missing"` plus the target's name;
+  `project_summary` counts rack instances in `pluginInstanceCount` and reports
+  `rackInstrumentCount`. The unknown-view error names every view, so it is the agent's index —
+  it must list exactly the implemented ones.
 - **MCP endpoint.** `POST /mcp` — JSON-RPC 2.0 over Streamable HTTP, stable revision
   `2025-11-25`, stateless JSON responses (no SSE/session id in v1); `GET /mcp` → 405. Methods:
   `initialize`, `notifications/initialized` (202), `ping`, `tools/list|call`,

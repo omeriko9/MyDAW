@@ -326,8 +326,8 @@ void addTrackFields(FieldSet& fields) {
     static const char* names[] = {
         "id", "index", "kind", "name", "color", "height", "parentId", "channels", "volume",
         "pan", "mute", "solo", "recordArm", "monitor", "inputDevice", "inputChannel",
-        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiOutChannel",
-        "midiOutDevice", "vcaId", "eq",
+        "outputTarget", "frozen", "frozenAssetId", "midiTarget", "midiTargetKind",
+        "midiTargetName", "midiOutChannel", "midiOutDevice", "vcaId", "eq",
         "clipCount", "insertCount", "sendCount", "automationLaneCount",
     };
     fields.insert(std::begin(names), std::end(names));
@@ -336,7 +336,25 @@ void addTrackFields(FieldSet& fields) {
 // index is the track's 1-based position in the arrangement — what a user means by
 // "channel 3". It is not stored on the track (order is the vector's), so the callers
 // below stamp it while walking the list.
-json trackSummary(const Track& track) {
+// Resolves what a track's midiTarget POINTS AT. midiTarget addresses instrument
+// tracks and rack instruments through one shared id space (SPEC §5.9), so the raw
+// number alone never tells an agent which world it landed in — every reader of
+// midiTarget must consult the rack too, or it reports a rack routing as "missing".
+void stampMidiTarget(json& item, const Model& model, uint64_t midiTarget) {
+    if (midiTarget == 0)
+        return;
+    if (const Track* dest = model.trackById(midiTarget)) {
+        item["midiTargetKind"] = "track";
+        item["midiTargetName"] = dest->name;
+    } else if (const RackInstrument* rack = model.rackById(midiTarget)) {
+        item["midiTargetKind"] = "rack";
+        item["midiTargetName"] = rack->name;
+    } else {
+        item["midiTargetKind"] = "missing"; // dangling routing; the UI shows it as unrouted
+    }
+}
+
+json trackSummary(const Model& model, const Track& track) {
     json item{{"id", track.id}, {"kind", trackKindToString(track.kind)},
               {"name", track.name}, {"color", track.color}, {"channels", track.channels},
               {"volume", track.volume}, {"pan", track.pan}, {"mute", track.mute},
@@ -356,8 +374,10 @@ json trackSummary(const Track& track) {
         item["frozen"] = true;
     if (track.frozenAssetId != 0)
         item["frozenAssetId"] = track.frozenAssetId;
-    if (track.midiTarget != 0)
+    if (track.midiTarget != 0) {
         item["midiTarget"] = track.midiTarget;
+        stampMidiTarget(item, model, track.midiTarget);
+    }
     if (track.midiOutChannel > 0)
         item["midiOutChannel"] = track.midiOutChannel;
     if (!track.midiOutDevice.empty())
@@ -573,7 +593,9 @@ json projectSummary(App& app, QueryBudget& budget) {
     std::size_t clipCount = 0;
     std::size_t noteCount = 0;
     std::size_t controllerCount = 0;
-    std::size_t pluginCount = project.masterTrack.inserts.size();
+    // Rack instruments are plugin instances too (SPEC §5.9): counting only track
+    // inserts under-reports every rack project.
+    std::size_t pluginCount = project.masterTrack.inserts.size() + project.rack.size();
     for (const Track& track : project.tracks) {
         clipCount += track.clips.size();
         pluginCount += track.inserts.size();
@@ -604,6 +626,7 @@ json projectSummary(App& app, QueryBudget& budget) {
                 {"assetCount", project.assets.size()},
                 {"markerCount", project.markers.size()},
                 {"pluginInstanceCount", pluginCount},
+                {"rackInstrumentCount", project.rack.size()},
                 {"vcaCount", project.vcas.size()},
                 {"arrangerSectionCount", project.arranger.sections.size()},
                 {"arrangerChainLength", project.arranger.chain.size()},
@@ -626,7 +649,8 @@ json projectSummary(App& app, QueryBudget& budget) {
 FieldSet projectSummaryFields() {
     return FieldSet{"name", "formatVersion", "sampleRate", "path", "dirty", "trackCount",
                     "clipCount", "noteCount", "controllerCount", "assetCount", "markerCount",
-                    "pluginInstanceCount", "vcaCount", "arrangerSectionCount",
+                    "pluginInstanceCount", "rackInstrumentCount", "vcaCount",
+                    "arrangerSectionCount",
                     "arrangerChainLength", "arrangerChainActive", "chordEventCount",
                     "transposeEventCount", "tempoMapCount", "timeSigMapCount",
                     "tempo", "timeSignature", "loop", "grid"};
@@ -727,7 +751,7 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
         if (single) {
             Track* track = app.model.trackById(trackId);
             budget.inspect(track->eq.bands.size(), "track EQ bands");
-            json item = trackSummary(*track);
+            json item = trackSummary(app.model, *track);
             if (const int ix = indexOf(*track))
                 item["index"] = ix;
             items.push_back(std::move(item));
@@ -771,7 +795,7 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 if (hasName && track.name != name)
                     return;
                 budget.inspect(track.eq.bands.size(), "track EQ bands");
-                json item = trackSummary(track);
+                json item = trackSummary(app.model, track);
                 if (const int ix = indexOf(track))
                     item["index"] = ix;
                 items.push_back(std::move(item));
@@ -1107,6 +1131,13 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
             if (track.midiTarget != 0 && (!hasType || type == "midi")) {
                 json item{{"trackId", track.id}, {"trackName", track.name},
                           {"type", "midi"}, {"target", track.midiTarget}};
+                // The target may be an instrument track OR a rack instrument
+                // (one id space, SPEC §5.9) — say which, by name.
+                stampMidiTarget(item, app.model, track.midiTarget);
+                item["targetKind"] = item["midiTargetKind"];
+                item["targetName"] = item.value("midiTargetName", std::string());
+                item.erase("midiTargetKind");
+                item.erase("midiTargetName");
                 if (track.midiOutChannel > 0)
                     item["midiOutChannel"] = track.midiOutChannel; // 1..16 forced channel
                 items.push_back(std::move(item));
@@ -1125,8 +1156,8 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 }
             }
         });
-        fields = {"trackId", "trackName", "type", "target", "midiOutChannel", "sendIndex",
-                  "level", "pre", "enabled"};
+        fields = {"trackId", "trackName", "type", "target", "targetKind", "targetName",
+                  "midiOutChannel", "sendIndex", "level", "pre", "enabled"};
     } else if (args.view == "sends") {
         if (!validateWhereKeys(args.where, {"trackId", "sendIndex", "destTrackId"},
                                errCode, errMsg))
@@ -1204,6 +1235,7 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 if (hasFormat && plugin.format != format)
                     continue;
                 json item = pluginSummary(plugin);
+                item["owner"] = "track";
                 item["trackId"] = track.id;
                 item["trackName"] = track.name;
                 item["slotIndex"] = index;
@@ -1211,10 +1243,81 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                 items.push_back(std::move(item));
             }
         });
+        // Rack-owned instruments are plugin instances too (SPEC §5.9) — omitting them
+        // here made "what plugins are loaded?" answer wrong for every rack project.
+        // where.trackId means "on this track", so it excludes the whole rack.
+        if (!hasTrackId) {
+            budget.inspect(app.model.project.rack.size(), "rack instruments");
+            for (const RackInstrument& entry : app.model.project.rack) {
+                const PluginInstance& plugin = entry.plugin;
+                if (hasInstanceId && plugin.instanceId != instanceId)
+                    continue;
+                if (hasUid && plugin.uid != uid)
+                    continue;
+                if (hasFormat && plugin.format != format)
+                    continue;
+                json item = pluginSummary(plugin);
+                item["owner"] = "rack";
+                item["rackId"] = entry.id;
+                item["rackName"] = entry.name;
+                item["live"] = pluginIsLive(app, plugin.instanceId);
+                items.push_back(std::move(item));
+            }
+        }
         fields = {"instanceId", "uid", "format", "path", "bitness", "name", "version",
                   "sourceHint", "bypass", "wetDry", "stateFile", "sampleAssetId",
-                  "sidechainSource", "parameterValueCount", "trackId", "trackName",
-                  "slotIndex", "live"};
+                  "sidechainSource", "parameterValueCount", "owner", "trackId", "trackName",
+                  "slotIndex", "rackId", "rackName", "live"};
+    } else if (args.view == "rack") {
+        // Rack-owned VST instruments (SPEC §5.9): the third leg of the standard model
+        // (MIDI track = notes only, Instrument track = notes + own VST, RACK = shared
+        // VST instances any number of MIDI tracks route into). `feederTrackIds` is the
+        // answer to "which channels play through this VST".
+        if (!validateWhereKeys(args.where, {"rackId", "uid", "name"}, errCode, errMsg))
+            return json();
+        uint64_t rackId = 0;
+        bool hasRackId = false;
+        std::string uid, name;
+        bool hasUid = false, hasName = false;
+        if (!readId(args.where, "rackId", false, false, rackId, hasRackId, errCode, errMsg) ||
+            !readString(args.where, "uid", uid, hasUid, errCode, errMsg) ||
+            !readString(args.where, "name", name, hasName, errCode, errMsg))
+            return json();
+        if (hasRackId && !app.model.rackById(rackId)) {
+            fail(errCode, errMsg, "not_found", "rackId not found: " + std::to_string(rackId));
+            return json();
+        }
+        budget.inspect(app.model.project.rack.size(), "rack instruments");
+        inspectTracks(app, budget);
+        for (const RackInstrument& entry : app.model.project.rack) {
+            if (hasRackId && entry.id != rackId)
+                continue;
+            if (hasUid && entry.plugin.uid != uid)
+                continue;
+            if (hasName && entry.name != name)
+                continue;
+            json feeders = json::array();
+            for (const Track& track : app.model.project.tracks)
+                if (track.midiTarget == entry.id)
+                    feeders.push_back(json{{"trackId", track.id},
+                                           {"trackName", track.name},
+                                           {"midiOutChannel", track.midiOutChannel}});
+            json item{{"id", entry.id},
+                      {"name", entry.name},
+                      {"outputTarget", entry.outputTarget}, // 0 = master, else bus track id
+                      {"instanceId", entry.plugin.instanceId},
+                      {"uid", entry.plugin.uid},
+                      {"format", entry.plugin.format},
+                      {"pluginName", entry.plugin.name},
+                      {"bitness", entry.plugin.bitness},
+                      {"bypass", entry.plugin.bypass},
+                      {"live", pluginIsLive(app, entry.plugin.instanceId)},
+                      {"feederCount", feeders.size()},
+                      {"feeders", std::move(feeders)}};
+            items.push_back(std::move(item));
+        }
+        fields = {"id", "name", "outputTarget", "instanceId", "uid", "format", "pluginName",
+                  "bitness", "bypass", "live", "feederCount", "feeders"};
     } else if (args.view == "plugin_params") {
         if (!validateWhereKeys(args.where, {"instanceId", "paramId"}, errCode, errMsg))
             return json();
@@ -1608,7 +1711,7 @@ json runAgentQuery(App& app, const json& payload, std::string& errCode,
                  " — valid views: project_summary, tempo_map, time_signature_map, grid, "
                  "loop, tracks, track, clips, clip, notes, controllers, automation, "
                  "markers, arranger, chord_events, transpose_events, assets, vcas, vca, "
-                 "take_folders, takes, routing, sends, plugin_instances, plugin_params, "
+                 "routing, sends, rack, plugin_instances, plugin_params, "
                  "plugin_presets, plugin_registry, transport, engine_status, "
                  "audio_devices, midi_inputs, midi_maps, recent_projects, settings, "
                  "unresolved_plugins, logs");

@@ -2318,6 +2318,26 @@ export const checks = [
         [...document.querySelectorAll(".ir-row:not(.ir-rack-row)")].some(
           (r) => r.textContent.includes("HostRow") && r.querySelector(".ir-route")));
 
+      // The in-app editor must open for a RACK instrument. PluginEditorHost.findInstance
+      // walked tracks+master only, so a rack window mounted and instantly closed itself
+      // (the "instance disappeared" path) — and every built-in rack instrument opens
+      // in-app by design, so Open Editor did nothing at all for them.
+      await s.eval(() => {
+        [...document.querySelectorAll(".ir-rack-row button")]
+          .find((b) => b.textContent.trim() === "Open Editor")?.click();
+        return true;
+      });
+      await s.untilEval("the in-app editor window stays open for the rack instrument", () => {
+        const w = document.querySelector(".pe-window");
+        return !!w && w.textContent.includes("Synth");
+      });
+      // Restore layout: leaving a floating window open shifts every later check's geometry.
+      await s.eval(() => {
+        document.querySelector(".pe-window [aria-label='Close editor']")?.click();
+        return true;
+      });
+      await s.untilEval("and it closes again", () => !document.querySelector(".pe-window"));
+
       // Clean up: remove the rack instrument (engine clears the feeder) + the tracks.
       await s.probe("cmd/rack.remove", { rackId: after.rack[0].id });
       await s.probe("cmd/track.remove", { trackId: trk.id });
