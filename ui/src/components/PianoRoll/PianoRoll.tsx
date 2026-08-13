@@ -345,6 +345,33 @@ function localPt(e: { clientX: number; clientY: number; currentTarget: Element }
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
+/** What the notes-move handler reads off a pointer event. Structural, so a real
+ *  React.PointerEvent satisfies it and the edge-auto-scroll loop can replay the last
+ *  pointer position every frame without forging a DOM event. */
+interface PrPointerLike {
+  clientX: number;
+  clientY: number;
+  shiftKey: boolean;
+  currentTarget: HTMLCanvasElement;
+}
+
+/** Edge auto-scroll shape, matching the arrangement: it fires only once the gesture
+ *  reaches the edge (INNER), ramps to full speed RAMP px beyond it, and MAX is px per
+ *  SECOND — per-second, not per-frame, so the rate is what the user sees rather than
+ *  whatever the display ticks at. A fat inner band hijacks drags that merely finish
+ *  near the border. */
+const PR_AUTOSCROLL_INNER = 6;
+const PR_AUTOSCROLL_RAMP = 60;
+const PR_AUTOSCROLL_MAX = 1300;
+
+function edgePull(client: number, lo: number, hi: number): number {
+  if (client < lo + PR_AUTOSCROLL_INNER)
+    return -Math.min(1, (lo + PR_AUTOSCROLL_INNER - client) / PR_AUTOSCROLL_RAMP) * PR_AUTOSCROLL_MAX;
+  if (client > hi - PR_AUTOSCROLL_INNER)
+    return Math.min(1, (client - (hi - PR_AUTOSCROLL_INNER)) / PR_AUTOSCROLL_RAMP) * PR_AUTOSCROLL_MAX;
+  return 0;
+}
+
 /* ============================================================================
  * Zoom pill (UI_IMPROVE.md §1.1) — subscribes to the Editor's render-free view
  * ref via an external-store bridge (notified from clampView). 100% = the
@@ -743,10 +770,74 @@ function Editor({ track, clip }: EditorProps) {
     v.scrollY = M.clamp(v.scrollY, 0, Math.max(0, M.NUM_PITCHES * v.rowH - h));
     persisted.zoomX = v.zoomX;
     persisted.rowH = v.rowH;
+    // Observability seam: the view lives in a ref (never React state, never persisted),
+    // so nothing outside this component can see a scroll. Mirroring it onto the canvas
+    // as data-* costs one attribute write per view change and is what lets the browser
+    // rig assert on edge auto-scroll at all.
+    if (el) {
+      el.dataset.scrollX = String(Math.round(v.scrollX));
+      el.dataset.scrollY = String(Math.round(v.scrollY));
+    }
     savePrefDebounced("pianoRoll.view", persisted);
     for (const l of [...zoomListeners]) l();
   };
   clampViewRef.current = clampView;
+
+  /* ---- edge auto-scroll while a note gesture is live ---- */
+  const prScrollRef = useRef<{ raf: number | null; last: PrPointerLike | null; t: number }>({
+    raf: null,
+    last: null,
+    t: 0,
+  });
+
+  const prStopAutoScroll = () => {
+    const a = prScrollRef.current;
+    if (a.raf !== null) cancelAnimationFrame(a.raf);
+    a.raf = null;
+    a.last = null;
+    a.t = 0;
+  };
+
+  const prAutoScroll = (e: PrPointerLike) => {
+    const a = prScrollRef.current;
+    a.last = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey,
+               currentTarget: e.currentTarget };
+    if (a.raf !== null) return; // running; it reads .last each frame
+    a.t = 0;
+    // `raf` stays non-null for the loop's whole life: the replay below re-enters
+    // prAutoScroll, and clearing the id first would spawn a SECOND chain every frame —
+    // measured at 59x the intended speed in the arrangement before this was pinned.
+    const step = (now: number) => {
+      const cur = prScrollRef.current;
+      const pt = cur.last;
+      const stop = () => {
+        cur.raf = null;
+        cur.t = 0;
+      };
+      if (!pt || !gestureRef.current) return stop();
+      // Seconds since the last frame, capped so a stalled tab cannot teleport the view.
+      const dt = cur.t === 0 ? 1 / 60 : Math.min(0.05, (now - cur.t) / 1000);
+      cur.t = now;
+      const r = pt.currentTarget.getBoundingClientRect();
+      const dx = edgePull(pt.clientX, r.left, r.right) * dt;
+      const dy = edgePull(pt.clientY, r.top, r.bottom) * dt;
+      if (dx === 0 && dy === 0) return stop(); // back inside — idle until it leaves again
+      const v = viewRef.current;
+      const before = { x: v.scrollX, y: v.scrollY };
+      v.scrollX += dx;
+      v.scrollY += dy;
+      clampViewRef.current();
+      if (v.scrollX !== before.x || v.scrollY !== before.y) {
+        // Replay at the same SCREEN point: post-scroll it means a different beat/pitch,
+        // which is what keeps the marquee (or the dragged notes) extending.
+        onNotesMove(pt);
+      }
+      cur.raf = requestAnimationFrame(step);
+    };
+    a.raf = requestAnimationFrame(step);
+  };
+
+  useEffect(() => prStopAutoScroll, []);
 
   /* ---- playhead overlay (transportBus + raf while playing — never react state) ---- */
   const transportRef = useRef<{ ev: TransportEvent; at: number } | null>(
@@ -1542,12 +1633,16 @@ function Editor({ track, clip }: EditorProps) {
     }
   };
 
-  const onNotesMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const onNotesMove = (e: PrPointerLike) => {
     const el = e.currentTarget;
     const { x, y } = localPt(e);
     const g = gestureRef.current;
     const v = viewRef.current;
     const c = clipRef.current;
+    // A gesture that runs past the visible grid drags the view with it, so a marquee
+    // (or a note drag) can reach material that is off-screen when it starts — the same
+    // Cubase behaviour the arrangement has (Omer, 2026-08-13). Pan scrolls itself.
+    if (g && g.kind !== "pan") prAutoScroll(e);
 
     if (!g) {
       hideDragHud();
@@ -1833,6 +1928,7 @@ function Editor({ track, clip }: EditorProps) {
   const onNotesUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const el = e.currentTarget;
     const g = gestureRef.current;
+    prStopAutoScroll();
     if (!g) return;
     gestureRef.current = null;
     previewOff();

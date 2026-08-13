@@ -2656,6 +2656,120 @@ export const checks = [
   },
 
   {
+    id: "edge-autoscroll-and-selected-clip-on-top",
+    title: "a gesture at the edge scrolls the view (arrange + piano roll), and the selected clip is the topmost one",
+    area: "timeline",
+    guards: "2026-08-13 (Omer): (a) a marquee/drag that leaves the visible grid must pull the view after it, in BOTH the arrangement and the piano roll, or you can only select what already fits on screen; (b) overlapping clips need the SELECTED one on top — draw order and hit order share stackedClips(), so what looks topmost is what a click grabs. The scroll rate is per-SECOND: the first cut re-entered its own rAF loop every frame and ran 59x too fast, which no static reading would have caught.",
+    run: async (s, tt) => {
+      const ZOOM_X = 32;
+      await s.eval(`(() => {
+        localStorage.setItem("mydaw.ui.tool", JSON.stringify("select"));
+        localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 }));
+        return true;
+      })()`);
+      const trk = (await s.probe("cmd/track.add", { kind: "midi", name: "EdgeScroll" })).payload.track;
+      // Overlapping pair (A 0..8 under, B 4..12 over) + a long clip that gives the view
+      // somewhere to scroll to.
+      const A = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 0, lengthBeats: 8, name: "Under", notes: [{ pitch: 60, startBeat: 0, lengthBeats: 1, velocity: 100 }] })).payload.clip;
+      const B = (await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 4, lengthBeats: 8, name: "Over", notes: [] })).payload.clip;
+      await s.probe("cmd/clip.addMidi", { trackId: trk.id, startBeat: 12, lengthBeats: 400, name: "Long", notes: [{ pitch: 60, startBeat: 0, lengthBeats: 1, velocity: 100 }, { pitch: 67, startBeat: 380, lengthBeats: 1, velocity: 100 }] });
+      await s.reload();
+
+      const g = JSON.parse(await s.eval(`(() => {
+        const row = [...document.querySelectorAll(".tlh-row")].find((r) => r.textContent.trim().startsWith("EdgeScroll"));
+        const rb = row.getBoundingClientRect();
+        const cv = document.querySelector("canvas.tl-clipcanvas").getBoundingClientRect();
+        return JSON.stringify({ rowY: rb.top + rb.height / 2, left: cv.left, right: cv.right });
+      })()`));
+      const xOf = (beat) => g.left + beat * ZOOM_X;
+      // The viewport pref is debounced 300 ms and the timer RESETS on every change, so it
+      // only lands after the gesture stops — always read it AFTER the release.
+      const scrollX = async () => {
+        await new Promise((r) => setTimeout(r, 450));
+        return Number(await s.eval(`JSON.parse(localStorage.getItem("mydaw.ui.viewport") || "{}").scrollX ?? -1`));
+      };
+      const press = (x, y) => s.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      const moveTo = (x, y) => s.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+      const release = (x, y) => s.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0 });
+
+      /* --- (a1) the piano roll pulls its view when a gesture leaves the grid ---
+         Runs FIRST, on a pristine view: which clip a dbl-click opens depends on the
+         arrangement scroll, and a short clip has nothing to scroll (0 -> 0 reads like
+         a broken feature when it is really a broken fixture). */
+      await s.click(xOf(13), g.rowY, { clicks: 2 }); // open the 400-beat clip in the piano roll
+      await s.untilEval("the piano roll mounts", () => !!document.querySelector(".pr-notes-wrap canvas"));
+      // The dock resizes as it opens: read the canvas rect only once it stops moving, or
+      // the press lands where the canvas WAS.
+      await s.until("the piano roll canvas settles", async () => {
+        const a1 = await s.eval(`(() => JSON.stringify(document.querySelector(".pr-notes-wrap canvas").getBoundingClientRect()))()`);
+        await new Promise((r) => setTimeout(r, 120));
+        const a2 = await s.eval(`(() => JSON.stringify(document.querySelector(".pr-notes-wrap canvas").getBoundingClientRect()))()`);
+        return a1 === a2;
+      });
+      const pr = JSON.parse(await s.eval(`(() => {
+        const r = document.querySelector(".pr-notes-wrap canvas").getBoundingClientRect();
+        return JSON.stringify({ left: r.left, right: r.right, midY: r.top + r.height / 2 });
+      })()`));
+      // The piano roll's view lives in a ref, so clampView mirrors it onto the canvas as
+      // data-scroll-x — the only thing outside the component that can see a scroll.
+      const prScroll = () => s.eval(`(() => {
+        const c = document.querySelector(".pr-notes-wrap canvas");
+        return String(c && c.dataset.scrollX !== undefined ? c.dataset.scrollX : "missing");
+      })()`);
+      const prBefore = Number(await prScroll());
+      tt.ok(Number.isFinite(prBefore), `the piano roll reports its scroll (${prBefore})`);
+      await press(pr.left + 120, pr.midY);
+      await moveTo(pr.right + 40, pr.midY);
+      await new Promise((r) => setTimeout(r, 500));
+      await release(pr.right + 40, pr.midY);
+      const prAfter = Number(await prScroll());
+      tt.ok(prAfter > prBefore + 100,
+        `holding a marquee at the piano roll's right edge scrolled it (${prBefore} -> ${prAfter})`);
+      tt.ok(prAfter - prBefore < 4000, `at a sane rate (${prAfter - prBefore} px in ~0.5 s)`);
+
+
+      /* --- (a1) arrangement: hold a marquee at the right edge --- */
+      await press(xOf(20), g.rowY);
+      await moveTo(g.right + 40, g.rowY);
+      await new Promise((r) => setTimeout(r, 500));
+      await release(g.right + 40, g.rowY);
+      const right = await scrollX();
+      tt.ok(right > 200, `holding at the right edge scrolled the arrangement (scrollX ${right})`);
+      // ~1400 px/s by design; a frame-rate-driven loop blows straight past this.
+      tt.ok(right < 4000, `and at a sane rate, not a frame-count runaway (${right} px in ~0.5 s)`);
+
+      /* --- (a2) arrangement: hold at the left edge to come back --- */
+      await press(g.left + 220, g.rowY);
+      await moveTo(g.left - 40, g.rowY);
+      await new Promise((r) => setTimeout(r, 500));
+      await release(g.left - 40, g.rowY);
+      const back = await scrollX();
+      tt.ok(back < right, `holding at the left edge scrolled back (${right} -> ${back})`);
+
+      /* --- (b) the selected clip is the topmost one in an overlap --- */
+      await s.eval(`(() => { localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 })); return true; })()`);
+      await s.reload();
+      const startsOf = async () => {
+        const p = (await s.probe("session/hello", { clientName: "smoke" })).payload.project;
+        const t = p.tracks.find((x) => x.id === trk.id);
+        return Object.fromEntries(t.clips.map((c) => [c.id, c.startBeat]));
+      };
+      await s.click(xOf(1), g.rowY); // a beat only the UNDER clip covers -> selects it
+      const s0 = await startsOf();
+      await s.drag([xOf(6), g.rowY], [xOf(6) + 2 * ZOOM_X, g.rowY], 10); // grab inside the overlap
+      await s.until("the overlap drag grabbed the SELECTED clip, not the later one", async () => {
+        const s1 = await startsOf();
+        return s1[A.id] > s0[A.id] + 1.5 && Math.abs(s1[B.id] - s0[B.id]) < 1e-6;
+      });
+
+      // Restore the rig: close the piano roll's clip and drop the scratch track.
+      await s.probe("cmd/track.remove", { trackId: trk.id });
+      await s.eval(`(() => { localStorage.setItem("mydaw.ui.viewport", JSON.stringify({ zoomX: ${ZOOM_X}, zoomY: 16, scrollX: 0, scrollY: 0 })); return true; })()`);
+      await s.reload();
+    },
+  },
+
+  {
     id: "track-selection-survives-canvas-clicks",
     title: "a selected track stays selected when you click the arrangement, and the track list clears it",
     area: "timeline-selection",

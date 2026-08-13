@@ -236,6 +236,39 @@ function laneSegmentAt(
  * Drag state (all refs — never React state; local preview only, SPEC §5.8)
  * ========================================================================= */
 
+/**
+ * A row's clips in STACKING order — bottom first, topmost LAST.
+ *
+ * Overlapping clips need one of them to be the readable one, and that has to be the
+ * one you picked: selecting a clip brings it to the front (Omer, 2026-08-13). Draw
+ * and hit-test share this list — the draw loop paints it in order, hitTest walks it
+ * backwards — so what looks topmost is also what a click lands on. The sort is stable,
+ * so unselected clips keep their timeline order underneath.
+ */
+function stackedClips<T extends { id: number }>(clips: T[], selected: Set<number>): T[] {
+  if (clips.length < 2) return clips;
+  let any = false;
+  for (const c of clips)
+    if (selected.has(c.id)) {
+      any = true;
+      break;
+    }
+  if (!any) return clips;
+  return [...clips].sort((a, b) => Number(selected.has(a.id)) - Number(selected.has(b.id)));
+}
+
+/** The part of a pointer event the move handler actually reads. Structural, so a real
+ *  React.PointerEvent satisfies it — and so the auto-scroll loop can replay the last
+ *  pointer position frame after frame without a synthetic DOM event. */
+interface PointerLike {
+  clientX: number;
+  clientY: number;
+  shiftKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
 interface MoveOrigin {
   trackId: number;
   startBeat: number;
@@ -748,7 +781,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         continue;
       }
 
-      for (const clip of track.clips) {
+      for (const clip of stackedClips(track.clips, selSet)) {
         if (row.kind === "take" && (clip.lane ?? 0) !== row.lane) continue;
         if (hideOriginals?.has(clip.id)) continue;
         let startBeat = clip.startBeat;
@@ -1087,6 +1120,87 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
   /* -------------------------------------------------------------- hit tests */
 
+  /* ------------------------------------------------------ edge auto-scroll */
+  // While a gesture is live, a pointer at (or past) the canvas edge scrolls the view
+  // and REPLAYS the gesture at the same screen point every frame, so the marquee keeps
+  // growing / the dragged clip keeps tracking as new material scrolls in.
+  const autoScrollRef = useRef<{ raf: number | null; last: PointerLike | null; t: number }>({
+    raf: null,
+    last: null,
+    t: 0,
+  });
+
+  // px per SECOND at full deflection, not per frame: the rate must be what the user sees,
+  // not whatever the display (or a headless test rig) happens to tick at.
+  // Triggers only when the gesture reaches the edge — "a selection that goes OUT of the
+  // visible grid", not one that merely ends near it. A fat inner band (the first cut used
+  // 48px) hijacks ordinary drags that finish close to the border: it silently scrolled the
+  // view under three other browser-rig gestures before this was narrowed.
+  const edgeVelocity = (client: number, lo: number, hi: number): number => {
+    const INNER = 6; // px inside the edge that still count as "at the edge"
+    const RAMP = 60; // px beyond it to reach full speed
+    const MAX = 1400; // px per second
+    if (client < lo + INNER) return -Math.min(1, (lo + INNER - client) / RAMP) * MAX;
+    if (client > hi - INNER) return Math.min(1, (client - (hi - INNER)) / RAMP) * MAX;
+    return 0;
+  };
+
+  const stopAutoScroll = (): void => {
+    const a = autoScrollRef.current;
+    if (a.raf !== null) cancelAnimationFrame(a.raf);
+    a.raf = null;
+    a.last = null;
+    a.t = 0;
+  };
+
+  const autoScrollTick = (e: PointerLike): void => {
+    const a = autoScrollRef.current;
+    a.last = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey,
+               altKey: e.altKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey };
+    if (a.raf !== null) return; // already running; it reads a.last each frame
+    a.t = 0;
+    // NOTE: `raf` stays non-null for the whole life of the loop. The replay below calls
+    // back into onPointerMove -> autoScrollTick, and if the id were cleared first that
+    // re-entry would start a SECOND chain every frame — measured at 59x the intended
+    // speed before this was pinned (2026-08-13).
+    const step = (now: number): void => {
+      const cur = autoScrollRef.current;
+      const pt = cur.last;
+      const el = canvasRef.current;
+      const st = stateRef.current;
+      const proj = st.project;
+      const stop = (): void => {
+        cur.raf = null;
+        cur.t = 0;
+      };
+      if (!pt || !el || !proj || !dragRef.current) return stop();
+      // Seconds since the previous frame, capped so a stalled tab cannot teleport the view.
+      const dt = cur.t === 0 ? 1 / 60 : Math.min(0.05, (now - cur.t) / 1000);
+      cur.t = now;
+      const r = el.getBoundingClientRect();
+      const dx = edgeVelocity(pt.clientX, r.left, r.right) * dt;
+      const dy = edgeVelocity(pt.clientY, r.top, r.bottom) * dt;
+      if (dx === 0 && dy === 0) return stop(); // back inside: idle until it leaves again
+      const { width: w, height: h } = sizeRef.current;
+      const maxX = Math.max(0, contentBeats(proj) * st.vp.zoomX - w);
+      const maxY = Math.max(0, rowsBottom(st.rows) + 96 - h);
+      const s = useStore.getState();
+      const scrollX = clamp(s.viewport.scrollX + dx, 0, maxX);
+      const scrollY = clamp(s.viewport.scrollY + dy, 0, maxY);
+      if (scrollX !== s.viewport.scrollX || scrollY !== s.viewport.scrollY) {
+        noteManualScroll(); // "J" follow stands down for the gesture, like a pan
+        s.setViewport({ scrollX, scrollY });
+        // Re-apply the gesture at the same SCREEN point: after the scroll it means a
+        // different beat/row, which is exactly what makes the marquee keep extending.
+        onPointerMove(pt);
+      }
+      cur.raf = requestAnimationFrame(step);
+    };
+    a.raf = requestAnimationFrame(step);
+  };
+
+  useEffect(() => stopAutoScroll, []);
+
   const localPoint = (clientX: number, clientY: number): { vx: number; cy: number } => {
     const el = canvasRef.current;
     const r = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
@@ -1099,10 +1213,12 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
     const row = rowAtY(rws, cy);
     if (!row || (row.kind !== "track" && row.kind !== "take")) return null;
     const yIn = cy - row.top;
-    const clips =
+    const clips = stackedClips(
       row.kind === "take"
         ? row.track.clips.filter((c) => (c.lane ?? 0) === row.lane)
-        : row.track.clips;
+        : row.track.clips,
+      new Set(sel.clipIds), // same stacking the draw uses: topmost drawn = topmost clicked
+    );
     for (let i = clips.length - 1; i >= 0; i--) {
       const clip = clips[i];
       const lenBeats = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
@@ -1599,9 +1715,13 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
 
   /* ---------------------------------------------------------- pointer move */
 
-  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+  const onPointerMove = (e: PointerLike): void => {
     const d = dragRef.current;
     const { vx, cy } = localPoint(e.clientX, e.clientY);
+    // Edge auto-scroll: a gesture that runs past the visible grid drags the view with
+    // it, so a marquee (or a clip move) can reach material that is off-screen when the
+    // gesture starts — Cubase behaviour (Omer, 2026-08-13). Pan drives the scroll itself.
+    if (d && d.kind !== "pan") autoScrollTick(e);
     if (!d) {
       hideDragHud();
       updateHover(vx, cy);
@@ -1884,6 +2004,7 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>): void => {
     const d = dragRef.current;
     dragRef.current = null;
+    stopAutoScroll();
     hideDragHud();
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
