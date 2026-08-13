@@ -176,6 +176,12 @@ try {
   report("soloing the FEEDER keeps its part and drops the host's own parts",
     fOnF > 500 && fOnH < 50, `host=${fOnH} feeder=${fOnF}`);
   await req("cmd/track.set", { trackId: hFeed.id, patch: { solo: false } });
+  // RELEASING solo must restore the whole mix. The source sets live in the PLAN, so a
+  // solo change has to rebuild — the mute fast path alone left the last soloed track's
+  // bake in place and the mix stayed stuck on it (Omer, minutes after the first fix).
+  const relH = await winRender(...winH), relF = await winRender(...winF);
+  report("clearing solo brings every shared source back",
+    relH > 500 && relF > 500, `host=${relH} feeder=${relF}`);
   for (const id of [hFeed.id, host.id, sA.id, sB.id]) await req("cmd/track.remove", { trackId: id });
 
   const aud = (await req("cmd/track.add", { kind: "audio", name: "Other" })).track;

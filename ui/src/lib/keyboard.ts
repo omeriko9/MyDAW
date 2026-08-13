@@ -68,6 +68,7 @@
  */
 
 import { useStore, transportBus } from "../store/store";
+import { shouldFollow } from "./followPlayhead";
 import { confirmRemoveTracks } from "./trackActions";
 import type { FocusedPane, PanelsState, PoppedOutTab } from "../store/store";
 import {
@@ -561,7 +562,21 @@ function zoomH(factor: number): void {
   if (activeContext()?.zoomH?.(factor)) return;
   const s = useStore.getState();
   const zoomX = Math.min(MAX_ZOOM_X, Math.max(MIN_ZOOM_X, s.viewport.zoomX * factor));
-  if (zoomX !== s.viewport.zoomX) s.setViewport({ zoomX });
+  if (zoomX === s.viewport.zoomX) return;
+  // Zoom around the PLAYHEAD while follow-playhead is on (Omer, 2026-08-13). Changing
+  // zoomX alone keeps the same scrollX, so every beat slides to a new screen x — and the
+  // playhead lands outside the follow dead zone, which the next transport tick corrects
+  // with a page jump. Two moves, one keypress: the whole arrangement lurched. Pinning the
+  // playhead to the screen position it already occupies keeps it inside the dead zone, so
+  // there is nothing left for follow to correct.
+  const beat = transportBus.last?.beat;
+  if (shouldFollow(s.followPlayhead) && typeof beat === "number") {
+    const screenX = beat * s.viewport.zoomX - s.viewport.scrollX;
+    const scrollX = Math.max(0, beat * zoomX - screenX);
+    s.setViewport({ zoomX, scrollX });
+    return;
+  }
+  s.setViewport({ zoomX });
 }
 
 /** Shift+G/H vertical zoom — focused pane first, else track-height scale (layout

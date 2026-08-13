@@ -1713,8 +1713,23 @@ json CommandProcessor::trackSet(const json& p, bool transient, CmdResult& r) {
         mixerOnly = false;
     }
 
-    if (muteSolo)
+    if (muteSolo) {
         pushEffectiveMutes();
+        // Solo also decides which MIDI SOURCES get baked into a shared instrument node
+        // (SPEC §7 solo-in-place: `audible` vs `sources`), and that lives in the PLAN,
+        // not in a mute gain. Without a rebuild the last soloed track's bake survives
+        // the solo being cleared — the mix stays stuck on it (Omer, 2026-08-13).
+        // Only projects that actually SHARE a sound source can be affected, so the
+        // ordinary mute/solo click keeps the rebuild-free fast path.
+        bool sharedSources = false;
+        for (const Track& x : m.project.tracks)
+            if (x.midiTarget != 0) {
+                sharedSources = true;
+                break;
+            }
+        if (sharedSources)
+            r.structural = true;
+    }
     if (!any) {
         r.mutated = false;
         return json::object();
