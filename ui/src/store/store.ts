@@ -538,7 +538,13 @@ export function dedupePlugins(all: PluginInfo[]): PluginInfo[] {
     // A duplicate whose canonical copy is missing from this list (blacklist filtering,
     // a targeted rescan) must still be shown rather than vanish with it.
     if (p.duplicateOf && !canonical.has(p.duplicateOf)) return true;
-    const key = `${p.contentKey}|${p.blacklisted ? 1 : 0}`;
+    // The key must include the plugin's identity WITHIN the file, not just the file.
+    // A SHELL plugin (WaveShell hosts every Waves plug-in from one binary; VST2 shells
+    // in general) puts hundreds of different plugins behind one contentKey — keying on
+    // the file alone kept exactly one of them and silently hid the rest, which is why
+    // "Enigma" could not be found anywhere in the browser (Omer, 2026-08-13). Copies of
+    // the same file still collapse: identical binaries expose identical uids.
+    const key = `${p.contentKey}|${p.uid}|${p.blacklisted ? 1 : 0}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

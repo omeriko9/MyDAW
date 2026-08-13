@@ -35,6 +35,34 @@ describe("dedupePlugins", () => {
     expect(out.map((x) => x.path)).toEqual(["C:/vst/Orchestral.dll"]);
   });
 
+  it("keeps every plugin inside a SHELL binary", () => {
+    // WaveShell hosts the entire Waves catalogue from ONE file: same path, same
+    // contentKey, different uids. Keying the dedupe on the file alone kept exactly one
+    // of them, so "Enigma" was missing from the browser everywhere (Omer, 2026-08-13).
+    const shell = { path: "C:/VST3/WaveShell1-VST3 15.0_x64.vst3", contentKey: "8410624-ws" };
+    const out = dedupePlugins([
+      p({ ...shell, uid: "565354454E4753656E69676D61207374", name: "Enigma Stereo" }),
+      p({ ...shell, uid: "565354454E4758656E69676D61206D6F", name: "Enigma Mono/Stereo" }),
+      p({ ...shell, uid: "565354454E475271313073746572656F", name: "Q10 Stereo" }),
+    ]);
+    expect(out.map((x) => x.name)).toEqual(["Enigma Stereo", "Enigma Mono/Stereo", "Q10 Stereo"]);
+  });
+
+  it("still collapses COPIES of a shell binary, per hosted plugin", () => {
+    const a = { contentKey: "8410624-ws", path: "C:/VST3/WaveShell.vst3" };
+    const b = { contentKey: "8410624-ws", path: "C:/backup/WaveShell.vst3", duplicateOf: "C:/VST3/WaveShell.vst3" };
+    const out = dedupePlugins([
+      p({ ...a, uid: "enigma", name: "Enigma" }),
+      p({ ...a, uid: "q10", name: "Q10" }),
+      p({ ...b, uid: "enigma", name: "Enigma" }),
+      p({ ...b, uid: "q10", name: "Q10" }),
+    ]);
+    expect(out.map((x) => `${x.name}@${x.path}`)).toEqual([
+      "Enigma@C:/VST3/WaveShell.vst3",
+      "Q10@C:/VST3/WaveShell.vst3",
+    ]);
+  });
+
   it("never collapses a DIFFERENT build of the same plugin", () => {
     // The v1.03 Orchestral: same name, same uid, different bytes — two real choices.
     const out = dedupePlugins([
