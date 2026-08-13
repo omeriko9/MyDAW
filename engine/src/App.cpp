@@ -1543,12 +1543,31 @@ int App::run() {
         // Child "new window" instances self-terminate once their browser tab goes away, so
         // closing the tab doesn't leave an orphan engine running. A longer grace before the
         // first tab ever connects covers a browser that failed to open.
-        if (opts.exitWhenIdle) {
+        // Closing the last tab shuts the engine down too (Omer, 2026-08-13) — an app
+        // whose window is gone should not linger in Task Manager. The MAIN engine only
+        // does this when it opened a browser: every test harness runs --no-browser and
+        // connects/disconnects at will, and killing those engines mid-suite would be a
+        // spectacular own goal. A reload also disconnects, hence the grace period.
+        const bool idleExits = opts.exitWhenIdle || !opts.noBrowser;
+        if (idleExits) {
             if (server.wsClientCount() > 0) {
                 everConnected = true;
                 lastClientPresent = now;
             } else if (now - lastClientPresent >= (everConnected ? 15s : 45s)) {
-                Log::info("engine: idle child window (no clients) — exiting");
+                // Save first: this path also catches a browser CRASH, and unsaved work
+                // must survive it. The autosave snapshot is what the recovery flow
+                // (§5.1) offers on the next launch — deliberately not a silent
+                // overwrite of the user's own project file.
+                if (everConnected && projectIO.isDirty()) {
+                    std::string err;
+                    if (projectIO.autosaveNow(model, err))
+                        Log::info("engine: saved a recovery snapshot before the idle exit");
+                    else
+                        Log::warn("engine: recovery snapshot before idle exit failed: %s",
+                                  err.c_str());
+                }
+                Log::info(opts.exitWhenIdle ? "engine: idle child window (no clients) — exiting"
+                                            : "engine: last tab closed (no clients) — exiting");
                 requestStop();
             }
         }
