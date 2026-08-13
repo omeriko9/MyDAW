@@ -612,6 +612,15 @@ export const checks = [
           (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
         await s.untilEval("the table renders its headers", () =>
           document.querySelectorAll(".pm-th").length > 6);
+        // ...and its ROWS. Headers render first; the rows land a beat later and used to
+        // shift every column left by the scrollbar width, so a handle position captured
+        // in that window was 8px stale by the time the drag pressed — the pointerdown
+        // then missed the 8px handle entirely. That was the whole "flaky" failure: it
+        // passed alone (rows arrived after the drag) and failed right after another
+        // Plugin Manager check had warmed the registry (rows arrived DURING it).
+        // The gutter is reserved now, but a check must not race the layout either.
+        await s.untilEval("and its rows, so the layout has settled", () =>
+          document.querySelectorAll(".pm-row").length > 0);
 
         const folder = () => s.eval(`(() => {
           const th = [...document.querySelectorAll(".pm-th")].find(t => t.textContent.trim().startsWith("Folder"));
@@ -634,6 +643,7 @@ export const checks = [
         await s.until("the manager page mounts again", async () =>
           (await s.eval(`!!document.querySelector(".pm-title")`)) === true, { timeout: 30000 });
         await s.untilEval("headers render again", () => document.querySelectorAll(".pm-th").length > 6);
+        await s.untilEval("rows render again", () => document.querySelectorAll(".pm-row").length > 0);
         const afterReload = JSON.parse(await folder());
         tt.ok(afterReload.w > before.w + 100,
           `the widened Folder column persisted (${before.w} -> ${afterReload.w}px)`);

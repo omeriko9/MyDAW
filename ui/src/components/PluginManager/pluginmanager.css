@@ -145,6 +145,11 @@
 .pm-main {
   flex: 1 1 auto;
   overflow: auto;
+  /* Reserve the scrollbar gutter ALWAYS. The rows arrive a moment after the header
+     does, and the scrollbar appearing with them shrank the content box — so every
+     column visibly jumped left the instant the list loaded, and a resize handle
+     grabbed in that window moved out from under the pointer (2026-08-13). */
+  scrollbar-gutter: stable;
   padding: 0 22px;
 }
 
