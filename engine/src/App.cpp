@@ -1446,6 +1446,7 @@ int App::run() {
     auto lastTransport = now, lastMeters = now, lastPump = now, lastAutosave = now,
          lastMidiPump = now, lastExport = now, lastRecNotes = now, lastRecPeaks = now;
     auto lastClientPresent = now; // for --exit-when-idle child instances
+    int lastClientCountLogged = -1;
     bool everConnected = false;
     TransportState lastState = transport.state();
     uint32_t lastWrapSeq = transport.wrapSeq();
@@ -1550,7 +1551,17 @@ int App::run() {
         // spectacular own goal. A reload also disconnects, hence the grace period.
         const bool idleExits = opts.exitWhenIdle || !opts.noBrowser;
         if (idleExits) {
-            if (server.wsClientCount() > 0) {
+            // Say what the timer sees. "It didn't shut down" has exactly two causes —
+            // a client is still attached (another MyDAW tab, e.g. the Plugin Manager
+            // page, or a stale socket) or the countdown never started — and the log
+            // should answer which without a debugger (Omer, 2026-08-14).
+            const int clients = server.wsClientCount();
+            if (clients != lastClientCountLogged) {
+                lastClientCountLogged = clients;
+                Log::info("engine: %d ws client(s) attached%s", clients,
+                          clients == 0 ? " — idle-exit countdown started" : "");
+            }
+            if (clients > 0) {
                 everConnected = true;
                 lastClientPresent = now;
             } else if (now - lastClientPresent >= (everConnected ? 15s : 45s)) {
