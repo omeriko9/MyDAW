@@ -35,6 +35,7 @@ export interface Palette {
   keyText: string;
   keyBorder: string;
   outside: string;
+  clipSpan: string;
   velBg: string;
   noteText: string;
   /** chord-track tone-row wash (translucent accent) */
@@ -62,6 +63,10 @@ const VAR_MAP: Array<[keyof Palette, string, string]> = [
   ["keyText", "--pr-key-text", "#454b59"],
   ["keyBorder", "--pr-key-border", "#868c9b"],
   ["outside", "--pr-outside", "rgba(10,11,14,0.45)"],
+  // Faint "the clip lives here" wash. The grid marks real bars now, so the clip
+  // start no longer has a line of its own — this keeps it readable without
+  // pretending to be musical structure (Omer, 2026-08-14). Theme-overridable.
+  ["clipSpan", "--pr-clip-span", "rgba(255,255,255,0.028)"],
   ["velBg", "--pr-vel-bg", "#191b21"],
   ["noteText", "--pr-note-text", "rgba(13,14,18,0.78)"],
   ["chordTone", "--pr-chord-tone", "rgba(91,140,255,0.10)"],
@@ -324,6 +329,11 @@ export function drawNotesArea(
   /** Chord-track tone highlight (TRACK_TYPES_PLAN §3.7): per CLIP-RELATIVE beat range,
    *  tint the chord-tone rows — the region ends where the next chord begins. */
   chordRegions: ReadonlyArray<{ startBeat: number; endBeat: number; pcs: ReadonlySet<number> }> | null = null,
+  /** Where this clip sits on the TIMELINE. The emphasised grid lines mark real bars, so
+   *  they have to be measured from the project's bar 1 — a clip that starts off-bar was
+   *  drawing its own beat 0 as a barline and every accent after it was wrong
+   *  (Omer, 2026-08-14). */
+  clipStartBeat = 0,
 ): void {
   ctx.clearRect(0, 0, w, h);
 
@@ -363,22 +373,35 @@ export function drawNotesArea(
     if (p % 12 === 0) lineH(ctx, 0, w, M.pitchTop(p, v) + v.rowH);
   }
 
-  /* ---- vertical grid (adaptive: clip-local beats, brief requirement) ---- */
+  /* ---- the clip's own span: a barely-there wash so you can still see where the part
+     begins and ends now that the grid answers to the timeline instead ---- */
+  {
+    const spanEnd = Math.min(w, M.beatToX(clipLengthBeats, v));
+    const spanStart = Math.max(0, M.beatToX(0, v));
+    if (spanEnd > spanStart) {
+      ctx.fillStyle = pal.clipSpan;
+      ctx.fillRect(spanStart, 0, spanEnd - spanStart, h);
+    }
+  }
+
+  /* ---- vertical grid (absolute bars — see clipStartBeat) ---- */
   let effStep = stepBeats;
   while (effStep > 0 && effStep * v.zoomX < 7) effStep *= 2;
   if (effStep > 0) {
     const startBeat = Math.max(0, M.xToBeat(0, v));
     const endBeat = M.xToBeat(w, v);
-    const i0 = Math.floor(startBeat / effStep);
-    const i1 = Math.ceil(endBeat / effStep);
+    // Walk ABSOLUTE beats: the accents belong to the timeline's bars, not to the clip.
+    const i0 = Math.floor((startBeat + clipStartBeat) / effStep);
+    const i1 = Math.ceil((endBeat + clipStartBeat) / effStep);
     const eps = 1e-6;
     for (let i = i0; i <= i1; i++) {
-      const beat = i * effStep;
+      const absBeat = i * effStep;
+      const beat = absBeat - clipStartBeat; // clip-relative, for the pixel mapping
       const x = M.beatToX(beat, v);
       if (x < -1 || x > w + 1) continue;
-      const barPos = beat / beatsPerBar;
+      const barPos = absBeat / beatsPerBar;
       const isBar = Math.abs(barPos - Math.round(barPos)) < eps;
-      const isBeat = Math.abs(beat - Math.round(beat)) < eps;
+      const isBeat = Math.abs(absBeat - Math.round(absBeat)) < eps;
       ctx.strokeStyle = isBar ? pal.gridBar : isBeat ? pal.gridBeat : pal.gridFine;
       lineV(ctx, x, 0, h);
     }

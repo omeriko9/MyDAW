@@ -115,6 +115,18 @@ describe("snapFloor", () => {
     expect(snapFloor(0.49, 0.5)).toBe(0);
   });
 
+  it("snaps to the PROJECT grid, not the clip's own beat 0", () => {
+    // A clip starting at beat 2.25 (off-grid): clip-relative 0.30 is absolute 2.55, which
+    // belongs to the sixteenth at 2.5 -> clip-relative 0.25. Snapping without the origin
+    // would answer 0.25 only by luck; at 1/4 it answers 0 (absolute 2.25), a line the
+    // ruler never draws (Omer, 2026-08-14).
+    expect(snapFloor(0.3, 0.25, 2.25)).toBeCloseTo(0.25, 12);
+    // absolute 2.55 floors to absolute beat 2, i.e. BEFORE the clip start; the call
+    // site clamps that to 0 so a note can never begin outside its clip.
+    expect(snapFloor(0.3, 1, 2.25)).toBeCloseTo(-0.25, 12);
+    expect(snapFloor(0.3, 1, 0)).toBe(0);                    // origin 0 = old behaviour
+  });
+
   it("tolerates float error just below a grid line", () => {
     // 0.1 * 3 = 0.30000000000000004-style error must not floor down a whole step
     expect(snapFloor(0.7 + 0.1, 0.2)).toBeCloseTo(0.8, 12);

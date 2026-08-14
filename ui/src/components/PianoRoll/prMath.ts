@@ -174,8 +174,17 @@ export function gridStep(divBeats: number, triplet: boolean): number {
   return divBeats * (triplet ? 2 / 3 : 1);
 }
 
-export function snapFloor(beat: number, step: number): number {
-  return step > 0 ? Math.floor(beat / step + 1e-9) * step : beat;
+/**
+ * Snap a CLIP-RELATIVE beat down to the grid.
+ *
+ * `origin` is where the clip sits on the timeline: the grid belongs to the PROJECT, so a
+ * clip starting off-bar must still snap to real sixteenths, not to its own beat 0
+ * (Omer, 2026-08-14 — same reason the drawn grid is measured in absolute beats).
+ */
+export function snapFloor(beat: number, step: number, origin = 0): number {
+  if (step <= 0) return beat;
+  const abs = beat + origin;
+  return Math.floor(abs / step + 1e-9) * step - origin;
 }
 
 export function snapRound(beat: number, step: number): number {

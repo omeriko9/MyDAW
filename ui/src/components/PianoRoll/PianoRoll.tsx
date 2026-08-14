@@ -951,6 +951,7 @@ function Editor({ track, clip }: EditorProps) {
         scaleRef.current.pcs,
         velColorsRef.current,
         chordRegionsRef.current,
+        c.startBeat,
       );
     }
     const kEl = keysCv.canvasRef.current;
@@ -1440,7 +1441,7 @@ function Editor({ track, clip }: EditorProps) {
           id: tempId(),
           pitch: pitchAt(y),
           velocity: lastVelRef.current,
-          startBeat: Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step)),
+          startBeat: Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step, clipRef.current.startBeat)),
           lengthBeats: Math.max(M.MIN_NOTE_LEN, drawLenRef.current ?? step),
         },
       ],
@@ -1450,7 +1451,7 @@ function Editor({ track, clip }: EditorProps) {
   const startCreate = (x: number, y: number, free = false) => {
     const v = viewRef.current;
     const step = stepRef.current;
-    const startBeat = Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step));
+    const startBeat = Math.max(0, free ? M.xToBeat(x, v) : M.snapFloor(M.xToBeat(x, v), step, clipRef.current.startBeat));
     const len = Math.max(M.MIN_NOTE_LEN, drawLenRef.current ?? step);
     const pitch = pitchAt(y);
     gestureRef.current = {
@@ -1561,7 +1562,9 @@ function Editor({ track, clip }: EditorProps) {
       requestDraw();
       return;
     }
-    if (!hit && t === "draw") {
+    // Alt+click WRITES, whatever the tool (Omer, 2026-08-14) — the standard DAW
+    // modifier for "draw here" without leaving the select tool.
+    if (!hit && (t === "draw" || e.altKey)) {
       startCreate(x, y, e.shiftKey); // Shift = free-form placement (no grid)
       requestDraw();
       return;
