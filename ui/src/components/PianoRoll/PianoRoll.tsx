@@ -21,7 +21,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import type { CcUpdate, MidiCc, MidiClip, Note, NoteInput, NoteUpdate, Project, Track, TransportEvent } from "../../protocol/types";
 import { transportBus, useStore } from "../../store/store";
 import type { Tool } from "../../store/store";
-import { addMidiClip, editCc, editNotes, extractMidiAutomation, locate, previewNote, quantizeNotes, redo, undo } from "../../store/actions";
+import { addMidiClip, editCc, editNotes, extractMidiAutomation, locate, previewNote, quantizeNotes, redo, undo,
+  resizeClip,
+} from "../../store/actions";
 import { paneVisible, registerKeyContext, zoomToFitPane } from "../../lib/keyboard";
 import {
   isBool,
@@ -648,6 +650,8 @@ function Editor({ track, clip }: EditorProps) {
     scrollY: (M.MAX_PITCH - 66) * persisted.rowH,
   });
   const gestureRef = useRef<Gesture | null>(null);
+  /** In-progress drag of a clip-edge grip in the ruler (clip-relative beats). */
+  const edgeDragRef = useRef<{ edge: "l" | "r"; start: number; length: number; moved: boolean } | null>(null);
   const pressedKeyRef = useRef<number | null>(null);
   /** pointer-hovered key (§8.4 — brightened + named in the keys column) */
   const hoverKeyRef = useRef<number | null>(null);
@@ -961,7 +965,10 @@ function Editor({ track, clip }: EditorProps) {
     const rEl = rulerCv.canvasRef.current;
     const rCtx = rulerCv.ctxRef.current;
     if (rEl && rCtx) {
-      D.drawRuler(rCtx, rEl.clientWidth, rEl.clientHeight, v, c.startBeat, c.lengthBeats, sigMap, pal);
+      D.drawRuler(rCtx, rEl.clientWidth, rEl.clientHeight, v, c.startBeat, c.lengthBeats, sigMap, pal,
+        edgeDragRef.current
+          ? { startBeat: edgeDragRef.current.start, lengthBeats: edgeDragRef.current.length }
+          : null);
     }
     lanesRef.current.forEach((lane, i) => {
       const lEl = laneCvs[i]?.canvasRef.current;
@@ -2382,17 +2389,77 @@ function Editor({ track, clip }: EditorProps) {
       void locate(abs);
     }
   };
+  /** Which clip edge the ruler grips sit on, for the pointer hit test. */
+  const edgeHandleAt = (x: number): "l" | "r" | null => {
+    const v = viewRef.current;
+    const c = clipRef.current;
+    const W = D.PR_EDGE_HANDLE_W;
+    const xs = M.beatToX(0, v);
+    const xe = M.beatToX(c.lengthBeats, v);
+    if (x >= xs && x <= xs + W) return "l";
+    if (x >= xe - W && x <= xe) return "r";
+    return null;
+  };
+
   const onRulerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Clip-edge grips beat the playhead scrub: they are small, deliberate targets
+    // (Omer, 2026-08-14 — trim/extend the part without leaving the piano roll).
+    const { x } = localPt(e);
+    const edge = edgeHandleAt(x);
+    if (edge) {
+      const c = clipRef.current;
+      edgeDragRef.current = { edge, start: 0, length: c.lengthBeats, moved: false };
+      requestDraw();
+      return;
+    }
     seekingRef.current = true;
     lastSeekRef.current = null;
     rulerSeek(e);
   };
   const onRulerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = edgeDragRef.current;
+    if (drag) {
+      const v = viewRef.current;
+      const c = clipRef.current;
+      const step = stepRef.current;
+      const raw = M.xToBeat(localPt(e).x, v);
+      const snapped = e.shiftKey ? raw : M.snapFloor(raw, step, c.startBeat);
+      if (drag.edge === "l") drag.start = Math.min(snapped, c.lengthBeats - step);
+      else drag.length = Math.max(step, snapped);
+      drag.moved = true;
+      requestDraw();
+      return;
+    }
+    if (edgeHandleAt(localPt(e).x)) e.currentTarget.style.cursor = "ew-resize";
+    else if (!seekingRef.current) e.currentTarget.style.cursor = "default";
     if (seekingRef.current) rulerSeek(e);
   };
   const onRulerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = edgeDragRef.current;
+    edgeDragRef.current = null;
+    if (drag) {
+      const c = clipRef.current;
+      if (drag.moved) {
+        // Left edge moves the clip's START on the timeline (notes keep their absolute
+        // positions — the engine rebases them); right edge sets the LENGTH.
+        const req =
+          drag.edge === "l"
+            ? resizeClip(c.id, "l", { newStartBeat: c.startBeat + drag.start })
+            : resizeClip(c.id, "r", { newLengthBeats: drag.length });
+        req.catch((err: unknown) =>
+          showToast(err instanceof Error && err.message ? err.message : "Resize failed", "error"),
+        );
+      }
+      requestDraw();
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      return;
+    }
     seekingRef.current = false;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);

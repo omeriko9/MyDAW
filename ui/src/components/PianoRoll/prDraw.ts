@@ -240,6 +240,9 @@ export function drawKeys(
  * Ruler — ABSOLUTE bars via clip.startBeat offset (brief requirement)
  * ========================================================================= */
 
+/** Width of the clip-edge grips in the ruler; the hit test uses the same number. */
+export const PR_EDGE_HANDLE_W = 7;
+
 export function drawRuler(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -249,6 +252,8 @@ export function drawRuler(
   clipLengthBeats: number,
   timeSigMap: TimeSigEntry[],
   pal: Palette,
+  /** Live drag preview for the clip-edge handles: clip-relative beats. */
+  handlePreview: { startBeat?: number; lengthBeats?: number } | null = null,
 ): void {
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = pal.panel;
@@ -295,6 +300,21 @@ export function drawRuler(
   if (endX < w) {
     ctx.fillStyle = pal.outside;
     ctx.fillRect(Math.max(0, endX), 0, w - Math.max(0, endX), h);
+  }
+
+  // Clip-edge handles (Omer, 2026-08-14): small grips in the ruler at the clip's start
+  // and end, dragged to trim or extend the part without leaving the piano roll. Drawn
+  // last so they sit above the shading, and sized for the pointer, not for looks.
+  const hStart = handlePreview?.startBeat ?? 0;
+  const hEnd = handlePreview?.lengthBeats ?? clipLengthBeats;
+  for (const [beat, side] of [[hStart, -1], [hEnd, 1]] as const) {
+    const x = M.beatToX(beat, v);
+    if (x < -PR_EDGE_HANDLE_W || x > w + PR_EDGE_HANDLE_W) continue;
+    const left = side < 0 ? x : x - PR_EDGE_HANDLE_W;
+    ctx.fillStyle = pal.clipEdge;
+    ctx.fillRect(left, 1, PR_EDGE_HANDLE_W, h - 3);
+    ctx.fillStyle = pal.panel;
+    ctx.fillRect(left + 2, h * 0.3, 1, h * 0.4); // grip line, so it reads as a handle
   }
 
   ctx.strokeStyle = pal.border;
