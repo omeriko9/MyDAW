@@ -783,6 +783,31 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
         continue;
       }
 
+      // "Loop clip forever" (SPEC §6): the repeats the GRAPH will play. Drawn in their
+      // OWN pass, before the per-clip loop, because that loop culls a clip once its own
+      // rectangle leaves the view — which silently took the repeats with it the moment
+      // you scrolled past the original (Omer, 2026-08-14). "Forever" has to mean it.
+      for (const clip of track.clips) {
+        if (clip.loop !== true || hideOriginals?.has(clip.id)) continue;
+        if (row.kind === "take" && (clip.lane ?? 0) !== row.lane) continue;
+        const len = clipLengthBeats(clip, proj.tempoMap, proj.sampleRate);
+        if (len <= 1e-9) continue;
+        const cw2 = len * v.zoomX;
+        const x0 = beatToPx(clip.startBeat, v);
+        // Start at the first repeat that can be on screen instead of counting from 1:
+        // at bar 900 of a two-bar loop that is 450 wasted iterations per frame.
+        const first = Math.max(1, Math.floor(-x0 / cw2));
+        for (let i = first; ; i++) {
+          const gx = x0 + i * cw2;
+          if (gx > w + 2) break;
+          if (gx + cw2 >= -2)
+            drawClip(ctx, {
+              clip, x: gx, y: ry, w: cw2, h: row.height, canvasW: w,
+              color: clip.color ?? track.color, selected: false, ghost: 0.45,
+              project: proj, zoomX: v.zoomX, colors, onPeaksArrive: schedule,
+            });
+        }
+      }
       for (const clip of stackedClips(track.clips, selSet)) {
         if (row.kind === "take" && (clip.lane ?? 0) !== row.lane) continue;
         if (hideOriginals?.has(clip.id)) continue;
@@ -848,21 +873,6 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           colors,
           onPeaksArrive: schedule,
         });
-        // "Loop clip forever" (SPEC §6): the repeats the GRAPH will play, drawn as
-        // ghosts to the right edge of the view. They are not clips — nothing here is
-        // selectable or draggable — which is exactly what the translucency says.
-        if (clip.loop === true && lenBeats > 1e-9 && !hideOriginals?.has(clip.id)) {
-          for (let i = 1; ; i++) {
-            const gx = beatToPx(startBeat + i * lenBeats, v);
-            if (gx > w + 2) break;
-            if (gx + cw >= -2)
-              drawClip(ctx, {
-                clip, x: gx, y: ry, w: cw, h: row.height, canvasW: w,
-                color: clip.color ?? track.color, selected: false, ghost: 0.45,
-                project: proj, zoomX: v.zoomX, colors, onPeaksArrive: schedule,
-              });
-          }
-        }
         // Alt+right-edge repeat preview: translucent whole-clip ghosts end-to-end.
         for (let i = 1; i <= repeatGhosts; i++) {
           const gx = beatToPx(startBeat + i * lenBeats, v);
