@@ -36,6 +36,7 @@ export interface Palette {
   keyBorder: string;
   outside: string;
   clipSpan: string;
+  clipEdge: string;
   velBg: string;
   noteText: string;
   /** chord-track tone-row wash (translucent accent) */
@@ -66,7 +67,8 @@ const VAR_MAP: Array<[keyof Palette, string, string]> = [
   // Faint "the clip lives here" wash. The grid marks real bars now, so the clip
   // start no longer has a line of its own — this keeps it readable without
   // pretending to be musical structure (Omer, 2026-08-14). Theme-overridable.
-  ["clipSpan", "--pr-clip-span", "rgba(255,255,255,0.028)"],
+  ["clipSpan", "--pr-clip-span", "rgba(150,180,255,0.10)"],
+  ["clipEdge", "--pr-clip-edge", "rgba(150,180,255,0.55)"],
   ["velBg", "--pr-vel-bg", "#191b21"],
   ["noteText", "--pr-note-text", "rgba(13,14,18,0.78)"],
   ["chordTone", "--pr-chord-tone", "rgba(91,140,255,0.10)"],
@@ -376,12 +378,20 @@ export function drawNotesArea(
   /* ---- the clip's own span: a barely-there wash so you can still see where the part
      begins and ends now that the grid answers to the timeline instead ---- */
   {
-    const spanEnd = Math.min(w, M.beatToX(clipLengthBeats, v));
-    const spanStart = Math.max(0, M.beatToX(0, v));
+    const x0 = M.beatToX(0, v);
+    const x1 = M.beatToX(clipLengthBeats, v);
+    const spanStart = Math.max(0, x0);
+    const spanEnd = Math.min(w, x1);
     if (spanEnd > spanStart) {
       ctx.fillStyle = pal.clipSpan;
       ctx.fillRect(spanStart, 0, spanEnd - spanStart, h);
     }
+    // ...and mark the BOUNDARIES themselves. A wash alone reads as "slightly different
+    // shade" and the eye slides over it; the edges are what the user is actually looking
+    // for (Omer, 2026-08-14 — the first attempt was too faint to see).
+    ctx.strokeStyle = pal.clipEdge;
+    if (x0 >= -1 && x0 <= w + 1) lineV(ctx, x0, 0, h);
+    if (x1 >= -1 && x1 <= w + 1) lineV(ctx, x1, 0, h);
   }
 
   /* ---- vertical grid (absolute bars — see clipStartBeat) ---- */

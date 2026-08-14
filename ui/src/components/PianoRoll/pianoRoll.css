@@ -17,6 +17,8 @@
   --pr-key-text: #454b59;
   --pr-key-border: #868c9b;
   --pr-outside: rgba(10, 11, 14, 0.45);
+  --pr-clip-span: rgba(150, 180, 255, 0.10);
+  --pr-clip-edge: rgba(150, 180, 255, 0.55);
   --pr-vel-bg: #191b21;
   --pr-note-text: rgba(13, 14, 18, 0.78);
 
@@ -46,6 +48,8 @@
   --pr-key-text: #8b91a2;
   --pr-key-border: #b9c0d0;
   --pr-outside: rgba(125, 133, 155, 0.18);
+  --pr-clip-span: rgba(40, 80, 170, 0.08);
+  --pr-clip-edge: rgba(40, 80, 170, 0.45);
   --pr-vel-bg: #eef0f6;
 }
 
@@ -62,6 +66,8 @@
   --pr-key-text: #4a5160;
   --pr-key-border: #7d8697;
   --pr-outside: rgba(20, 24, 32, 0.35);
+  --pr-clip-span: rgba(160, 190, 255, 0.10);
+  --pr-clip-edge: rgba(160, 190, 255, 0.50);
   --pr-vel-bg: #333944;
 }
 
