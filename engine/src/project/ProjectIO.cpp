@@ -349,9 +349,47 @@ bool ProjectIO::rename(Model& model, const std::string& newName, std::string& er
                 err = "exists";
                 return false;
             }
-            if (!MoveFileExW(utf8ToWide(projectDir_).c_str(), utf8ToWide(target).c_str(),
-                             MOVEFILE_WRITE_THROUGH)) {
-                err = "rename failed (is the folder open elsewhere?)";
+            // Get OUR OWN hold on the folder out of the way first. Windows refuses to
+            // rename a directory that is any process's current directory, and the shell
+            // dialogs used to leave the cwd exactly there (fixed at the source with
+            // FOS_NOCHANGEDIR — this is the belt to that pair of braces, and it also
+            // covers a cwd inherited from however the engine was launched).
+            {
+                std::wstring cwd(MAX_PATH, L'x');
+                const DWORD n = GetCurrentDirectoryW(MAX_PATH, cwd.data());
+                if (n > 0 && n < MAX_PATH) {
+                    cwd.resize(n);
+                    const std::string cur = wideToUtf8(cwd);
+                    // Inside the project folder (or the folder itself)? Step out of it.
+                    const std::string dirN = normPath(projectDir_);
+                    const std::string curN = normPath(cur);
+                    if (curN == dirN || curN.rfind(dirN + "/", 0) == 0)
+                        SetCurrentDirectoryW(utf8ToWide(parentDir(projectDir_)).c_str());
+                }
+            }
+            // A transient sharing violation (an antivirus/Dropbox scan of a file we just
+            // wrote, a peak file being finalised) resolves in milliseconds — retrying is
+            // the difference between "it never works" and a rename the user never notices.
+            DWORD lastErr = 0;
+            bool moved = false;
+            for (int attempt = 0; attempt < 10 && !moved; ++attempt) {
+                if (MoveFileExW(utf8ToWide(projectDir_).c_str(), utf8ToWide(target).c_str(),
+                                MOVEFILE_WRITE_THROUGH)) {
+                    moved = true;
+                    break;
+                }
+                lastErr = GetLastError();
+                if (lastErr != ERROR_SHARING_VIOLATION && lastErr != ERROR_ACCESS_DENIED)
+                    break; // a real failure (bad name, missing folder) — do not spin
+                Sleep(40);
+            }
+            if (!moved) {
+                // Say WHICH failure it was: "open elsewhere" sent the user hunting for a
+                // program that had it open, when the answer was usually us.
+                err = "rename failed (win32 error " + std::to_string(lastErr) + ")";
+                Log::warn("ProjectIO: rename '%s' -> '%s' failed, win32 %lu",
+                          projectDir_.c_str(), target.c_str(),
+                          static_cast<unsigned long>(lastErr));
                 return false;
             }
             projectDir_ = target;

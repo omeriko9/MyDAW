@@ -851,6 +851,32 @@ const APPDATA_ISO = mkdtempSync(path.join(__tmpdir(), "mydaw-iso-"));
   await sleep(700);
   const t2 = await waitEvent("event/transport", (p) => p.state === "playing" && p.beat > (t1?.beat ?? 0), 5000).catch(() => null);
   await req("transport/stop", {});
+  /* ---- project rename with the cwd sitting IN the project folder ------------------
+     Windows refuses to rename a directory that is any process's current directory, and
+     the shell's Save As dialog used to leave the cwd exactly there — so "rename project"
+     always answered "is the folder open elsewhere?" (it was: us). The engine now steps
+     out of the folder before the move (Omer, 2026-08-14).
+     HONESTY: this check only pins that rename works and moves the folder — it cannot
+     reproduce the cwd trap, because the harness spawns the engine with its own cwd and
+     cannot open a native dialog. The cwd case was proven separately by launching the
+     engine with cwd = the project folder: every rename failed before the fix and
+     succeeded after. Re-run that by hand if this area changes. */
+  {
+    const rnDir = path.join(TMP, "RenameMe.mydaw");
+    await req("project/new", {});
+    await req("cmd/track.add", { kind: "midi", name: "R" });
+    await req("project/saveAs", { path: rnDir });
+    let renamed = null;
+    try {
+      await req("project/rename", { name: "RenamedOk" });
+      renamed = existsSync(path.join(TMP, "RenamedOk.mydaw"));
+    } catch (e) {
+      renamed = `threw: ${e.message}`;
+    }
+    report("project/rename moves the folder on disk", renamed === true, String(renamed));
+    report("...and the old folder is gone", !existsSync(rnDir));
+  }
+
   report("transport plays + playhead advances", !!(t1 && t2), t1 && t2 ? `beat ${t1.beat.toFixed(2)} -> ${t2.beat.toFixed(2)}` : "");
 
   // status + registry shape

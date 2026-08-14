@@ -81,7 +81,12 @@ bool runDialog(bool save, bool multi, const std::string& title,
 
             DWORD opts = 0;
             if (SUCCEEDED(dlg->GetOptions(&opts))) {
-                opts |= FOS_FORCEFILESYSTEM;
+                // FOS_NOCHANGEDIR: without it the shell leaves the PROCESS current
+                // directory inside whatever folder the user browsed — typically the
+                // project folder itself. Windows refuses to rename a directory that is
+                // any process's cwd, so "Save As…" quietly made the project unrenamable
+                // ("the folder is open elsewhere" — it was, by us). 2026-08-14.
+                opts |= FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR;
                 if (multi)
                     opts |= FOS_ALLOWMULTISELECT;
                 dlg->SetOptions(opts);
