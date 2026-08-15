@@ -3193,6 +3193,18 @@ export default function ClipCanvas({ rows, lens = "off" }: ClipCanvasProps) {
           ] as MenuEntry[])
         : []),
       {
+        // Glue (Cubase): cmd/clip.join existed engine-side with no way to reach it —
+        // "I don't really have a way to glue together clips" (Omer, 2026-08-15).
+        label: `Glue${ids.length > 1 ? ` ${ids.length} Clips` : ""}`,
+        icon: "glue",
+        disabled: ids.length < 2,
+        title:
+          ids.length < 2
+            ? "Select two or more clips on the same track to glue them into one"
+            : "Join the selected clips into a single clip",
+        onClick: () => fire(joinClips(ids)),
+      },
+      {
         // "Loop clip forever" (SPEC §6) — the jam tool: repeat this part end-to-end
         // instead of recording the whole roll, then switch it off and record for real.
         label: loopedNow ? "Stop Looping Clip" : "Loop Clip Forever",
